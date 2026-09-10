@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vaidya Voice Receptionist - Clinic Dashboard Mock</title>
+<style>
+  :root{
+    --bg:#f6f8fb;--card:#ffffff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--soft:#f1f5f9;
+    --brand:#0f766e;--brand-dark:#115e59;--ok:#059669;--warn:#d97706;--danger:#dc2626;--blue:#2563eb;
+    --shadow:0 10px 30px rgba(15,23,42,.06);--radius:22px;
+  }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,Arial,Helvetica,sans-serif} a{text-decoration:none;color:inherit}
+  .app{min-height:100vh;display:grid;grid-template-columns:280px 1fr}.side{background:#0b1220;color:#dbeafe;padding:22px;position:sticky;top:0;height:100vh}.brand{display:flex;gap:12px;align-items:center;margin-bottom:26px}.logo{width:46px;height:46px;border-radius:16px;background:linear-gradient(135deg,#14b8a6,#2563eb);display:grid;place-items:center;color:white;font-weight:900;font-size:24px}.brand h1{font-size:21px;margin:0;color:white}.brand p{margin:3px 0 0;color:#94a3b8;font-size:13px}.clinic{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:18px;padding:14px;margin-bottom:18px}.clinic b{color:white}.clinic p{margin:6px 0 0;color:#94a3b8;font-size:13px;line-height:1.45}.nav{display:flex;flex-direction:column;gap:7px}.nav label{padding:12px 13px;border-radius:14px;color:#cbd5e1;cursor:pointer;font-weight:700;font-size:14px;display:flex;justify-content:space-between}.nav label:hover{background:rgba(255,255,255,.07);color:white}.statusBox{position:absolute;bottom:22px;left:22px;right:22px;background:rgba(20,184,166,.13);border:1px solid rgba(45,212,191,.25);border-radius:18px;padding:14px}.dot{display:inline-block;width:9px;height:9px;background:#2dd4bf;border-radius:99px;margin-right:7px}.statusBox p{margin:6px 0 0;color:#99f6e4;font-size:13px;line-height:1.45}
+  input[name=tab]{display:none}.main{padding:24px 30px 50px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}.topbar h2{font-size:28px;margin:0}.topbar p{margin:5px 0 0;color:var(--muted)}.quick{display:flex;gap:10px;flex-wrap:wrap}.btn{border:1px solid var(--line);background:white;border-radius:13px;padding:10px 14px;font-weight:800;color:#334155;cursor:pointer}.btn.primary{background:var(--brand);color:white;border-color:var(--brand)}.btn.danger{background:#fee2e2;color:#991b1b;border-color:#fecaca}.btn.ghost{background:var(--soft)}
+  section{display:none}#today:checked~.app .today,#calls:checked~.app .calls,#appointments:checked~.app .appointments,#setup:checked~.app .setup,#knowledge:checked~.app .knowledge{display:block}#today:checked~.app label[for=today],#calls:checked~.app label[for=calls],#appointments:checked~.app label[for=appointments],#setup:checked~.app label[for=setup],#knowledge:checked~.app label[for=knowledge]{background:white;color:#0f172a}
+  .grid{display:grid;gap:18px}.grid4{grid-template-columns:repeat(4,1fr)}.grid3{grid-template-columns:repeat(3,1fr)}.grid2{grid-template-columns:repeat(2,1fr)}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}.card h3{margin:0;font-size:18px}.muted{color:var(--muted);font-size:14px;line-height:1.5}.metric{font-size:33px;font-weight:900;margin:10px 0 2px}.chip{display:inline-flex;align-items:center;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900;border:1px solid var(--line);background:#fff}.chip.ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0}.chip.warn{background:#fffbeb;color:#b45309;border-color:#fde68a}.chip.danger{background:#fef2f2;color:#b91c1c;border-color:#fecaca}.chip.blue{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.chip.gray{background:#f8fafc;color:#475569}.list{display:flex;flex-direction:column;gap:12px}.item{border:1px solid var(--line);border-radius:18px;padding:14px;background:white}.itemTop{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.item h4{margin:0 0 5px;font-size:15px}.item p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.45}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.miniBtn{border:1px solid var(--line);background:var(--soft);border-radius:11px;padding:8px 10px;font-weight:800;font-size:12px;color:#334155}.miniBtn.ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0}.miniBtn.call{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.miniBtn.warn{background:#fffbeb;color:#b45309;border-color:#fde68a}.hero{background:linear-gradient(135deg,#0f766e,#0f172a);color:white;border:0;overflow:hidden;position:relative}.hero:after{content:"";position:absolute;right:-80px;top:-90px;width:260px;height:260px;background:rgba(255,255,255,.08);border-radius:50%}.hero .muted{color:#ccfbf1}.heroGrid{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:center}.mode{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.mode span{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);padding:8px 10px;border-radius:999px;font-weight:800;font-size:13px}.table{width:100%;border-collapse:collapse}.table th{text-align:left;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line);padding:12px}.table td{border-bottom:1px solid #f1f5f9;padding:14px 12px;font-size:14px;vertical-align:top}.table tr:last-child td{border-bottom:0}.split{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}.timeline{border-left:3px solid #e2e8f0;padding-left:16px}.event{position:relative;margin-bottom:16px}.event:before{content:"";position:absolute;left:-23px;top:3px;width:11px;height:11px;border-radius:99px;background:var(--brand);box-shadow:0 0 0 4px #ccfbf1}.event b{font-size:14px}.event p{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.45}.serviceCard{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start}.serviceMap{background:#f8fafc;border-radius:16px;padding:12px;margin-top:10px}.serviceMap b{font-size:13px}.serviceEditor{display:grid;gap:14px}.serviceEditCard{background:linear-gradient(180deg,#fff,#f8fafc);border:1px solid #dbe5ef;border-radius:20px;padding:18px;box-shadow:0 8px 24px rgba(15,23,42,.05)}.serviceEditHead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:14px}.serviceEditTitle{margin:0;font-size:15px;font-weight:900;color:var(--ink)}.serviceEditHint{margin:4px 0 0;color:var(--muted);font-size:12.5px}.serviceFormGrid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:14px}.serviceFormGrid .full{grid-column:1/-1}.serviceField label,.slotGroup label{display:block;font-size:11px;color:#64748b;font-weight:900;text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px}.serviceField input,.serviceField select,.slotGroup input{width:100%;border:1.5px solid #dbe5ef;border-radius:13px;padding:11px 13px;font-size:14px;font-family:inherit;background:white;color:var(--ink);transition:border-color .2s,box-shadow .2s}.serviceField input:focus,.serviceField select:focus,.slotGroup input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(15,118,110,.12)}.statusGrid{display:grid;grid-template-columns:180px 1fr;gap:14px;align-items:start}.slotGroup{background:#f1f5f9;border:1px solid #dbe5ef;border-radius:16px;padding:14px}.slotGroupHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.slotGroupHeader p{margin:0;color:var(--muted);font-size:12px}.timeSlotGrid{display:grid;gap:10px}.slotRow{display:grid;grid-template-columns:82px minmax(130px,1fr) minmax(130px,1fr);gap:10px;align-items:center}.slotLabel{font-weight:900;font-size:12px;color:#334155}.inactiveStatusField{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:14px}.removeServiceBtn{align-self:flex-start;background:#fff1f2;color:#be123c;border-color:#fecdd3}.kbBox{border:2px dashed #cbd5e1;border-radius:22px;background:#f8fafc;text-align:center;padding:28px}.kbIcon{width:54px;height:54px;margin:0 auto 12px;border-radius:18px;background:#0f172a;color:white;display:grid;place-items:center;font-weight:900}.formGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:12px}.field label{display:block;font-size:12px;color:var(--muted);font-weight:800;margin-bottom:5px;text-transform:uppercase}.field b{font-size:14px}.phoneMock{background:#ecfdf5;border-radius:26px;padding:18px}.phoneHead{display:flex;align-items:center;gap:10px;border-bottom:1px solid #d1fae5;padding-bottom:12px;margin-bottom:12px}.avatar{width:38px;height:38px;border-radius:99px;background:#059669;color:white;display:grid;place-items:center;font-weight:900}.bubble{background:white;border-radius:16px;padding:12px;margin:9px 0;box-shadow:0 2px 8px rgba(15,23,42,.04);font-size:14px;line-height:1.45}.bubble.me{background:#0f766e;color:white;margin-left:32px}.hiddenMobile{display:block}
+  .agentToggle{display:flex;align-items:center;gap:12px;background:#ecfdf5;border:2px solid #a7f3d0;border-radius:99px;padding:10px 18px 10px 14px;cursor:default;transition:all .3s}.agentDot{width:11px;height:11px;background:#059669;border-radius:99px;flex-shrink:0;transition:background .3s}.agentInfo{display:flex;flex-direction:column;gap:0;margin-right:8px}.agentInfo b{font-size:14px;color:#0f172a;line-height:1.3;white-space:nowrap}.agentInfo small{font-size:12px;color:#059669;font-weight:700;line-height:1.2;transition:color .3s}.agentSwitch{width:46px;height:26px;background:#059669;border-radius:99px;position:relative;cursor:pointer;transition:background .3s;flex-shrink:0;border:none}.agentSwitch:after{content:"";position:absolute;top:3px;right:3px;width:20px;height:20px;background:white;border-radius:99px;transition:all .3s;box-shadow:0 1px 4px rgba(0,0,0,.18)}.agentSwitch.off{background:#94a3b8}.agentSwitch.off:after{right:auto;left:3px}
+  .modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:1000;justify-content:center;align-items:center;padding:18px}.modal-overlay.show{display:flex}.modal{background:white;border-radius:22px;padding:32px;width:100%;max-width:440px;box-shadow:0 25px 60px rgba(15,23,42,.2);animation:modalIn .2s ease}.modal.visitModal{max-width:520px}.modal h3{margin:0 0 20px;font-size:22px}.modalHeader{display:flex;align-items:flex-start;gap:10px;margin-bottom:18px}.modalHeaderIcon{color:var(--brand);font-size:20px;font-weight:900;line-height:1}.modalHeader h3{margin:0;font-size:22px;color:#020617}.modalHeader p{margin:4px 0 0;color:var(--muted);font-size:13px}@keyframes modalIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.modal .formField{margin-bottom:16px}.modal .formField label{display:block;font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:6px;letter-spacing:.03em}.modal .formField input,.modal .formField select,.modal .formField textarea{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;font-family:inherit;background:#f8fafc;transition:border-color .2s}.modal.visitModal .formField input,.modal.visitModal .formField textarea{border-radius:18px;background:white;border-color:#dbe5ef;font-size:15px}.modal.visitModal .formField textarea{min-height:116px}.modal .formField input:focus,.modal .formField select:focus,.modal .formField textarea:focus{outline:none;border-color:var(--brand);background:white}.modal .formField textarea{resize:vertical;min-height:70px}.modal .modalActions{display:flex;gap:10px;margin-top:22px}.modal.visitModal .modalActions .btn{flex:1;font-size:16px;border-radius:18px}.modal.visitModal .modalActions .btn.ghost{flex:.8}
+  .customDateBtn{border:1px solid var(--line);background:white;border-radius:13px;padding:10px 14px;font-weight:800;font-size:13px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.customDateBtn:hover{border-color:var(--brand);color:var(--brand)}.customDateBtn svg{width:16px;height:16px}.hiddenDateInput{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+  .editTimeWrap{display:none;margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap}.editTimeWrap.show{display:flex}.editTimeWrap input[type=time]{border:1.5px solid var(--brand);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;background:#f0fdf4}.editTimeWrap .miniBtn{margin:0}
+  .miniBtn,.btn{cursor:pointer}.visitedBtn{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+  .actionLink{background:none;border:none;cursor:pointer;font-size:12px;font-weight:700;color:var(--blue);padding:4px 0;text-decoration:underline;text-underline-offset:3px}.actionLink:hover{color:var(--brand-dark)}.actionLink.danger{color:var(--danger)}
+  .rescheduleWrap{display:none;margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap}.rescheduleWrap.show{display:flex}.rescheduleWrap input{border:1.5px solid var(--brand);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;background:#f0fdf4}
+  .doctorGroup{border:1px solid #dbe5ef;border-radius:18px;background:#f8fafc;padding:12px;margin-top:12px}.doctorGroup:first-child{margin-top:0}.doctorGroupTitle{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px;color:#0f172a;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.doctorGroup .list{gap:10px}.doctorGroup .item{box-shadow:0 4px 14px rgba(15,23,42,.03)}
+  .thresholdNote{font-size:12px;color:var(--muted);margin:8px 0 0;font-style:italic}
+  .scheduleCard{margin-top:14px;border:1px solid var(--line);border-radius:14px;overflow:hidden}.scheduleRow{display:flex;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.scheduleRow:last-child{border-bottom:0}.scheduleRow .day{font-weight:700;color:var(--ink);min-width:100px}.scheduleRow .time{color:var(--muted);text-align:right}
+  .holidayItem{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}.holidayItem:last-child{border-bottom:0}.hDate{font-weight:700;font-size:13px;color:var(--ink)}.hReason{margin:2px 0 0;font-size:12px;color:var(--muted)}
+  .cancelledHoliday{background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:10px 14px;font-size:13px;color:#b91c1c;font-weight:600}
+  .scheduleEditWrap{display:none;margin-top:14px}.scheduleEditWrap.show{display:block}.scheduleEditRow{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}.scheduleEditRow label{min-width:90px;font-weight:700}.scheduleEditRow input{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;width:140px}
+  .holidayEditWrap{display:none;margin-top:14px}.holidayEditWrap.show{display:block}
+  .table tbody tr{cursor:pointer;transition:background .15s}.table tbody tr:hover{background:#f0fdf4}.table tbody tr.activeRow{background:#ecfdf5;box-shadow:inset 3px 0 0 var(--brand)}
+  .playerBar{margin-top:12px;background:#f1f5f9;border-radius:12px;padding:12px 14px;display:none}.playerBar.show{display:block}.playerBar .playerTop{display:flex;align-items:center;gap:10px;margin-bottom:8px}.playerBar .playBtn{width:32px;height:32px;border-radius:99px;background:var(--brand);color:white;border:none;cursor:pointer;display:grid;place-items:center;font-size:14px;flex-shrink:0}.playerBar .playBtn.playing{background:#dc2626}.playerTrack{flex:1;height:6px;background:#e2e8f0;border-radius:99px;overflow:hidden;position:relative}.playerProgress{height:100%;background:var(--brand);border-radius:99px;width:0%;transition:width .3s linear}.playerTime{font-size:12px;color:var(--muted);font-weight:700;min-width:70px;text-align:right}
+  .serviceEditCard .serviceField label,.serviceEditCard .slotGroup label{font-size:11px;color:#64748b;font-weight:900;letter-spacing:.04em;margin-bottom:7px}.serviceEditCard .serviceField input,.serviceEditCard .serviceField select,.serviceEditCard .slotGroup input{width:100%;border:1.5px solid #dbe5ef;border-radius:13px;padding:11px 13px;font-size:14px;background:white}.serviceEditCard .serviceField input:focus,.serviceEditCard .serviceField select:focus,.serviceEditCard .slotGroup input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(15,118,110,.12)}
+  .inactiveDurationGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}.inactiveDurationHint{margin:8px 0 0;color:#b45309;font-size:12px;line-height:1.45}.conflictList{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto;padding-right:4px}.conflictItem{border:1px solid #fecaca;background:#fef2f2;border-radius:16px;padding:13px}.conflictItem h4{margin:0 0 5px;font-size:15px}.conflictItem p{margin:0;color:#64748b;font-size:13px;line-height:1.45}.conflictFooter{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px}.conflictFooter .miniBtn{background:white}.btn:disabled{opacity:.55;cursor:not-allowed}
+  @media(max-width:1000px){.app{grid-template-columns:1fr}.side{position:relative;height:auto}.statusBox{position:static;margin-top:18px}.main{padding:20px}.grid4,.grid3,.grid2,.split,.heroGrid,.formGrid,.serviceFormGrid,.statusGrid{grid-template-columns:1fr}.slotRow{grid-template-columns:1fr}.hiddenMobile{display:none}.topbar{align-items:flex-start;flex-direction:column}.table{display:block;overflow-x:auto}}
+</style>
+</head>
+<body>
+<input type="radio" name="tab" id="today" checked>
+<input type="radio" name="tab" id="calls">
+<input type="radio" name="tab" id="appointments">
+<input type="radio" name="tab" id="setup">
+<input type="radio" name="tab" id="knowledge">
+<div class="app">
+  <aside class="side">
+    <div class="brand"><div class="logo">V</div><div><h1>Vaidya</h1><p>AI voice receptionist</p></div></div>
+    <div class="clinic"><b>Sri Murugan Clinic</b><p>Anna Nagar · Overflow + after-hours mode<br>Clinic line: +91 44 xxxx xxxx</p></div>
+    <nav class="nav">
+      <label for="today">Home <span>12</span></label>
+      <label for="calls">Call inbox <span>42</span></label>
+      <label for="appointments">Appointments <span>18</span></label>
+      <label for="setup">Clinic setup <span></span></label>
+      <label for="knowledge">Knowledge base <span>86</span></label>
+    </nav>
+    <div class="statusBox"><b><span class="dot"></span>Voice bot active</b><p>Answering after 4 rings and outside clinic hours. Last call handled 3 minutes ago.</p></div>
+  </aside>
+  <main class="main">
+    <section class="today">
+      <div class="topbar"><div><h2>Home</h2><p>What the receptionist or doctor needs to act on now.</p></div><div class="quick"><div class="agentToggle"><span class="agentDot"></span><div class="agentInfo"><b>AI Voice Agent</b><small>Active</small></div><div class="agentSwitch" onclick="this.classList.toggle('off');var d=this.closest('.agentToggle');var dot=d.querySelector('.agentDot');var st=d.querySelector('.agentInfo small');if(this.classList.contains('off')){d.style.background='#f1f5f9';d.style.borderColor='#cbd5e1';dot.style.background='#94a3b8';st.textContent='Inactive';st.style.color='#64748b'}else{d.style.background='#ecfdf5';d.style.borderColor='#a7f3d0';dot.style.background='#059669';st.textContent='Active';st.style.color='#059669'}" title="Toggle AI Voice Agent"></div></div><button class="btn primary" onclick="document.getElementById('newApptModal').classList.add('show')">Add manual booking</button></div></div>
+      <div class="card hero">
+        <div class="heroGrid"><div><h3>Vaidya has handled 42 calls today</h3><p class="muted">31 resolved automatically, 8 appointment requests captured, 3 need staff action.</p><div class="mode"><span>Overflow after 4 rings</span><span>After-hours active</span><span>Tamil + English</span></div></div><div><div class="metric">3</div><p class="muted">pending staff actions</p></div></div>
+      </div>
+      <div class="grid grid4" style="margin-top:18px">
+        <div class="card"><span class="chip warn">Action needed</span><div class="metric">5</div><p class="muted">Appointment requests waiting for confirmation</p></div>
+        <div class="card"><span class="chip blue">Callbacks</span><div class="metric">3</div><p class="muted">Patients asked for staff callback</p></div>
+        <div class="card"><span class="chip danger">Urgent reviewed</span><div class="metric">1</div><p class="muted">Emergency-style call handled with 108 instruction</p></div>
+        <div class="card"><span class="chip ok">Auto answered</span><div class="metric">31</div><p class="muted">Timing, fee, location, and basic FAQ calls</p></div>
+      </div>
+      <div class="split" style="margin-top:18px">
+        <div class="card"><h3>Needs your action</h3><p class="muted">Prioritized for receptionist workflow.</p><div class="list" id="homeActionList" style="margin-top:14px">
+          <div class="item"><div class="itemTop"><div><h4>Kumar · Knee pain follow-up</h4><p>Vaidya routed to previous doctor Dr. Kumar. Patient requested tomorrow 6:30 PM.</p></div><span class="chip warn">Confirm</span></div><div class="actions"><button class="miniBtn ok" onclick="homeConfirm(this)">Confirm</button><button class="miniBtn warn" onclick="homeReschedule(this)">Reschedule</button><button class="actionLink" onclick="alert('Calling patient...')">Call patient</button></div><div class="rescheduleWrap"><input type="datetime-local" value="2026-05-21T18:30"><button class="miniBtn ok" onclick="homeRescheduleSave(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Cancel</button></div></div>
+          <div class="item"><div class="itemTop"><div><h4>Ravi · Report question</h4><p>Bot did not answer report status. Callback requested.</p></div><span class="chip blue">Callback</span></div><div class="actions"><button class="actionLink" onclick="alert('Calling Ravi...')">Call now</button><button class="actionLink" onclick="this.closest('.item').remove()">Mark done</button></div></div>
+          <div class="item"><div class="itemTop"><div><h4>Unknown caller · Chest pain</h4><p>Vaidya gave 108 instruction and flagged this call for review.</p></div><span class="chip danger">Urgent</span></div><div class="actions"><button class="actionLink danger" onclick="alert('Calling back...')">Call back</button><button class="actionLink" onclick="alert('Playing recording...')">Listen recording</button></div></div>
+        </div></div>
+        <div class="card"><h3>Next 5 appointments</h3><p class="muted">Upcoming appointments from current time.</p><div class="list" style="margin-top:14px">
+          <div class="item"><div class="itemTop"><div><h4>Kumar · 2:00 PM</h4><p>Dr. Kumar · Orthopaedic · Knee pain follow-up</p></div><span class="chip warn">In 30 min</span></div></div>
+          <div class="item"><div class="itemTop"><div><h4>Priya · 2:30 PM</h4><p>Dr. Murugan · General Consultation · BP check</p></div><span class="chip gray">In 1 hr</span></div></div>
+          <div class="item"><div class="itemTop"><div><h4>Meena · 3:00 PM</h4><p>Dr. Priya · Paediatric · Child vaccination</p></div><span class="chip gray">In 1.5 hrs</span></div></div>
+          <div class="item"><div class="itemTop"><div><h4>Suresh · 4:00 PM</h4><p>Dr. Kumar · Orthopaedic · Back pain</p></div><span class="chip gray">In 2.5 hrs</span></div></div>
+          <div class="item"><div class="itemTop"><div><h4>Lakshmi · 5:00 PM</h4><p>Dr. Murugan · General Consultation · Diabetes follow-up</p></div><span class="chip gray">In 3.5 hrs</span></div></div>
+        </div></div>
+      </div>
+    </section>
+
+    <section class="calls">
+      <div class="topbar"><div><h2>Call inbox</h2><p>Voice calls handled by Vaidya. Receptionist sees outcome, action, recording, and short summary.</p></div><div class="quick"><button class="customDateBtn" onclick="this.nextElementSibling.showPicker()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Custom date</button><input type="date" class="hiddenDateInput" value="2026-05-19" onchange="document.getElementById('callDateLabel').textContent='Showing calls for: '+this.value"><button class="btn primary">Export today</button></div></div>
+      <p id="callDateLabel" class="muted" style="margin:0 0 12px;font-weight:700">Showing calls for: 2026-05-19</p>
+      <div class="card">
+        <table class="table" id="callTable"><thead><tr><th>Time</th><th>Caller</th><th>Outcome</th><th>Summary</th><th>Action</th></tr></thead><tbody>
+          <tr class="activeRow" onclick="selectCall(this)" data-caller="Kumar" data-phone="+91 98400 12345" data-outcome="Appointment request" data-summary="Knee pain follow-up. Same previous doctor Dr. Kumar. Requested tomorrow 6:30 PM." data-intent="Appointment booking" data-routing="Returning patient follow-up" data-service="Orthopaedic Consultation" data-doctor="Dr. Kumar" data-slot="Tomorrow 6:30 PM" data-status="Pending confirmation" data-t1="Vaidya: Knee pain follow-up-ku Dr. Kumar available irukkanga." data-t2="Patient: 6:30 okay." data-t3="Vaidya: Ungal peyar sollunga." data-duration="1m 38s"><td>12:42 PM<br><span class="muted">1m 38s</span></td><td>Kumar<br><span class="muted">+91 98400 12345</span></td><td><span class="chip warn">Appointment request</span></td><td>Knee pain follow-up. Same previous doctor Dr. Kumar. Requested tomorrow 6:30 PM.</td><td><button class="miniBtn ok">Confirm</button> <button class="miniBtn">Recording</button></td></tr>
+          <tr onclick="selectCall(this)" data-caller="New caller" data-phone="+91 90xxx 88221" data-outcome="Answered" data-summary="Asked Dr. Priya consultation fee. Vaidya answered Rs.700." data-intent="Fee inquiry" data-routing="Auto-answered" data-service="Paediatric Consultation" data-doctor="Dr. Priya" data-slot="N/A" data-status="Resolved" data-t1="Vaidya: Dr. Priya consultation fee Rs.700." data-t2="Patient: Thank you." data-t3="Vaidya: Veru enna help venuma?" data-duration="42s"><td>12:18 PM<br><span class="muted">42s</span></td><td>New caller<br><span class="muted">+91 90xxx 88221</span></td><td><span class="chip ok">Answered</span></td><td>Asked Dr. Priya consultation fee. Vaidya answered Rs.700.</td><td><button class="miniBtn">Details</button></td></tr>
+          <tr onclick="selectCall(this)" data-caller="Ravi" data-phone="+91 99xxx 55810" data-outcome="Callback" data-summary="Asked report status. Not answered by bot. Staff callback created." data-intent="Report status inquiry" data-routing="Staff callback" data-service="General Consultation" data-doctor="Dr. Murugan" data-slot="N/A" data-status="Callback pending" data-t1="Vaidya: Report status check panren." data-t2="Patient: Enna aachu report?" data-t3="Vaidya: Staff callback arrange panren." data-duration="1m 04s"><td>11:50 AM<br><span class="muted">1m 04s</span></td><td>Ravi<br><span class="muted">+91 99xxx 55810</span></td><td><span class="chip blue">Callback</span></td><td>Asked report status. Not answered by bot. Staff callback created.</td><td><button class="miniBtn call">Call</button></td></tr>
+          <tr onclick="selectCall(this)" data-caller="Unknown" data-phone="+91 78xxx 44556" data-outcome="Urgent flag" data-summary="Caller mentioned chest pain. Vaidya gave 108 instruction and asked for immediate care." data-intent="Emergency" data-routing="108 instruction given" data-service="Emergency" data-doctor="N/A" data-slot="Immediate" data-status="Flagged for review" data-t1="Patient: Chest la valikkuthu." data-t2="Vaidya: Udan 108 call pannunga." data-t3="Vaidya: Staff-ku notify panren, please don't delay." data-duration="35s"><td>11:18 AM<br><span class="muted">35s</span></td><td>Unknown<br><span class="muted">+91 78xxx 44556</span></td><td><span class="chip danger">Urgent flag</span></td><td>Caller mentioned chest pain. Vaidya gave 108 instruction and asked for immediate care.</td><td><button class="miniBtn call">Review</button></td></tr>
+        </tbody></table>
+      </div>
+      <div class="grid grid2" style="margin-top:18px">
+        <div class="card" id="callDetailCard"><h3>Call detail preview</h3><p class="muted">Shows only useful operational details. Transcript is available only if staff opens it.</p><div id="callDetailContent" class="summary" style="background:#f8fafc;border-radius:18px;padding:16px;margin-top:12px"><b id="cdTitle">Kumar · Appointment request</b><p class="muted" id="cdBody">Intent: Appointment booking<br>Routing: Returning patient follow-up<br>Service: Orthopaedic Consultation<br>Doctor: Dr. Kumar<br>Requested slot: Tomorrow 6:30 PM<br>Status: Pending confirmation</p></div></div>
+        <div class="phoneMock" id="callTranscriptCard"><div class="phoneHead"><div class="avatar">V</div><div><b>Recording + transcript</b><p class="muted" style="margin:0">Select a call above to view details</p></div></div><div id="transcriptBubbles"><div class="bubble" id="tb1">Vaidya: Knee pain follow-up-ku Dr. Kumar available irukkanga.</div><div class="bubble me" id="tb2">Patient: 6:30 okay.</div><div class="bubble" id="tb3">Vaidya: Ungal peyar sollunga.</div></div><div class="playerBar show" id="playerBar"><div class="playerTop"><button class="playBtn" id="playBtn" onclick="togglePlay()">&#9654;</button><div class="playerTrack"><div class="playerProgress" id="playerProgress"></div></div><span class="playerTime" id="playerTime">0:00 / 1:38</span></div></div><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="miniBtn">Download</button></div><div class="recordingNote"><b>Note:</b> Recordings are available for the last 30 days. For older recordings, please submit a request to the admin.</div></div>
+      </div>
+    </section>
+
+    <section class="appointments">
+      <div class="topbar"><div><h2>Appointments</h2><p>Pending requests from voice bot, confirmed bookings, and reschedules.</p></div><div class="quick"><button class="customDateBtn" onclick="this.nextElementSibling.showPicker()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Custom date</button><input type="date" class="hiddenDateInput" value="2026-05-19" onchange="document.getElementById('apptDateLabel').textContent='Showing appointments for: '+this.value"><button class="btn" onclick="document.getElementById('apptDateLabel').textContent='Showing appointments for: Today (2026-05-19)'">Today</button><button class="btn primary" onclick="document.getElementById('newApptModal').classList.add('show')">New appointment</button></div></div>
+      <p id="apptDateLabel" class="muted" style="margin:0 0 12px;font-weight:700">Showing appointments for: Today (2026-05-19)</p>
+      <div class="grid grid2">
+        <div class="card"><h3>Pending confirmation</h3><div id="pendingList" style="margin-top:12px"><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Kumar</h4><div class="list doctorList" data-doctor-list="Dr. Kumar"><div class="item" id="pending-kumar"><h4>Kumar · 6:30 PM</h4><p>Dr. Kumar · Orthopaedic · Follow-up</p><div class="actions"><button class="miniBtn ok" onclick="confirmAppt(this)">Confirm</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button></div><div class="editTimeWrap"><input type="time" value="18:30"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Cancel</button></div><p class="thresholdNote">⏱ Edit available within 1 hr of appointment. After that, only cancellation is allowed.</p></div></div></div><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Murugan</h4><div class="list doctorList" data-doctor-list="Dr. Murugan"><div class="item" id="pending-meena"><h4>Meena · 7:15 PM</h4><p>Dr. Murugan · General Consultation</p><div class="actions"><button class="miniBtn ok" onclick="confirmAppt(this)">Confirm</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button></div><div class="editTimeWrap"><input type="time" value="19:15"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Cancel</button></div><p class="thresholdNote">⏱ Edit available within 1 hr of appointment. After that, only cancellation is allowed.</p></div></div></div></div></div>
+        <div class="card"><h3>Confirmed today</h3><div id="confirmedList" style="margin-top:12px"><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Priya</h4><div class="list doctorList" data-doctor-list="Dr. Priya"><div class="item"><div class="itemTop"><div><h4>Arun · 10:30 AM</h4><p>Dr. Priya · Child fever</p></div><span class="chip ok">Confirmed</span></div><div class="actions"><button class="miniBtn visitedBtn" onclick="openVisitModal(this)">✓ Mark as Visited</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button><button class="miniBtn danger">Cancel</button></div><div class="editTimeWrap"><input type="time" value="10:30"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Cancel</button></div></div></div></div><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Murugan</h4><div class="list doctorList" data-doctor-list="Dr. Murugan"><div class="item"><div class="itemTop"><div><h4>Lakshmi · 11:15 AM</h4><p>Dr. Murugan · Fever</p></div><span class="chip ok">Confirmed</span></div><div class="actions"><button class="miniBtn visitedBtn" onclick="openVisitModal(this)">✓ Mark as Visited</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button><button class="miniBtn danger">Cancel</button></div><div class="editTimeWrap"><input type="time" value="11:15"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Cancel</button></div></div></div></div></div></div>
+        <div class="card"><h3>Visited</h3><p class="muted" style="margin:0">Patients who completed their consultation today.</p><div id="visitedList" style="margin-top:12px"><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Priya</h4><div class="list doctorList" data-doctor-list="Dr. Priya"><p class="muted doctorEmpty" style="text-align:center;padding:10px 0">No visited patients yet.</p></div></div><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Murugan</h4><div class="list doctorList" data-doctor-list="Dr. Murugan"><p class="muted doctorEmpty" style="text-align:center;padding:10px 0">No visited patients yet.</p></div></div><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Kumar</h4><div class="list doctorList" data-doctor-list="Dr. Kumar"><p class="muted doctorEmpty" style="text-align:center;padding:10px 0">No visited patients yet.</p></div></div></div></div>
+        <div class="card"><h3>Reschedule / cancel</h3><div id="rescheduleCancelList" style="margin-top:12px"><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Murugan</h4><div class="list doctorList" data-doctor-list="Dr. Murugan"><div class="item" data-doctor="Dr. Murugan" data-reason="General Consultation"><h4>Ravi · Wants change</h4><p>Dr. Murugan · Requested Saturday morning instead of today evening.</p><p class="thresholdNote" style="color:#b91c1c">⚠ Exceeds 1 hr threshold — reschedule only if the new slot is free, otherwise cancel.</p><div class="actions"><button class="miniBtn warn" onclick="toggleRequestReschedule(this)">Reschedule</button><button class="miniBtn danger" onclick="cancelAppointmentRequest(this)">Cancel appointment</button></div><div class="rescheduleWrap"><input type="datetime-local" value="2026-05-23T10:00"><button class="miniBtn ok" onclick="saveRequestReschedule(this)">Save reschedule</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Close</button></div><p class="rescheduleStatus muted" style="display:none;margin-top:8px"></p></div></div></div><div class="doctorGroup"><h4 class="doctorGroupTitle">Dr. Priya</h4><div class="list doctorList" data-doctor-list="Dr. Priya"><div class="item" data-doctor="Dr. Priya" data-reason="Paediatric Consultation"><h4>Sara · Cancel request</h4><p>Dr. Priya · Vaidya asked confirmation. Waiting for staff.</p><p class="thresholdNote" style="color:#b91c1c">⚠ Exceeds 1 hr threshold — reschedule only if the new slot is free, otherwise cancel.</p><div class="actions"><button class="miniBtn warn" onclick="toggleRequestReschedule(this)">Reschedule</button><button class="miniBtn danger" onclick="cancelAppointmentRequest(this)">Cancel appointment</button></div><div class="rescheduleWrap"><input type="datetime-local" value="2026-05-19T10:30"><button class="miniBtn ok" onclick="saveRequestReschedule(this)">Save reschedule</button><button class="miniBtn" onclick="this.parentElement.classList.remove('show')">Close</button></div><p class="rescheduleStatus muted" style="display:none;margin-top:8px"></p></div></div></div></div></div>
+      </div>
+    </section>
+
+    <section class="setup">
+      <div class="topbar"><div><h2>Clinic setup</h2><p>Only what doctors/receptionists need to manage Vaidya.</p></div></div>
+      <div class="grid grid2">
+        <div class="card" id="botModeCard">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h3>Bot answering mode</h3><button class="miniBtn warn" onclick="toggleBotEdit()">Edit</button></div>
+          <div id="botModeView" class="formGrid" style="margin-top:14px">
+            <div class="field"><label>When Vaidya answers</label><b id="botVal1">After 4 rings + OFF Hours</b></div>
+            <div class="field"><label>Human fallback</label><b id="botVal2">Receptionist mobile</b></div>
+            <div class="field"><label>Default language</label><b id="botVal3">Tamil + English</b></div>
+            <div class="field"><label>Booking mode</label><b id="botVal4">Pending Confirmation</b></div>
+          </div>
+          <div id="botModeEdit" style="display:none;margin-top:14px">
+            <div class="formGrid">
+              <div class="field"><label>When Vaidya answers</label><select id="botSel1"><option>After 4 rings + OFF Hours</option><option>OFF Hours</option><option>Only Holidays</option></select></div>
+              <div class="field"><label>Human fallback</label><select id="botSel2"><option>Receptionist mobile</option><option>Only Agent</option></select></div>
+              <div class="field"><label>Default language</label><select id="botSel3"><option>Tamil + English</option><option>Tamil</option><option>English</option></select></div>
+              <div class="field"><label>Booking mode</label><select id="botSel4"><option>Pending Confirmation</option><option>Auto Confirmation</option></select></div>
+            </div>
+            <div class="actions" style="margin-top:14px"><button class="btn primary" onclick="saveBotMode()">Save</button><button class="btn" onclick="toggleBotEdit()">Cancel</button></div>
+          </div>
+        </div>
+        <div class="card" id="doctorsCard">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h3>Doctors and fees</h3><button class="miniBtn warn" onclick="toggleDoctorsEdit()">Edit</button></div>
+          <div id="doctorsView"><table class="table" style="margin-top:10px"><tbody id="doctorsTableBody"><tr><td><b>Dr. Murugan</b><br><span class="muted">General Consultation</span></td><td>Rs.500</td></tr><tr><td><b>Dr. Priya</b><br><span class="muted">Paediatric Consultation</span></td><td>Rs.700</td></tr><tr><td><b>Dr. Kumar</b><br><span class="muted">Orthopaedic Consultation</span></td><td>Rs.1000</td></tr></tbody></table></div>
+          <div id="doctorsEdit" style="display:none;margin-top:14px">
+            <div id="doctorsEditList">
+              <div class="field" style="margin-bottom:10px;display:flex;gap:8px;align-items:center"><input type="text" value="Dr. Murugan" placeholder="Doctor name" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" value="General Consultation" placeholder="Specialization" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" value="500" placeholder="Fee" style="width:80px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button></div>
+              <div class="field" style="margin-bottom:10px;display:flex;gap:8px;align-items:center"><input type="text" value="Dr. Priya" placeholder="Doctor name" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" value="Paediatric Consultation" placeholder="Specialization" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" value="700" placeholder="Fee" style="width:80px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button></div>
+              <div class="field" style="margin-bottom:10px;display:flex;gap:8px;align-items:center"><input type="text" value="Dr. Kumar" placeholder="Doctor name" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" value="Orthopaedic Consultation" placeholder="Specialization" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" value="1000" placeholder="Fee" style="width:80px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button></div>
+            </div>
+            <div class="actions" style="margin-top:10px"><button class="miniBtn ok" onclick="addDoctorRow()">+ Add doctor</button></div>
+            <div class="actions" style="margin-top:14px"><button class="btn primary" onclick="saveDoctors()">Save</button><button class="btn" onclick="toggleDoctorsEdit()">Cancel</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid grid2" style="margin-top:18px">
+        <div class="card" id="hoursCard">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h3>Regular working hours</h3><button class="miniBtn warn" onclick="toggleHoursEdit()">Edit</button></div>
+          <p class="muted">Set clinic operating time and working days. Appointments can only be booked within these hours.</p>
+          <div id="hoursView">
+            <div class="scheduleCard">
+              <div class="scheduleRow"><span class="day">Monday</span><span class="time">9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</span></div>
+              <div class="scheduleRow"><span class="day">Tuesday</span><span class="time">9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</span></div>
+              <div class="scheduleRow"><span class="day">Wednesday</span><span class="time">9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</span></div>
+              <div class="scheduleRow"><span class="day">Thursday</span><span class="time">9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</span></div>
+              <div class="scheduleRow"><span class="day">Friday</span><span class="time">9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</span></div>
+              <div class="scheduleRow"><span class="day">Saturday</span><span class="time">9:00 AM – 1:00 PM</span></div>
+              <div class="scheduleRow"><span class="day">Sunday</span><span class="time" style="color:#b91c1c;font-weight:700">Closed</span></div>
+            </div>
+          </div>
+          <div id="hoursEdit" style="display:none;margin-top:14px">
+            <div id="hoursEditList">
+              <div class="scheduleEditRow"><label>Monday</label><input type="text" value="9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM"></div>
+              <div class="scheduleEditRow"><label>Tuesday</label><input type="text" value="9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM"></div>
+              <div class="scheduleEditRow"><label>Wednesday</label><input type="text" value="9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM"></div>
+              <div class="scheduleEditRow"><label>Thursday</label><input type="text" value="9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM"></div>
+              <div class="scheduleEditRow"><label>Friday</label><input type="text" value="9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM"></div>
+              <div class="scheduleEditRow"><label>Saturday</label><input type="text" value="9:00 AM – 1:00 PM"></div>
+              <div class="scheduleEditRow"><label>Sunday</label><input type="text" value="Closed"></div>
+            </div>
+            <div class="actions" style="margin-top:14px"><button class="btn primary" onclick="saveHours()">Save</button><button class="btn" onclick="toggleHoursEdit()">Cancel</button></div>
+          </div>
+        </div>
+        <div class="card" id="holidayCard">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h3>Holiday setup</h3><button class="miniBtn warn" onclick="toggleHolidayEdit()">Edit</button></div>
+          <p class="muted">Mark holidays when the clinic is closed. Appointments on these dates will be blocked. Previously booked appointments will be cancelled.</p>
+          <div id="holidayView">
+            <div class="scheduleCard" id="holidayList">
+              <div class="holidayItem"><div><span class="hDate">May 25, 2026</span><p class="hReason">Clinic closed – Staff meeting</p></div><button class="miniBtn danger" onclick="this.closest('.holidayItem').remove()" style="font-size:11px">Remove</button></div>
+              <div class="holidayItem"><div><span class="hDate">June 15, 2026</span><p class="hReason">Festival holiday</p></div><button class="miniBtn danger" onclick="this.closest('.holidayItem').remove()" style="font-size:11px">Remove</button></div>
+            </div>
+            <div class="cancelledHoliday" style="margin-top:14px">⚠ 2 appointments on May 25 auto-cancelled due to hospital holiday.</div>
+          </div>
+          <div id="holidayEdit" style="display:none;margin-top:14px">
+            <div id="holidayEditList">
+              <div class="scheduleEditRow"><input type="date" value="2026-05-25" style="width:160px"><input type="text" value="Clinic closed – Staff meeting" placeholder="Reason" style="flex:1"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button></div>
+              <div class="scheduleEditRow"><input type="date" value="2026-06-15" style="width:160px"><input type="text" value="Festival holiday" placeholder="Reason" style="flex:1"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button></div>
+            </div>
+            <div class="actions" style="margin-top:10px"><button class="miniBtn ok" onclick="addHolidayRow()">+ Add holiday</button></div>
+            <div class="actions" style="margin-top:14px"><button class="btn primary" onclick="saveHolidays()">Save</button><button class="btn" onclick="toggleHolidayEdit()">Cancel</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:18px" id="servicesCard"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Services Vaidya can route</h3><button class="miniBtn warn" onclick="toggleServicesEdit()">Edit</button></div><p class="muted">Patient problems are mapped to these clinic-approved services. Vaidya does not route unsupported services.</p>
+        <div id="servicesView" class="grid grid3" style="margin-top:14px">
+          <div class="feature serviceCard"><div><h3>General Consultation</h3><p>Fever, cold, cough, mild stomach pain, headache, BP/diabetes follow-up.</p><div class="serviceMap"><b>Doctor:</b> Dr. Murugan<br><b>Patients / 30 minutes:</b> 4<br><b>Status:</b> Active<br><b>Working hours:</b> 9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</div></div><span class="chip ok">Active</span></div>
+          <div class="feature serviceCard"><div><h3>Paediatric Consultation</h3><p>Child fever, child cold/cough, vaccination consultation.</p><div class="serviceMap"><b>Doctor:</b> Dr. Priya<br><b>Patients / 30 minutes:</b> 3<br><b>Status:</b> Active<br><b>Working hours:</b> 9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</div></div><span class="chip ok">Active</span></div>
+          <div class="feature serviceCard"><div><h3>Orthopaedic Consultation</h3><p>Knee pain, leg pain, back pain, joint pain, bone-related consultation.</p><div class="serviceMap"><b>Doctor:</b> Dr. Kumar<br><b>Patients / 30 minutes:</b> 2<br><b>Status:</b> Active<br><b>Working hours:</b> 9:00 AM – 1:00 PM, 5:00 PM – 9:00 PM</div></div><span class="chip ok">Active</span></div>
+        </div>
+        <div id="servicesEdit" style="display:none;margin-top:14px">
+          <div id="servicesEditList" class="serviceEditor">
+            <div class="field serviceEditCard">
+              <div class="serviceEditHead"><div><h4 class="serviceEditTitle">General Consultation</h4><p class="serviceEditHint">Configure routing, capacity, and availability.</p></div><button class="miniBtn danger removeServiceBtn" onclick="this.closest('.field').remove()">✕ Remove</button></div>
+              <div class="serviceFormGrid">
+                <div class="serviceField"><label>Service name</label><input type="text" value="General Consultation"></div>
+                <div class="serviceField"><label>Doctor</label><input type="text" value="Dr. Murugan"></div>
+                <div class="serviceField full"><label>Conditions</label><input type="text" value="Fever, cold, cough, mild stomach pain, headache, BP/diabetes follow-up"></div>
+                <div class="serviceField"><label>Number of Patients for 30 minutes</label><input type="text" value="4" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+                <div class="serviceField"><label>Status</label><select onchange="toggleServiceStatus(this)"><option selected>Active</option><option>Inactive</option></select></div>
+                <div class="activeStatusField full slotGroup"><div class="slotGroupHeader"><div><label>Working hours</label><p>Select start and end time slots instead of typing manually.</p></div></div><div class="timeSlotGrid"><div class="slotRow"><span class="slotLabel">Slot 1</span><input type="time" value="09:00"><input type="time" value="13:00"></div><div class="slotRow"><span class="slotLabel">Slot 2</span><input type="time" value="17:00"><input type="time" value="21:00"></div></div></div>
+                <div class="inactiveStatusField full" style="display:none"><label>Inactive Duration</label><p class="inactiveDurationHint">Select the start and end date/time for this doctor to remain inactive.</p><div class="inactiveDurationGrid"><div class="serviceField"><label>From</label><input type="datetime-local" value="2026-05-19T09:00"></div><div class="serviceField"><label>To</label><input type="datetime-local" value="2026-05-19T13:00"></div></div></div>
+              </div>
+            </div>
+            <div class="field serviceEditCard">
+              <div class="serviceEditHead"><div><h4 class="serviceEditTitle">Paediatric Consultation</h4><p class="serviceEditHint">Configure routing, capacity, and availability.</p></div><button class="miniBtn danger removeServiceBtn" onclick="this.closest('.field').remove()">✕ Remove</button></div>
+              <div class="serviceFormGrid">
+                <div class="serviceField"><label>Service name</label><input type="text" value="Paediatric Consultation"></div>
+                <div class="serviceField"><label>Doctor</label><input type="text" value="Dr. Priya"></div>
+                <div class="serviceField full"><label>Conditions</label><input type="text" value="Child fever, child cold/cough, vaccination consultation"></div>
+                <div class="serviceField"><label>Number of Patients for 30 minutes</label><input type="text" value="3" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+                <div class="serviceField"><label>Status</label><select onchange="toggleServiceStatus(this)"><option selected>Active</option><option>Inactive</option></select></div>
+                <div class="activeStatusField full slotGroup"><div class="slotGroupHeader"><div><label>Working hours</label><p>Select start and end time slots instead of typing manually.</p></div></div><div class="timeSlotGrid"><div class="slotRow"><span class="slotLabel">Slot 1</span><input type="time" value="09:00"><input type="time" value="13:00"></div><div class="slotRow"><span class="slotLabel">Slot 2</span><input type="time" value="17:00"><input type="time" value="21:00"></div></div></div>
+                <div class="inactiveStatusField full" style="display:none"><label>Inactive Duration</label><p class="inactiveDurationHint">Select the start and end date/time for this doctor to remain inactive.</p><div class="inactiveDurationGrid"><div class="serviceField"><label>From</label><input type="datetime-local" value="2026-05-19T09:00"></div><div class="serviceField"><label>To</label><input type="datetime-local" value="2026-05-19T13:00"></div></div></div>
+              </div>
+            </div>
+            <div class="field serviceEditCard">
+              <div class="serviceEditHead"><div><h4 class="serviceEditTitle">Orthopaedic Consultation</h4><p class="serviceEditHint">Configure routing, capacity, and availability.</p></div><button class="miniBtn danger removeServiceBtn" onclick="this.closest('.field').remove()">✕ Remove</button></div>
+              <div class="serviceFormGrid">
+                <div class="serviceField"><label>Service name</label><input type="text" value="Orthopaedic Consultation"></div>
+                <div class="serviceField"><label>Doctor</label><input type="text" value="Dr. Kumar"></div>
+                <div class="serviceField full"><label>Conditions</label><input type="text" value="Knee pain, leg pain, back pain, joint pain, bone-related consultation"></div>
+                <div class="serviceField"><label>Number of Patients for 30 minutes</label><input type="text" value="2" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></div>
+                <div class="serviceField"><label>Status</label><select onchange="toggleServiceStatus(this)"><option selected>Active</option><option>Inactive</option></select></div>
+                <div class="activeStatusField full slotGroup"><div class="slotGroupHeader"><div><label>Working hours</label><p>Select start and end time slots instead of typing manually.</p></div></div><div class="timeSlotGrid"><div class="slotRow"><span class="slotLabel">Slot 1</span><input type="time" value="09:00"><input type="time" value="13:00"></div><div class="slotRow"><span class="slotLabel">Slot 2</span><input type="time" value="17:00"><input type="time" value="21:00"></div></div></div>
+                <div class="inactiveStatusField full" style="display:none"><label>Inactive Duration</label><p class="inactiveDurationHint">Select the start and end date/time for this doctor to remain inactive.</p><div class="inactiveDurationGrid"><div class="serviceField"><label>From</label><input type="datetime-local" value="2026-05-19T09:00"></div><div class="serviceField"><label>To</label><input type="datetime-local" value="2026-05-19T13:00"></div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="actions" style="margin-top:10px"><button class="miniBtn ok" onclick="addServiceRow()">+ Add service</button></div>
+          <div class="actions" style="margin-top:14px"><button class="btn primary" onclick="saveServices()">Save</button><button class="btn" onclick="toggleServicesEdit()">Cancel</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="knowledge">
+      <div class="topbar"><div><h2>Knowledge base</h2><p>Questions Vaidya is allowed to answer from clinic-approved information.</p></div><button class="btn primary">Add Q&A</button></div>
+      <div class="grid grid2">
+        <div class="card"><div class="kbBox"><div class="kbIcon">PDF</div><h3>Upload clinic FAQ PDF</h3><p class="muted">Timings, fees, parking, instructions, insurance notes. Answers stay pending until approved.</p><div class="actions" style="justify-content:center"><button class="btn primary">Upload PDF</button><button class="btn">Use manual Q&A</button></div></div></div>
+        <div class="card"><h3>Review queue</h3><div class="list" style="margin-top:12px"><div class="item"><div class="itemTop"><div><h4>Insurance accepted?</h4><p>Selected providers accepted. Staff confirmation required.</p></div><span class="chip warn">Review</span></div><div class="actions"><button class="miniBtn ok">Approve</button><button class="miniBtn">Edit</button></div></div><div class="item"><h4>Report ready?</h4><p>Recommended action: do not answer automatically. Create callback.</p><span class="chip blue">Callback answer</span></div></div></div>
+      </div>
+      <div class="card" style="margin-top:18px"><h3>Approved answers Vaidya can use</h3><table class="table"><thead><tr><th>Patient question</th><th>Approved answer</th><th>Source</th></tr></thead><tbody><tr><td>Scan-ku fasting venuma?</td><td>Abdomen scan requires fasting. Other scans depend on scan type. Staff confirmation recommended.</td><td>PDF page 7</td></tr><tr><td>Parking irukka?</td><td>Two-wheeler parking available. Car parking may be limited in evening.</td><td>PDF page 4</td></tr><tr><td>First visit-ku enna kondu varanum?</td><td>Bring previous reports, current medicines list, and ID proof.</td><td>PDF page 6</td></tr></tbody></table></div>
+    </section>
+  </main>
+</div>
+
+<!-- Examination Notes Modal -->
+<div class="modal-overlay" id="visitNotesModal">
+  <div class="modal visitModal">
+    <div class="modalHeader"><span class="modalHeaderIcon">⚕</span><div><h3>Examination Notes</h3><p id="visitPatientLabel">Patient details</p></div></div>
+    <div class="formField"><label>Findings / Notes</label><textarea id="visitFindings" placeholder="Enter examination findings, observations..."></textarea></div>
+    <div class="formField"><label>Diagnosis</label><input id="visitDiagnosis" type="text" placeholder="e.g. Osteoarthritis Grade II – Left Knee"></div>
+    <div class="formField"><label>Advice</label><textarea id="visitAdvice" placeholder="Advice, medicines, dosage, follow-up instructions..."></textarea></div>
+    <div class="modalActions">
+      <button class="btn ghost" onclick="saveVisitDraft()">☷ Save Draft</button>
+      <button class="btn primary" onclick="submitVisited()">✓ Mark as Visited</button>
+    </div>
+    <div class="modalActions" style="margin-top:10px"><button class="btn" onclick="closeVisitModal()">Cancel</button></div>
+  </div>
+</div>
+
+<!-- Inactive Duration Conflict Modal -->
+<div class="modal-overlay" id="inactiveConflictModal">
+  <div class="modal visitModal">
+    <div class="modalHeader"><span class="modalHeaderIcon">⚠</span><div><h3>Conflict appointments</h3><p id="conflictSummary">Cancel the booked patient slots that fall inside the inactive duration.</p></div></div>
+    <div class="conflictList" id="conflictList"></div>
+    <div class="modalActions">
+      <button class="btn" onclick="closeConflictModal()">Keep Active</button>
+      <button class="btn primary" id="applyInactiveBtn" onclick="applyInactiveAfterConflicts()" disabled>Make Inactive</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Appointment Modal -->
+<div class="modal-overlay" id="newApptModal">
+  <div class="modal">
+    <h3>New Appointment</h3>
+    <div class="formField"><label>Patient name</label><input type="text" placeholder="Enter patient full name"></div>
+    <div class="formField"><label>Phone number</label><input type="tel" placeholder="+91 XXXXX XXXXX"></div>
+    <div class="formField"><label>Cause / Reason</label><textarea placeholder="Brief description of the visit reason"></textarea></div>
+    <div class="formField"><label>Appointment time</label><input type="datetime-local" value="2026-05-20T17:00"></div>
+    <div class="formField"><label>Doctor</label><select><option>Dr. Murugan – General</option><option>Dr. Priya – Paediatric</option><option>Dr. Kumar – Orthopaedic</option></select></div>
+    <div class="modalActions">
+      <button class="btn primary" onclick="document.getElementById('newApptModal').classList.remove('show')">Book Appointment</button>
+      <button class="btn" onclick="document.getElementById('newApptModal').classList.remove('show')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var visitCurrentItem=null;
+var pendingInactiveServiceRows=null;
+function escapeHtml(value){
+  return String(value||'').replace(/[&<>'"]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch];});
+}
+function getDoctorNameFromText(value){
+  var match=String(value||'').match(/Dr\.\s*[A-Za-z]+/);
+  return match?match[0]:'Unassigned doctor';
+}
+function getDoctorForItem(item){
+  if(item.dataset&&item.dataset.doctor)return item.dataset.doctor;
+  var details=item.querySelector('p');
+  return getDoctorNameFromText(details?details.textContent:'');
+}
+function getDoctorList(containerId,doctorName){
+  var container=document.getElementById(containerId);
+  var doctor=doctorName||'Unassigned doctor';
+  var lists=container.querySelectorAll('[data-doctor-list]');
+  for(var i=0;i<lists.length;i++){
+    if(lists[i].dataset.doctorList===doctor)return lists[i];
+  }
+  var empty=document.getElementById('visitedEmpty');
+  if(containerId==='visitedList'&&empty)empty.remove();
+  var group=document.createElement('div');
+  group.className='doctorGroup';
+  group.innerHTML='<h4 class="doctorGroupTitle">'+escapeHtml(doctor)+'</h4><div class="list doctorList" data-doctor-list="'+escapeHtml(doctor)+'"></div>';
+  container.appendChild(group);
+  return group.querySelector('.doctorList');
+}
+function appendToDoctorGroup(containerId,doctorName,item){
+  var list=getDoctorList(containerId,doctorName);
+  var empty=list.querySelector('.doctorEmpty');
+  if(empty)empty.remove();
+  list.appendChild(item);
+}
+function confirmAppt(btn){
+  var item=btn.closest('.item');
+  var name=item.querySelector('h4').textContent;
+  var desc=item.querySelector('p').textContent;
+  var newItem=document.createElement('div');
+  newItem.className='item';
+  newItem.innerHTML='<div class="itemTop"><div><h4>'+escapeHtml(name)+'</h4><p>'+escapeHtml(desc)+'</p></div><span class="chip ok">Confirmed</span></div><div class="actions"><button class="miniBtn visitedBtn" onclick="openVisitModal(this)">✓ Mark as Visited</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button><button class="miniBtn danger">Cancel</button></div><div class="editTimeWrap"><input type="time" value="18:30"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove(\'show\')">Cancel</button></div>';
+  appendToDoctorGroup('confirmedList',getDoctorNameFromText(desc),newItem);
+  item.remove();
+}
+function openVisitModal(btn){
+  visitCurrentItem=btn.closest('.item');
+  var h4=visitCurrentItem.querySelector('h4').textContent;
+  var p=visitCurrentItem.querySelector('p').textContent;
+  document.getElementById('visitPatientLabel').textContent=h4+' · '+p;
+  document.getElementById('visitFindings').value=visitCurrentItem.dataset.findings||'';
+  document.getElementById('visitDiagnosis').value=visitCurrentItem.dataset.diagnosis||'';
+  document.getElementById('visitAdvice').value=visitCurrentItem.dataset.advice||'';
+  document.getElementById('visitNotesModal').classList.add('show');
+  setTimeout(function(){document.getElementById('visitFindings').focus();},50);
+}
+function closeVisitModal(){
+  document.getElementById('visitNotesModal').classList.remove('show');
+  visitCurrentItem=null;
+}
+function saveVisitDraft(){
+  if(!visitCurrentItem)return;
+  visitCurrentItem.dataset.findings=document.getElementById('visitFindings').value;
+  visitCurrentItem.dataset.diagnosis=document.getElementById('visitDiagnosis').value;
+  visitCurrentItem.dataset.advice=document.getElementById('visitAdvice').value;
+  var existingDraft=visitCurrentItem.querySelector('.draftChip');
+  if(!existingDraft){
+    var actions=visitCurrentItem.querySelector('.actions');
+    var chip=document.createElement('span');
+    chip.className='chip blue draftChip';
+    chip.textContent='Draft saved';
+    actions.appendChild(chip);
+  }
+  document.getElementById('visitNotesModal').classList.remove('show');
+}
+function submitVisited(){
+  if(!visitCurrentItem)return;
+  var findings=document.getElementById('visitFindings').value.trim();
+  var diagnosis=document.getElementById('visitDiagnosis').value.trim();
+  var advice=document.getElementById('visitAdvice').value.trim();
+  if(!(findings||diagnosis||advice)){
+    alert('Please fill at least one examination note before marking as visited.');
+    return;
+  }
+  markVisited(visitCurrentItem,findings,diagnosis,advice);
+  document.getElementById('visitNotesModal').classList.remove('show');
+  visitCurrentItem=null;
+}
+function markVisited(item,findings,diagnosis,advice){
+  var h4=item.querySelector('h4').textContent;
+  var p=item.querySelector('p').textContent;
+  var emptyMsg=document.getElementById('visitedEmpty');
+  var doctorName=getDoctorForItem(item);
+  if(emptyMsg)emptyMsg.remove();
+  var newItem=document.createElement('div');
+  newItem.className='item';
+  newItem.innerHTML='<div class="itemTop"><div><h4>'+escapeHtml(h4)+'</h4><p>'+escapeHtml(p)+'</p></div><span class="chip ok" style="background:#f0fdf4;color:#166534;border-color:#86efac">✓ Visited</span></div><div class="serviceMap"><b>Findings / Notes:</b> '+escapeHtml(findings||'-')+'<br><b>Diagnosis:</b> '+escapeHtml(diagnosis||'-')+'<br><b>Advice:</b> '+escapeHtml(advice||'-')+'</div>';
+  appendToDoctorGroup('visitedList',doctorName,newItem);
+  item.remove();
+}
+function toggleEditTime(btn){
+  var wrap=btn.closest('.item').querySelector('.editTimeWrap');
+  wrap.classList.toggle('show');
+}
+function saveEditTime(btn){
+  var wrap=btn.closest('.editTimeWrap');
+  var input=wrap.querySelector('input[type="time"]');
+  var val=input.value;
+  var h4=btn.closest('.item').querySelector('h4');
+  var namePart=h4.textContent.split('·')[0].trim();
+  var parts=val.split(':');
+  var h=parseInt(parts[0]),m=parts[1];
+  var ampm=h>=12?'PM':'AM';
+  h=h%12;if(h===0)h=12;
+  var formatted=h+':'+m+' '+ampm;
+  h4.textContent=namePart+' · '+formatted;
+  wrap.classList.remove('show');
+}
+function toggleRequestReschedule(btn){
+  var item=btn.closest('.item');
+  item.querySelector('.rescheduleWrap').classList.toggle('show');
+  var status=item.querySelector('.rescheduleStatus');
+  if(status){
+    status.style.display='none';
+    status.textContent='';
+  }
+}
+function formatRequestAppointmentTime(value){
+  var selectedDate=new Date(value);
+  var hours=selectedDate.getHours();
+  var minutes=selectedDate.getMinutes();
+  var ampm=hours>=12?'PM':'AM';
+  var hour12=hours%12;
+  if(hour12===0)hour12=12;
+  return hour12+':'+String(minutes).padStart(2,'0')+' '+ampm;
+}
+function hasAppointmentSlotConflict(doctor,selectedDate,sourceItem){
+  return collectBookedAppointments().some(function(appt){
+    if(appt.item===sourceItem)return false;
+    var sameDoctor=appt.doctor===doctor;
+    var sameTime=Math.abs(appt.when.getTime()-selectedDate.getTime())<30*60*1000;
+    return sameDoctor&&sameTime;
+  });
+}
+function saveRequestReschedule(btn){
+  var item=btn.closest('.item');
+  var input=item.querySelector('.rescheduleWrap input[type="datetime-local"]');
+  var status=item.querySelector('.rescheduleStatus');
+  var selectedDate=new Date(input.value);
+  var doctor=item.dataset.doctor||'';
+  if(Number.isNaN(selectedDate.getTime())){
+    status.textContent='Please select a valid reschedule slot.';
+    status.style.color='#b91c1c';
+    status.style.display='block';
+    return;
+  }
+  if(hasAppointmentSlotConflict(doctor,selectedDate,item)){
+    status.innerHTML='⚠ No slot available for '+escapeHtml(doctor)+' at '+escapeHtml(formatDateTime(selectedDate))+'. Choose another reschedule slot or cancel this appointment.';
+    status.style.color='#b91c1c';
+    status.style.display='block';
+    item.querySelector('.rescheduleWrap').classList.add('show');
+    return;
+  }
+  var title=item.querySelector('h4').textContent.split('·')[0].trim();
+  var details=item.querySelector('p').textContent;
+  var newItem=document.createElement('div');
+  newItem.className='item';
+  newItem.innerHTML='<div class="itemTop"><div><h4>'+escapeHtml(title+' · '+formatRequestAppointmentTime(input.value))+'</h4><p>'+escapeHtml(details)+'</p></div><span class="chip ok">Rescheduled</span></div><div class="actions"><button class="miniBtn visitedBtn" onclick="openVisitModal(this)">✓ Mark as Visited</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button><button class="miniBtn danger">Cancel</button></div><div class="editTimeWrap"><input type="time" value="'+String(selectedDate.getHours()).padStart(2,'0')+':'+String(selectedDate.getMinutes()).padStart(2,'0')+'"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove(\'show\')">Cancel</button></div>';
+  appendToDoctorGroup('confirmedList',doctor,newItem);
+  item.remove();
+}
+function cancelAppointmentRequest(btn){
+  var item=btn.closest('.item');
+  item.innerHTML='<div class="itemTop"><div><h4>'+escapeHtml(item.querySelector('h4').textContent)+'</h4><p>Appointment cancelled by staff.</p></div><span class="chip danger">Cancelled</span></div>';
+}
+function toggleBotEdit(){
+  var view=document.getElementById('botModeView');
+  var edit=document.getElementById('botModeEdit');
+  if(edit.style.display==='none'){edit.style.display='block';view.style.display='none';}
+  else{edit.style.display='none';view.style.display='block';}
+}
+function saveBotMode(){
+  document.getElementById('botVal1').textContent=document.getElementById('botSel1').value;
+  document.getElementById('botVal2').textContent=document.getElementById('botSel2').value;
+  document.getElementById('botVal3').textContent=document.getElementById('botSel3').value;
+  document.getElementById('botVal4').textContent=document.getElementById('botSel4').value;
+  toggleBotEdit();
+}
+function toggleDoctorsEdit(){
+  var view=document.getElementById('doctorsView');
+  var edit=document.getElementById('doctorsEdit');
+  if(edit.style.display==='none'){edit.style.display='block';view.style.display='none';}
+  else{edit.style.display='none';view.style.display='block';}
+}
+function addDoctorRow(){
+  var list=document.getElementById('doctorsEditList');
+  var row=document.createElement('div');
+  row.className='field';
+  row.style.cssText='margin-bottom:10px;display:flex;gap:8px;align-items:center';
+  row.innerHTML='<input type="text" placeholder="Doctor name" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" placeholder="Specialization" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><input type="text" placeholder="Fee" style="width:80px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button>';
+  list.appendChild(row);
+}
+function saveDoctors(){
+  var list=document.getElementById('doctorsEditList');
+  var rows=list.querySelectorAll('.field');
+  var tbody=document.getElementById('doctorsTableBody');
+  tbody.innerHTML='';
+  rows.forEach(function(row){
+    var inputs=row.querySelectorAll('input');
+    if(inputs[0]&&inputs[0].value){
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td><b>'+inputs[0].value+'</b><br><span class="muted">'+inputs[1].value+'</span></td><td>Rs.'+inputs[2].value+'</td>';
+      tbody.appendChild(tr);
+    }
+  });
+  toggleDoctorsEdit();
+}
+function toggleServicesEdit(){
+  var view=document.getElementById('servicesView');
+  var edit=document.getElementById('servicesEdit');
+  if(edit.style.display==='none'){edit.style.display='block';view.style.display='none';}
+  else{edit.style.display='none';view.style.display='block';}
+}
+function toggleServiceStatus(sel){
+  var row=sel.closest('.field');
+  var activeField=row.querySelector('.activeStatusField');
+  var inactiveField=row.querySelector('.inactiveStatusField');
+  if(sel.value==='Active'){
+    activeField.style.display='block';
+    inactiveField.style.display='none';
+  }else{
+    activeField.style.display='none';
+    inactiveField.style.display='block';
+  }
+}
+function formatTimeInput(value){
+  if(!value)return '';
+  var parts=value.split(':');
+  var h=parseInt(parts[0],10);
+  var m=parts[1]||'00';
+  var ampm=h>=12?'PM':'AM';
+  var h12=h%12;
+  if(h12===0)h12=12;
+  return h12+':'+m+' '+ampm;
+}
+function getServiceWorkingHours(row){
+  var slots=[];
+  row.querySelectorAll('.slotRow').forEach(function(slot){
+    var times=slot.querySelectorAll('input[type="time"]');
+    if(times[0]&&times[1]&&times[0].value&&times[1].value){
+      slots.push(formatTimeInput(times[0].value)+' – '+formatTimeInput(times[1].value));
+    }
+  });
+  return slots.join(', ');
+}
+function addServiceRow(){
+  var list=document.getElementById('servicesEditList');
+  var row=document.createElement('div');
+  row.className='field serviceEditCard';
+  row.innerHTML=`<div class="serviceEditHead"><div><h4 class="serviceEditTitle">New service</h4><p class="serviceEditHint">Configure routing, capacity, and availability.</p></div><button class="miniBtn danger removeServiceBtn" onclick="this.closest('.field').remove()">✕ Remove</button></div>
+  <div class="serviceFormGrid">
+    <div class="serviceField"><label>Service name</label><input type="text" placeholder="Service name"></div>
+    <div class="serviceField"><label>Doctor</label><input type="text" placeholder="Doctor name"></div>
+    <div class="serviceField full"><label>Conditions</label><input type="text" placeholder="Conditions handled"></div>
+    <div class="serviceField"><label>Number of Patients for 30 minutes</label><input type="text" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')" placeholder="Count"></div>
+    <div class="serviceField"><label>Status</label><select onchange="toggleServiceStatus(this)"><option selected>Active</option><option>Inactive</option></select></div>
+    <div class="activeStatusField full slotGroup"><div class="slotGroupHeader"><div><label>Working hours</label><p>Select start and end time slots instead of typing manually.</p></div></div><div class="timeSlotGrid"><div class="slotRow"><span class="slotLabel">Slot 1</span><input type="time" value="09:00"><input type="time" value="13:00"></div><div class="slotRow"><span class="slotLabel">Slot 2</span><input type="time" value="17:00"><input type="time" value="21:00"></div></div></div>
+    <div class="inactiveStatusField full" style="display:none"><label>Inactive Duration</label><p class="inactiveDurationHint">Select the start and end date/time for this doctor to remain inactive.</p><div class="inactiveDurationGrid"><div class="serviceField"><label>From</label><input type="datetime-local" value="2026-05-19T09:00"></div><div class="serviceField"><label>To</label><input type="datetime-local" value="2026-05-19T13:00"></div></div></div>
+  </div>`;
+  list.appendChild(row);
+}
+function formatDateTime(value){
+  if(!value)return '';
+  var date=new Date(value);
+  if(Number.isNaN(date.getTime()))return value;
+  return date.toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'});
+}
+function getServiceInactiveDuration(row){
+  var fields=row.querySelectorAll('.inactiveStatusField input[type="datetime-local"]');
+  return {start:fields[0]?fields[0].value:'',end:fields[1]?fields[1].value:''};
+}
+function getAppointmentDateValue(){
+  var dateInput=document.querySelector('.appointments .hiddenDateInput');
+  return dateInput&&dateInput.value?dateInput.value:'2026-05-19';
+}
+function parseAppointmentTime(timeText){
+  var match=timeText.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if(!match)return null;
+  var hour=parseInt(match[1],10);
+  var minute=parseInt(match[2],10);
+  var ampm=match[3].toUpperCase();
+  if(ampm==='PM'&&hour<12)hour+=12;
+  if(ampm==='AM'&&hour===12)hour=0;
+  return {hour:hour,minute:minute};
+}
+function collectBookedAppointments(){
+  var dateValue=getAppointmentDateValue();
+  var appointments=[];
+  document.querySelectorAll('.appointments .item').forEach(function(item){
+    var title=item.querySelector('h4');
+    var desc=item.querySelector('p');
+    if(!(title&&desc))return;
+    var doctor=(desc.textContent.split('·')[0]||'').trim();
+    if(!doctor.startsWith('Dr.'))return;
+    var time=parseAppointmentTime(title.textContent);
+    if(!time)return;
+    var when=new Date(dateValue+'T'+String(time.hour).padStart(2,'0')+':'+String(time.minute).padStart(2,'0')+':00');
+    appointments.push({item:item,patient:title.textContent,details:desc.textContent,doctor:doctor,when:when});
+  });
+  return appointments;
+}
+function findInactiveConflicts(rows){
+  var conflicts=[];
+  var bookedAppointments=collectBookedAppointments();
+  rows.forEach(function(row,rowIndex){
+    var inputs=row.querySelectorAll('input');
+    var doctorName=inputs[1]&&inputs[1].value?inputs[1].value.trim():'';
+    var serviceName=inputs[0]&&inputs[0].value?inputs[0].value.trim():'Service';
+    var status=row.querySelector('select')?row.querySelector('select').value:'Active';
+    if(status!=='Inactive')return;
+    var duration=getServiceInactiveDuration(row);
+    if(!(duration.start&&duration.end)){
+      alert('Please select inactive duration From and To for '+(doctorName||serviceName)+'.');
+      throw new Error('Missing inactive duration');
+    }
+    var start=new Date(duration.start);
+    var end=new Date(duration.end);
+    if(!(start<end)){
+      alert('Inactive duration To time must be after From time for '+(doctorName||serviceName)+'.');
+      throw new Error('Invalid inactive duration');
+    }
+    bookedAppointments.forEach(function(appt,apptIndex){
+      if(appt.doctor===doctorName&&appt.when>=start&&appt.when<=end){
+        conflicts.push({rowIndex:rowIndex,apptIndex:apptIndex,item:appt.item,patient:appt.patient,details:appt.details,doctor:doctorName,service:serviceName,when:appt.when,start:start,end:end});
+      }
+    });
+  });
+  return conflicts;
+}
+function showInactiveConflicts(conflicts,rows){
+  pendingInactiveServiceRows=rows;
+  var list=document.getElementById('conflictList');
+  list.innerHTML='';
+  document.getElementById('conflictSummary').textContent=conflicts.length+' appointment(s) conflict with the inactive duration. Cancel them before making the doctor inactive.';
+  conflicts.forEach(function(conflict,index){
+    var item=document.createElement('div');
+    item.className='conflictItem';
+    item.dataset.conflictIndex=String(index);
+    item.innerHTML='<h4>'+escapeHtml(conflict.patient)+'</h4><p><b>Doctor:</b> '+escapeHtml(conflict.doctor)+'<br><b>Service:</b> '+escapeHtml(conflict.service)+'<br><b>Appointment:</b> '+escapeHtml(formatDateTime(conflict.when))+'<br><b>Inactive duration:</b> '+escapeHtml(formatDateTime(conflict.start))+' – '+escapeHtml(formatDateTime(conflict.end))+'<br>'+escapeHtml(conflict.details)+'</p><div class="conflictFooter"><span class="chip danger">Conflict</span><button class="miniBtn danger" onclick="cancelConflictAppointment(this)">Cancel appointment</button></div>';
+    item._appointmentItem=conflict.item;
+    list.appendChild(item);
+  });
+  updateConflictApplyButton();
+  document.getElementById('inactiveConflictModal').classList.add('show');
+}
+function updateConflictApplyButton(){
+  var remaining=document.querySelectorAll('#conflictList .conflictItem').length;
+  var btn=document.getElementById('applyInactiveBtn');
+  btn.disabled=remaining>0;
+  btn.textContent=remaining>0?'Cancel '+remaining+' appointment(s) first':'Make Inactive';
+}
+function cancelConflictAppointment(btn){
+  var conflictItem=btn.closest('.conflictItem');
+  if(conflictItem._appointmentItem){
+    conflictItem._appointmentItem.remove();
+  }
+  conflictItem.remove();
+  updateConflictApplyButton();
+}
+function closeConflictModal(){
+  document.getElementById('inactiveConflictModal').classList.remove('show');
+  pendingInactiveServiceRows=null;
+}
+function applyInactiveAfterConflicts(){
+  if(document.querySelectorAll('#conflictList .conflictItem').length>0)return;
+  if(pendingInactiveServiceRows){
+    renderServiceRows(pendingInactiveServiceRows);
+  }
+  closeConflictModal();
+}
+function saveServices(){
+  var list=document.getElementById('servicesEditList');
+  var rows=Array.prototype.slice.call(list.querySelectorAll('.serviceEditCard'));
+  var conflicts=[];
+  try{
+    conflicts=findInactiveConflicts(rows);
+  }catch(error){
+    return;
+  }
+  if(conflicts.length>0){
+    showInactiveConflicts(conflicts,rows);
+    return;
+  }
+  renderServiceRows(rows);
+}
+function renderServiceRows(rows){
+  var view=document.getElementById('servicesView');
+  view.innerHTML='';
+  rows.forEach(function(row){
+    var inputs=row.querySelectorAll('input');
+    if(inputs[0]&&inputs[0].value){
+      var card=document.createElement('div');
+      card.className='feature serviceCard';
+      var serviceName=inputs[0].value;
+      var doctorName=inputs[1]&&inputs[1].value?inputs[1].value:'Not set';
+      var conditions=inputs[2]&&inputs[2].value?inputs[2].value:'No conditions added';
+      var patientCount=inputs[3]&&inputs[3].value?inputs[3].value:'1';
+      var status=row.querySelector('select')?row.querySelector('select').value:'Active';
+      var activeHours=getServiceWorkingHours(row);
+      var inactiveDuration=getServiceInactiveDuration(row);
+      var inactiveLabel=inactiveDuration.start&&inactiveDuration.end?formatDateTime(inactiveDuration.start)+' – '+formatDateTime(inactiveDuration.end):'Not set';
+      var statusDetail=status==='Active'?'<br><b>Working hours:</b> '+(activeHours||'Not set'):'<br><b>Inactive duration:</b> '+inactiveLabel;
+      var chipClass=status==='Active'?'ok':'gray';
+      card.innerHTML='<div><h3>'+escapeHtml(serviceName)+'</h3><p>'+escapeHtml(conditions)+'</p><div class="serviceMap"><b>Doctor:</b> '+escapeHtml(doctorName)+'<br><b>Patients / 30 minutes:</b> '+escapeHtml(patientCount)+'<br><b>Status:</b> '+escapeHtml(status)+statusDetail+'</div></div><span class="chip '+chipClass+'">'+escapeHtml(status)+'</span>';
+      view.appendChild(card);
+    }
+  });
+  toggleServicesEdit();
+}
+function toggleHoursEdit(){
+  var view=document.getElementById('hoursView');
+  var edit=document.getElementById('hoursEdit');
+  if(edit.style.display==='none'){edit.style.display='block';view.style.display='none';}
+  else{edit.style.display='none';view.style.display='block';}
+}
+function saveHours(){
+  var rows=document.querySelectorAll('#hoursEditList .scheduleEditRow');
+  var view=document.getElementById('hoursView');
+  var html='<div class="scheduleCard">';
+  rows.forEach(function(row){
+    var day=row.querySelector('label').textContent;
+    var time=row.querySelector('input').value;
+    var style=time.toLowerCase()==='closed'?' style="color:#b91c1c;font-weight:700"':'';
+    html+='<div class="scheduleRow"><span class="day">'+day+'</span><span class="time"'+style+'>'+time+'</span></div>';
+  });
+  html+='</div>';
+  view.innerHTML=html;
+  toggleHoursEdit();
+}
+function toggleHolidayEdit(){
+  var view=document.getElementById('holidayView');
+  var edit=document.getElementById('holidayEdit');
+  if(edit.style.display==='none'){edit.style.display='block';view.style.display='none';}
+  else{edit.style.display='none';view.style.display='block';}
+}
+function addHolidayRow(){
+  var list=document.getElementById('holidayEditList');
+  var row=document.createElement('div');
+  row.className='scheduleEditRow';
+  row.innerHTML='<input type="date" style="width:160px"><input type="text" placeholder="Reason" style="flex:1"><button class="miniBtn danger" onclick="this.parentElement.remove()" style="font-size:11px">✕</button>';
+  list.appendChild(row);
+}
+function saveHolidays(){
+  var rows=document.querySelectorAll('#holidayEditList .scheduleEditRow');
+  var list=document.getElementById('holidayList');
+  list.innerHTML='';
+  rows.forEach(function(row){
+    var inputs=row.querySelectorAll('input');
+    if(inputs[0].value){
+      var dateVal=inputs[0].value;
+      var d=new Date(dateVal+'T00:00:00');
+      var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var formatted=months[d.getMonth()]+' '+d.getDate()+', '+d.getFullYear();
+      var reason=inputs[1].value||'Holiday';
+      var item=document.createElement('div');
+      item.className='holidayItem';
+      item.innerHTML='<div><span class="hDate">'+formatted+'</span><p class="hReason">'+reason+'</p></div><button class="miniBtn danger" onclick="this.closest(\'.holidayItem\').remove()" style="font-size:11px">Remove</button>';
+      list.appendChild(item);
+    }
+  });
+  toggleHolidayEdit();
+}
+function selectCall(row){
+  document.querySelectorAll('#callTable tbody tr').forEach(function(r){r.classList.remove('activeRow')});
+  row.classList.add('activeRow');
+  var caller=row.dataset.caller;
+  var outcome=row.dataset.outcome;
+  var intent=row.dataset.intent;
+  var routing=row.dataset.routing;
+  var service=row.dataset.service;
+  var doctor=row.dataset.doctor;
+  var slot=row.dataset.slot;
+  var status=row.dataset.status;
+  var duration=row.dataset.duration;
+  document.getElementById('cdTitle').textContent=caller+' \u00b7 '+outcome;
+  document.getElementById('cdBody').innerHTML='Intent: '+intent+'<br>Routing: '+routing+'<br>Service: '+service+'<br>Doctor: '+doctor+'<br>Requested slot: '+slot+'<br>Status: '+status;
+  document.getElementById('tb1').textContent=row.dataset.t1;
+  document.getElementById('tb2').textContent=row.dataset.t2;
+  document.getElementById('tb3').textContent=row.dataset.t3;
+  document.getElementById('tb2').className=row.dataset.t2.startsWith('Patient')?'bubble me':'bubble';
+  document.getElementById('playerTime').textContent='0:00 / '+duration;
+  stopPlay();
+}
+function homeConfirm(btn){
+  var item=btn.closest('.item');
+  var h4=item.querySelector('h4').textContent;
+  var p=item.querySelector('p').textContent;
+  var newItem=document.createElement('div');
+  newItem.className='item';
+  newItem.innerHTML='<div class="itemTop"><div><h4>'+escapeHtml(h4)+'</h4><p>'+escapeHtml(p)+'</p></div><span class="chip ok">Confirmed</span></div><div class="actions"><button class="miniBtn visitedBtn" onclick="openVisitModal(this)">\u2713 Mark as Visited</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button><button class="miniBtn danger">Cancel</button></div><div class="editTimeWrap"><input type="time" value="18:30"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove(\'show\')">Cancel</button></div>';
+  appendToDoctorGroup('confirmedList',getDoctorNameFromText(p),newItem);
+  item.remove();
+}
+function homeReschedule(btn){
+  var wrap=btn.closest('.item').querySelector('.rescheduleWrap');
+  wrap.classList.toggle('show');
+}
+function homeRescheduleSave(btn){
+  var wrap=btn.closest('.rescheduleWrap');
+  var input=wrap.querySelector('input');
+  var val=input.value;
+  var item=btn.closest('.item');
+  var h4=item.querySelector('h4').textContent;
+  var p=item.querySelector('p').textContent;
+  var d=new Date(val);
+  var hh=d.getHours(),mm=d.getMinutes();
+  var ampm=hh>=12?'PM':'AM';
+  var h12=hh%12;if(h12===0)h12=12;
+  var timeStr=h12+':'+(mm<10?'0':'')+mm+' '+ampm;
+  var namePart=h4.split('\u00b7')[0].trim();
+  var newItem=document.createElement('div');
+  newItem.className='item';
+  newItem.innerHTML='<div class="itemTop"><div><h4>'+escapeHtml(namePart+' \u00b7 '+timeStr)+'</h4><p>'+escapeHtml(p)+'</p></div><span class="chip ok">Confirmed</span></div><div class="actions"><button class="miniBtn visitedBtn" onclick="openVisitModal(this)">\u2713 Mark as Visited</button><button class="miniBtn warn" onclick="toggleEditTime(this)">Edit time</button><button class="miniBtn danger">Cancel</button></div><div class="editTimeWrap"><input type="time" value="'+('0'+hh).slice(-2)+':'+('0'+mm).slice(-2)+'"><button class="miniBtn ok" onclick="saveEditTime(this)">Save</button><button class="miniBtn" onclick="this.parentElement.classList.remove(\'show\')">Cancel</button></div>';
+  appendToDoctorGroup('confirmedList',getDoctorNameFromText(p),newItem);
+  item.remove();
+}
+var playInterval=null;
+var playSeconds=0;
+var playTotal=0;
+function togglePlay(){
+  var btn=document.getElementById('playBtn');
+  if(btn.classList.contains('playing')){
+    stopPlay();
+  } else {
+    btn.classList.add('playing');
+    btn.innerHTML='&#9646;&#9646;';
+    var activeRow=document.querySelector('#callTable tbody tr.activeRow');
+    var dur=activeRow?activeRow.dataset.duration:'1m 38s';
+    playTotal=parseDuration(dur);
+    playSeconds=0;
+    var progress=document.getElementById('playerProgress');
+    var timeEl=document.getElementById('playerTime');
+    progress.style.width='0%';
+    playInterval=setInterval(function(){
+      playSeconds++;
+      var pct=Math.min((playSeconds/playTotal)*100,100);
+      progress.style.width=pct+'%';
+      var mm=Math.floor(playSeconds/60);
+      var ss=playSeconds%60;
+      timeEl.textContent=mm+':'+(ss<10?'0':'')+ss+' / '+dur;
+      if(playSeconds>=playTotal) stopPlay();
+    },1000);
+  }
+}
+function stopPlay(){
+  clearInterval(playInterval);
+  playInterval=null;
+  playSeconds=0;
+  var btn=document.getElementById('playBtn');
+  btn.classList.remove('playing');
+  btn.innerHTML='&#9654;';
+  document.getElementById('playerProgress').style.width='0%';
+}
+function parseDuration(str){
+  var parts=str.replace('s','').split('m ');
+  if(parts.length===2) return parseInt(parts[0])*60+parseInt(parts[1]||0);
+  return parseInt(parts[0]);
+}
+</script>
+</body>
+</html>

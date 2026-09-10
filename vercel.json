@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm install --frozen-lockfile && pnpm --filter @vaidya/shared build && pnpm --filter @vaidya/db build && pnpm --filter @vaidya/web build",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": "apps/web/.next"
+}

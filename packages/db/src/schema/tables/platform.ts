@@ -1,0 +1,40 @@
+import { integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+
+export const notificationEvents = pgTable('notification_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clinicId: uuid('clinic_id').notNull(),
+  eventType: text('event_type').notNull(),
+  recipientType: text('recipient_type').notNull(),
+  recipientPhone: text('recipient_phone'),
+  recipientEmail: text('recipient_email'),
+  channel: text('channel').notNull(),
+  templateKey: text('template_key'),
+  languageCode: text('language_code'),
+  payloadJson: jsonb('payload_json').notNull().default({}),
+  deduplicationKey: text('deduplication_key'),
+  status: text('status').notNull().default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(3),
+  providerResponseJson: jsonb('provider_response_json'),
+  lastError: text('last_error'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }).defaultNow(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const auditLogs = pgTable('audit_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clinicId: uuid('clinic_id'),
+  actorUserId: uuid('actor_user_id'),
+  actorType: text('actor_type').notNull(),
+  eventType: text('event_type').notNull(),
+  entityType: text('entity_type'),
+  entityId: uuid('entity_id'),
+  oldValuesJson: jsonb('old_values_json'),
+  newValuesJson: jsonb('new_values_json'),
+  eventDataJson: jsonb('event_data_json').notNull().default({}),
+  source: text('source'),
+  requestId: text('request_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

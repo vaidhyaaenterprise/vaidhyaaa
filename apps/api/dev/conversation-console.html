@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vaidya Conversation Test Console</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1419;
+        --panel: #1a2332;
+        --border: #2d3a4f;
+        --text: #e7ecf3;
+        --muted: #9aa8bc;
+        --accent: #3b82f6;
+        --patient: #2563eb;
+        --assistant: #059669;
+        --system: #6b7280;
+        --debug: #a78bfa;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+      .layout {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 1.25rem;
+        display: grid;
+        gap: 1rem;
+      }
+      h1 { margin: 0 0 0.25rem; font-size: 1.35rem; }
+      .subtitle { color: var(--muted); margin: 0 0 1rem; font-size: 0.9rem; }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1rem;
+      }
+      .row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+      label { display: grid; gap: 0.35rem; font-size: 0.8rem; color: var(--muted); flex: 1; min-width: 180px; }
+      input, button, textarea {
+        font: inherit;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #111827;
+        color: var(--text);
+        padding: 0.55rem 0.75rem;
+      }
+      button {
+        background: var(--accent);
+        border-color: transparent;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.secondary { background: #374151; }
+      button:disabled { opacity: 0.55; cursor: not-allowed; }
+      .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+      .chips button { font-size: 0.8rem; padding: 0.35rem 0.6rem; background: #1f2937; }
+      .conversation-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        gap: 1rem;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .conversation-grid { grid-template-columns: 1fr; }
+      }
+      .panel-title {
+        margin: 0 0 0.75rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      #chatLog {
+        min-height: 420px;
+        max-height: 62vh;
+        overflow: auto;
+        display: grid;
+        gap: 0.75rem;
+      }
+      #debugPanel {
+        min-height: 420px;
+        max-height: 62vh;
+        overflow: auto;
+      }
+      .msg {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.75rem;
+        background: #111827;
+      }
+      .msg.patient { border-left: 4px solid var(--patient); }
+      .msg.assistant { border-left: 4px solid var(--assistant); }
+      .msg.system { border-left: 4px solid var(--system); color: var(--muted); font-size: 0.85rem; }
+      .meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
+      pre {
+        margin: 0;
+        padding: 0.75rem;
+        background: #0b1220;
+        border-radius: 8px;
+        overflow: auto;
+        font-size: 0.75rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .debug-empty {
+        color: var(--muted);
+        font-size: 0.85rem;
+        padding: 0.5rem 0;
+      }
+      .debug-summary {
+        margin-bottom: 0.75rem;
+        padding: 0.65rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #111827;
+        font-size: 0.8rem;
+        color: var(--debug);
+      }
+      .status { font-size: 0.85rem; color: var(--muted); }
+      .error { color: #f87171; }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <h1>Vaidya Conversation Test Console</h1>
+        <p class="subtitle">Chat on the left. NLU / LLM debug on the right. Set <code>DEBUG_API=true</code> in your API env.</p>
+      </header>
+
+      <section class="panel">
+        <div class="row">
+          <label>API base URL
+            <input id="apiBase" value="" />
+          </label>
+          <label>Clinic ID
+            <input id="clinicId" value="00000000-0000-0000-0000-000000000001" />
+          </label>
+          <label>Patient phone
+            <input id="patientPhone" value="+919111111111" />
+          </label>
+          <button id="createSessionBtn">Create session</button>
+        </div>
+        <p class="status" id="sessionStatus">No active session.</p>
+      </section>
+
+      <section class="panel">
+        <div class="row">
+          <label style="flex: 3">Message
+            <textarea id="messageText" rows="2" placeholder="Type a patient message…"></textarea>
+          </label>
+          <button id="sendBtn" disabled>Send</button>
+          <button class="secondary" id="refreshBtn" disabled>Refresh</button>
+        </div>
+        <div class="chips" id="quickPhrases"></div>
+      </section>
+
+      <div class="conversation-grid">
+        <section class="panel">
+          <h2 class="panel-title">Chat</h2>
+          <div id="chatLog"></div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">NLU / LLM Debug</h2>
+          <div id="debugSummary" class="debug-summary">No debug yet.</div>
+          <div id="debugPanel">
+            <div class="debug-empty">Send a message to see classifier/extractor output, raw LLM JSON, and whether the LLM was actually called.</div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const DEFAULT_PHRASES = [
+        'Hello',
+        'Naalaikku evening appointment venum',
+        'Knee pain appointment venum',
+        'Chest pain irukku appointment venum',
+        'Fever-ku enna tablet?',
+        'English please',
+        'Parking irukka?',
+        'Receptionist kitta pesanum',
+        'Fees evlo?',
+        'Clinic enga irukku?',
+      ];
+
+      const state = { sessionId: null, latestDebug: null };
+
+      const apiBaseInput = document.getElementById('apiBase');
+      const clinicIdInput = document.getElementById('clinicId');
+      const patientPhoneInput = document.getElementById('patientPhone');
+      const messageTextInput = document.getElementById('messageText');
+      const sessionStatus = document.getElementById('sessionStatus');
+      const chatLog = document.getElementById('chatLog');
+      const debugPanel = document.getElementById('debugPanel');
+      const debugSummary = document.getElementById('debugSummary');
+      const sendBtn = document.getElementById('sendBtn');
+      const refreshBtn = document.getElementById('refreshBtn');
+      const quickPhrases = document.getElementById('quickPhrases');
+
+      apiBaseInput.value = window.location.origin;
+
+      function appendChat(kind, title, body, meta) {
+        const el = document.createElement('div');
+        el.className = `msg ${kind}`;
+        el.innerHTML = `<strong>${title}</strong><div>${body}</div>${meta ? `<div class="meta">${meta}</div>` : ''}`;
+        chatLog.prepend(el);
+      }
+
+      function appendSystemToChat(title, payload) {
+        const el = document.createElement('div');
+        el.className = 'msg system';
+        el.innerHTML = `<strong>${title}</strong><pre>${JSON.stringify(payload, null, 2)}</pre>`;
+        chatLog.prepend(el);
+      }
+
+      function renderDebug(payload) {
+        state.latestDebug = payload;
+        if (!payload) {
+          debugSummary.textContent = 'No debug returned. Enable DEBUG_API=true in the API env.';
+          debugPanel.innerHTML = '<div class="debug-empty">No debug_json on the assistant message.</div>';
+          return;
+        }
+
+        const summary = payload.agent_llm_status === 'failed'
+          ? `Agent LLM FAILED: ${payload.agent_fallback?.message || payload.agent_fallback?.reason || 'unknown error'}`
+          : payload.agent_llm_status === 'success'
+            ? 'Agent LLM success'
+            : payload.llm_path_summary
+          || [
+            payload.intent_classifier_llm?.llm_called === false
+              ? `Classifier skipped (${payload.intent_classifier_llm?.skipped_reason || 'unknown'})`
+              : payload.intent_classifier_llm?.llm_called
+                ? `Classifier LLM (${payload.intent_classifier_llm?.provider || 'unknown'})`
+                : null,
+            payload.state_entity_extractor_llm?.llm_called === false
+              ? `Extractor skipped (${payload.state_entity_extractor_llm?.skipped_reason || 'unknown'})`
+              : payload.llm?.llm_called || payload.state_entity_extractor_llm?.llm_called
+                ? `Extractor LLM (${(payload.llm || payload.state_entity_extractor_llm)?.provider || 'unknown'})`
+                : null,
+          ].filter(Boolean).join(' · ') || 'See debug payload';
+
+        debugSummary.textContent = summary;
+        debugPanel.innerHTML = `<pre>${JSON.stringify(payload, null, 2)}</pre>`;
+      }
+
+      async function api(path, options) {
+        const response = await fetch(`${apiBaseInput.value.replace(/\/$/, '')}${path}`, {
+          headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
+          ...options,
+        });
+        const json = await response.json();
+        if (!response.ok) {
+          throw json;
+        }
+        return json;
+      }
+
+      async function createSession() {
+        try {
+          const body = await api('/v1/conversations', {
+            method: 'POST',
+            body: JSON.stringify({
+              clinic_id: clinicIdInput.value.trim(),
+              channel: 'web_demo',
+              patient_phone: patientPhoneInput.value.trim(),
+            }),
+          });
+          const session = body.data.session;
+          state.sessionId = session.id;
+          sessionStatus.textContent = `Session ${session.id} · ${session.language_code} · ${session.current_flow}/${session.current_state}`;
+          sendBtn.disabled = false;
+          refreshBtn.disabled = false;
+          chatLog.innerHTML = '';
+          appendSystemToChat('Session created', session);
+          renderDebug(null);
+        } catch (error) {
+          appendSystemToChat('Create session failed', error);
+          sessionStatus.innerHTML = '<span class="error">Failed to create session.</span>';
+        }
+      }
+
+      async function refreshHistory() {
+        if (!state.sessionId) return;
+        try {
+          const body = await api(`/v1/conversations/${state.sessionId}`);
+          chatLog.innerHTML = '';
+          const session = body.data.session;
+          sessionStatus.textContent = `Session ${session.id} · ${session.language_code} · ${session.current_flow}/${session.current_state}`;
+          let latestDebug = null;
+          for (const message of body.data.messages) {
+            renderChatMessage(message);
+            if (message.sender === 'assistant' && message.debug_json) {
+              latestDebug = message.debug_json;
+            }
+          }
+          renderDebug(latestDebug);
+        } catch (error) {
+          appendSystemToChat('Refresh failed', error);
+        }
+      }
+
+      function renderChatMessage(message) {
+        const meta = [
+          message.intent ? `intent: ${message.intent}` : null,
+          message.reply_template_key ? `template: ${message.reply_template_key}` : null,
+          message.flow_after ? `flow: ${message.flow_before}/${message.state_before} → ${message.flow_after}/${message.state_after}` : null,
+        ].filter(Boolean).join(' · ');
+        appendChat(message.sender, message.sender, message.message_text.replace(/</g, '&lt;'), meta);
+      }
+
+      async function sendMessage(text) {
+        if (!state.sessionId || !text.trim()) return;
+        const idempotencyKey = `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        appendChat('patient', 'patient', text.replace(/</g, '&lt;'));
+        try {
+          const body = await api(`/v1/conversations/${state.sessionId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ message_text: text.trim(), idempotency_key: idempotencyKey }),
+          });
+          renderChatMessage(body.data.assistant_message);
+          renderDebug(body.data.assistant_message.debug_json ?? null);
+          const session = body.data.session;
+          sessionStatus.textContent = `Session ${session.id} · ${session.language_code} · ${session.current_flow}/${session.current_state}`;
+        } catch (error) {
+          renderDebug(error);
+          appendSystemToChat('Send failed', error);
+        }
+      }
+
+      document.getElementById('createSessionBtn').addEventListener('click', createSession);
+      sendBtn.addEventListener('click', () => {
+        const text = messageTextInput.value;
+        messageTextInput.value = '';
+        sendMessage(text);
+      });
+      refreshBtn.addEventListener('click', refreshHistory);
+      messageTextInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          const text = messageTextInput.value;
+          messageTextInput.value = '';
+          sendMessage(text);
+        }
+      });
+
+      for (const phrase of DEFAULT_PHRASES) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = phrase;
+        button.addEventListener('click', () => sendMessage(phrase));
+        quickPhrases.appendChild(button);
+      }
+    </script>
+  </body>
+</html>

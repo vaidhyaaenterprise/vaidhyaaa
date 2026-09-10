@@ -1,0 +1,57 @@
+{
+  "name": "@vaidya/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./dto": {
+      "types": "./dist/dto/index.d.ts",
+      "require": "./dist/dto/index.js",
+      "import": "./dist/dto/index.js",
+      "default": "./dist/dto/index.js"
+    },
+    "./enums": {
+      "types": "./dist/enums/index.d.ts",
+      "require": "./dist/enums/index.js",
+      "import": "./dist/enums/index.js",
+      "default": "./dist/enums/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors/index.d.ts",
+      "require": "./dist/errors/index.js",
+      "import": "./dist/errors/index.js",
+      "default": "./dist/errors/index.js"
+    },
+    "./api-client": {
+      "types": "./dist/api-client/index.d.ts",
+      "require": "./dist/api-client/index.js",
+      "import": "./dist/api-client/index.js",
+      "default": "./dist/api-client/index.js"
+    },
+    "./templates": {
+      "types": "./dist/templates/index.d.ts",
+      "require": "./dist/templates/index.js",
+      "import": "./dist/templates/index.js",
+      "default": "./dist/templates/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

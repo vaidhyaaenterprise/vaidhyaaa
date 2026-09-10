@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vaidya Doctor Portal - Standalone HTML</title>
+  <style>
+    :root {
+      --brand: #0f766e;
+      --brand-2: #2563eb;
+      --dark: #0b1220;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --green-bg: #ecfdf5;
+      --green: #047857;
+      --green-line: #a7f3d0;
+      --amber-bg: #fffbeb;
+      --amber: #b45309;
+      --amber-line: #fde68a;
+      --blue-bg: #eff6ff;
+      --blue: #1d4ed8;
+      --blue-line: #bfdbfe;
+      --gray-bg: #f8fafc;
+      --gray: #475569;
+      --gray-line: #e2e8f0;
+      --red-bg: #fef2f2;
+      --red: #b91c1c;
+      --red-line: #fecaca;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, Arial, Helvetica, sans-serif;
+    }
+
+    button, input, select, textarea { font: inherit; }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid rgba(15, 118, 110, .25);
+      outline-offset: 2px;
+    }
+
+    .app {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      width: 272px;
+      height: 100vh;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 22px;
+      background: var(--dark);
+      color: #dbeafe;
+    }
+
+    .brand-row,
+    .doctor-row,
+    .nav-left,
+    .status-line,
+    .queue-meta,
+    .section-title,
+    .btn,
+    .chip-group,
+    .legend-item,
+    .form-actions {
+      display: flex;
+      align-items: center;
+    }
+
+    .brand-row { gap: 12px; margin-bottom: 26px; }
+
+    .brand-logo {
+      width: 46px;
+      height: 46px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, #14b8a6, #2563eb);
+      color: white;
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .brand-name { color: white; font-size: 20px; font-weight: 800; line-height: 1.2; }
+    .brand-subtitle, .doctor-subtitle, .doctor-location { color: #94a3b8; font-size: 12px; }
+    .brand-subtitle { margin-top: 2px; }
+
+    .doctor-card,
+    .duty-card {
+      border: 1px solid rgba(255, 255, 255, .09);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, .06);
+      padding: 14px;
+    }
+
+    .doctor-card { margin-bottom: 18px; }
+    .doctor-row { gap: 10px; margin-bottom: 8px; }
+
+    .doctor-avatar {
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #0f766e, #2563eb);
+      color: white;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .doctor-name { color: white; font-size: 14px; font-weight: 700; }
+    .doctor-location { line-height: 1.5; }
+
+    .nav { display: flex; flex-direction: column; gap: 6px; }
+
+    .nav-btn {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 0;
+      border-radius: 14px;
+      background: transparent;
+      color: #cbd5e1;
+      padding: 11px 13px;
+      text-align: left;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+
+    .nav-btn.active { background: white; color: var(--text); }
+    .nav-left { gap: 9px; }
+
+    .badge-count {
+      border-radius: 999px;
+      background: rgba(255,255,255,.15);
+      color: #94a3b8;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .nav-btn.active .badge-count { background: var(--brand); color: white; }
+    .nav-divider { height: 1px; background: rgba(255, 255, 255, .08); margin: 8px 0; }
+    .logout { color: #f87171; }
+
+    .duty-wrapper { margin-top: auto; }
+    .duty-card { background: rgba(20, 184, 166, .13); border-color: rgba(45, 212, 191, .25); }
+    .status-line { gap: 7px; color: #2dd4bf; font-size: 13px; font-weight: 700; }
+    .duty-card p { margin: 6px 0 0; color: #99f6e4; font-size: 12px; line-height: 1.5; }
+
+    main {
+      flex: 1;
+      min-width: 0;
+      padding: 28px 32px 60px;
+      overflow-y: auto;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 5px; color: var(--text); font-size: 26px; font-weight: 900; }
+    .subtitle { margin: 5px 0 0; color: var(--muted); font-size: 14px; }
+
+    .btn {
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid transparent;
+      border-radius: 13px;
+      padding: 10px 16px;
+      color: white;
+      background: var(--brand);
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .btn.secondary { color: #334155; background: #f1f5f9; border-color: var(--line); }
+    .btn.small { padding: 7px 11px; border-radius: 11px; font-size: 12px; }
+    .btn.blue { color: var(--blue); background: var(--blue-bg); border-color: var(--blue-line); }
+    .btn.warn { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-line); }
+    .btn.danger { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 20px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #0f766e, #0f172a);
+      padding: 20px 24px;
+    }
+
+    .hero h2 { margin-bottom: 6px; color: white; font-size: 20px; font-weight: 900; }
+    .hero p { margin-bottom: 0; color: #ccfbf1; font-size: 13px; line-height: 1.5; }
+
+    .tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+    .tag {
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+      padding: 6px 10px;
+      color: white;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .hero-stat {
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px;
+      background: rgba(255,255,255,.08);
+      padding: 10px 12px;
+      text-align: center;
+    }
+
+    .hero-stat strong { display: block; color: white; font-size: 24px; font-weight: 900; }
+    .hero-stat span { display: block; margin-top: 2px; color: #99f6e4; font-size: 11px; font-weight: 700; }
+
+    .split { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    .split.has-panel { grid-template-columns: 1fr 1.3fr; }
+
+    .group { margin-bottom: 18px; }
+    .section-title { gap: 8px; margin-bottom: 10px; color: var(--text); font-size: 14px; font-weight: 800; }
+    .queue-list { display: flex; flex-direction: column; gap: 10px; }
+
+    .queue-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: white;
+      padding: 14px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .queue-card.selected { border-color: var(--brand); background: #f0fdf4; box-shadow: inset 3px 0 0 var(--brand); }
+    .queue-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+    .patient-main { flex: 1; min-width: 0; }
+    .patient-name-row { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .patient-name { color: var(--text); font-size: 15px; font-weight: 800; }
+    .patient-age { color: #94a3b8; font-size: 12px; }
+    .reason { margin-bottom: 6px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .queue-meta { flex-wrap: wrap; gap: 8px; }
+    .queue-meta span { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+    .card-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+
+    .chip {
+      display: inline-block;
+      white-space: nowrap;
+      border: 1px solid var(--gray-line);
+      border-radius: 999px;
+      background: var(--gray-bg);
+      color: var(--gray);
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .chip.waiting { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-line); }
+    .chip.in-progress { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-line); }
+    .chip.visited { background: var(--green-bg); color: var(--green); border-color: var(--green-line); }
+    .chip.skipped { background: var(--gray-bg); color: var(--gray); border-color: var(--gray-line); }
+
+    .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .progress-note { margin-top: 8px; color: var(--brand); font-size: 12px; font-weight: 700; }
+
+    .diagnosis-box {
+      margin-top: 8px;
+      border: 1px solid var(--green-line);
+      border-radius: 10px;
+      background: #f0fdf4;
+      padding: 7px 10px;
+      font-size: 12px;
+    }
+
+    .diagnosis-box b { color: var(--green); }
+
+    .consultation-panel,
+    .card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: white;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, .06);
+    }
+
+    .consult-header {
+      background: linear-gradient(135deg, #0f766e, #0f172a);
+      color: white;
+      padding: 18px 22px;
+    }
+
+    .consult-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .eyebrow { margin-bottom: 4px; color: #99f6e4; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+    .consult-name { font-size: 20px; font-weight: 900; }
+    .consult-meta { margin-top: 4px; color: #ccfbf1; font-size: 13px; }
+    .consult-time { text-align: right; font-size: 22px; font-weight: 900; }
+    .consult-type { display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-top: 2px; color: #99f6e4; font-size: 12px; }
+    .complaint { margin-top: 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 12px; background: rgba(255,255,255,.1); padding: 8px 12px; font-size: 13px; }
+    .complaint b { color: #99f6e4; }
+
+    .consult-body { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 20px 22px; }
+    .history-list { display: flex; flex-direction: column; gap: 14px; border-left: 3px solid var(--line); padding-left: 14px; }
+    .history-item { position: relative; }
+    .history-button {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .history-button:hover .history-date,
+    .history-button:hover .history-reason { text-decoration: underline; }
+
+    .history-dot { position: absolute; left: -21px; top: 3px; width: 11px; height: 11px; border-radius: 99px; background: var(--brand); box-shadow: 0 0 0 4px #ccfbf1; }
+    .history-date { color: var(--text); font-size: 13px; font-weight: 700; }
+    .history-reason, .empty { margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .history-dx { margin-top: 2px; color: var(--brand); font-size: 12px; font-weight: 700; }
+    .history-doctor { margin-top: 1px; color: #94a3b8; font-size: 11px; }
+    .history-detail-grid { display: grid; gap: 12px; }
+    .history-detail-card { border: 1px solid var(--line); border-radius: 14px; background: var(--gray-bg); padding: 12px 14px; }
+    .history-detail-card span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .history-detail-card strong, .history-detail-card p { color: var(--text); font-size: 14px; }
+    .history-detail-card p { margin: 0; line-height: 1.5; }
+
+    label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .field-group { margin-bottom: 12px; }
+    textarea, input, select {
+      width: 100%;
+      border: 1.5px solid #dbe5ef;
+      border-radius: 13px;
+      background: white;
+      color: var(--text);
+      padding: 10px 13px;
+      font-size: 13px;
+    }
+
+    textarea { resize: vertical; min-height: 78px; }
+    .form-actions { gap: 8px; margin-top: 4px; }
+    .form-actions .btn.primary { flex: 1; }
+
+    .analytics-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+    .stat-card { padding: 18px 20px; }
+    .stat-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .stat-label { color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .stat-value { margin: 8px 0 2px; color: var(--text); font-size: 32px; font-weight: 900; }
+    .stat-sub { color: var(--muted); font-size: 13px; }
+    .stat-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: rgba(15,118,110,.1); }
+
+    .card { padding: 20px; }
+    .card-title-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .card-title { color: var(--text); font-size: 16px; font-weight: 800; }
+    .card-sub { margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .filter-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .filter-box { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--gray-bg); padding: 4px; }
+    .filter-btn { border: 1px solid transparent; border-radius: 10px; background: white; color: #334155; padding: 7px 13px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .filter-btn.active { border-color: var(--brand); background: #f0fdfa; color: var(--brand); }
+
+    .chart-wrap { min-height: 280px; }
+    .bar-chart { display: flex; align-items: flex-end; gap: 12px; height: 235px; padding: 20px 6px 0; border-bottom: 1px solid #f1f5f9; }
+    .bar-group { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 8px; height: 100%; min-width: 56px; }
+    .bar-stack { width: 100%; max-width: 54px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; border-radius: 8px 8px 0 0; background: #e2e8f0; }
+    .bar-new { background: #2563eb; }
+    .bar-follow { background: var(--brand); }
+    .bar-label { color: #94a3b8; font-size: 11px; text-align: center; }
+    .line-chart svg { width: 100%; height: 260px; display: block; }
+    .area-fill { fill: rgba(15,118,110,.12); }
+    .grid-line { stroke: #f1f5f9; stroke-width: 1; }
+    .legend { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+    .legend-item { gap: 6px; color: #334155; font-size: 12px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+    .bottom-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 18px; }
+    .mini-title { display: flex; align-items: center; gap: 7px; margin-bottom: 16px; color: var(--text); font-size: 15px; font-weight: 800; }
+    .donut-layout { display: grid; grid-template-columns: 150px 1fr; gap: 14px; align-items: center; }
+    .donut { width: 150px; height: 150px; border-radius: 50%; position: relative; background: conic-gradient(var(--brand) 0 28%, #2563eb 28% 49%, #d97706 49% 66%, #dc2626 66% 76%, #7c3aed 76% 85%, #059669 85% 92%, #0891b2 92% 100%); }
+    .donut.visit { background: conic-gradient(var(--brand) 0 68%, #2563eb 68% 89%, #d97706 89% 100%); }
+    .donut::after { content: ""; position: absolute; inset: 38px; border-radius: 50%; background: white; }
+    .legend-list { display: flex; flex-direction: column; gap: 6px; }
+    .legend-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
+    .age-bars { height: 210px; display: flex; align-items: flex-end; gap: 8px; }
+    .age-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+    .age-fill { width: 100%; max-width: 34px; border-radius: 5px 5px 0 0; background: #d97706; }
+    .age-bar:nth-child(even) .age-fill { background: #f59e0b; }
+    .age-label { color: #94a3b8; font-size: 11px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { border-bottom: 1px solid #f1f5f9; padding: 10px 12px; color: #94a3b8; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+    td { padding: 12px; color: var(--text); font-size: 14px; }
+    tbody tr:nth-child(even) { background: var(--gray-bg); }
+
+    .hidden { display: none !important; }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 10;
+      background: rgba(15,23,42,.55);
+      padding: 20px;
+    }
+
+    .modal {
+      width: min(620px, 100%);
+      border-radius: 22px;
+      background: white;
+      box-shadow: 0 25px 80px rgba(0,0,0,.25);
+      padding: 22px;
+    }
+
+    .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+    .modal h2 { margin-bottom: 4px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-grid .wide { grid-column: 1 / -1; }
+
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 20;
+      max-width: 340px;
+      border-radius: 14px;
+      background: #0f172a;
+      color: white;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 15px 40px rgba(15,23,42,.3);
+      opacity: 0;
+      transform: translateY(10px);
+      pointer-events: none;
+      transition: all .2s;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 1100px) {
+      .split.has-panel, .hero, .bottom-grid, .consult-body { grid-template-columns: 1fr; }
+      .analytics-stats { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 760px) {
+      .app { flex-direction: column; }
+      .sidebar { position: relative; width: 100%; height: auto; }
+      main { padding: 22px 16px 44px; }
+      .topbar { flex-direction: column; }
+      .analytics-stats, .form-grid, .donut-layout { grid-template-columns: 1fr; }
+      .donut { margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <div class="brand-logo">V</div>
+        <div>
+          <div class="brand-name">Vaidya</div>
+          <div class="brand-subtitle">Doctor Portal</div>
+        </div>
+      </div>
+
+      <div class="doctor-card">
+        <div class="doctor-row">
+          <div class="doctor-avatar">MK</div>
+          <div>
+            <div class="doctor-name">Dr. M. Kumar</div>
+            <div class="doctor-subtitle">Orthopaedic Surgeon</div>
+          </div>
+        </div>
+        <div class="doctor-location">Sri Murugan Clinic · Anna Nagar</div>
+      </div>
+
+      <nav class="nav" aria-label="Main navigation">
+        <button class="nav-btn active" data-section="today">
+          <span class="nav-left"><span>▦</span> Today</span>
+          <span class="badge-count" id="sidebarCount">8</span>
+        </button>
+        <button class="nav-btn" data-section="analytics">
+          <span class="nav-left"><span>▥</span> Analytics</span>
+        </button>
+        <div class="nav-divider"></div>
+        <button class="nav-btn logout" type="button"><span class="nav-left"><span>⇥</span> Logout</span></button>
+      </nav>
+
+      <div class="duty-wrapper">
+        <div class="duty-card">
+          <div class="status-line"><span>●</span> On Duty</div>
+          <p>Morning shift · 9:00 AM – 1:00 PM<br />Next: Evening 5:00 – 9:00 PM</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <section id="todaySection"></section>
+      <section id="analyticsSection" class="hidden"></section>
+    </main>
+  </div>
+
+  <div id="historyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="historyModalTitle">Previous Visit</h2>
+          <p class="subtitle" id="historyModalSubtitle">Old consultation details</p>
+        </div>
+        <button class="btn secondary small" id="closeHistoryModal" type="button">Close</button>
+      </div>
+      <div id="historyModalBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    /*
+      EDIT DATA HERE:
+      Change this patient list, analytics arrays, doctor names, labels, colors, etc.
+      Then save this file and refresh the browser to see your changes.
+    */
+    const INITIAL_PATIENTS = [
+      {
+        id: "1",
+        name: "Arun Kumar",
+        age: 52,
+        gender: "Male",
+        phone: "+91 98400 12345",
+        time: "9:00 AM",
+        type: "in-person",
+        status: "visited",
+        reason: "Knee pain follow-up – 3 months post physiotherapy",
+        roomNumber: "203",
+        diagnosis: "Osteoarthritis Grade II – Left Knee",
+        advice: "Diclofenac 50mg BD x 5 days. Continue physio. Review in 6 weeks.",
+        visitNote: "ROM improved. Mild crepitus. No effusion.",
+        history: [
+          { date: "Mar 10, 2026", reason: "Initial knee pain consultation", diagnosis: "Osteoarthritis Grade I", doctor: "Dr. M. Kumar" },
+          { date: "Jan 5, 2026", reason: "Knee swelling after fall", diagnosis: "Mild ligament strain", doctor: "Dr. M. Kumar" }
+        ]
+      },
+      {
+        id: "2",
+        name: "Lakshmi Devi",
+        age: 64,
+        gender: "Female",
+        phone: "+91 94440 88221",
+        time: "9:30 AM",
+        type: "in-person",
+        status: "visited",
+        reason: "Lower back pain – chronic, worsening at night",
+        roomNumber: "203",
+        diagnosis: "Lumbar Spondylosis with disc bulge L4–L5",
+        advice: "Etoricoxib 90mg OD x 7 days. Hot fomentation. Posture advice given.",
+        visitNote: "SLR negative. Paraspinal tenderness++.",
+        history: [
+          { date: "Feb 20, 2026", reason: "Back pain, initial visit", diagnosis: "Muscle spasm", doctor: "Dr. M. Kumar" }
+        ]
+      },
+      {
+        id: "3",
+        name: "Ramesh Babu",
+        age: 38,
+        gender: "Male",
+        phone: "+91 98760 55810",
+        time: "10:00 AM",
+        type: "in-person",
+        status: "in-progress",
+        reason: "Right shoulder pain after gym injury",
+        roomNumber: "203",
+        history: [
+          { date: "Nov 3, 2025", reason: "Shoulder dislocation – reduced in ER", diagnosis: "Shoulder dislocation – reduced", doctor: "Dr. M. Kumar" }
+        ]
+      },
+      { id: "4", name: "Priya Venkatesh", age: 29, gender: "Female", phone: "+91 77770 33445", time: "10:30 AM", type: "video", status: "waiting", reason: "Ankle sprain follow-up – 2 weeks post injury", history: [] },
+      { id: "5", name: "Suresh Rajan", age: 47, gender: "Male", phone: "+91 90001 67890", time: "11:00 AM", type: "in-person", status: "waiting", reason: "Hip replacement pre-surgery assessment", roomNumber: "204", history: [
+        { date: "Apr 14, 2026", reason: "Hip pain, X-ray review", diagnosis: "Avascular Necrosis hip – Grade III", doctor: "Dr. M. Kumar" },
+        { date: "Mar 1, 2026", reason: "Hip pain onset", diagnosis: "Hip OA – early", doctor: "Dr. M. Kumar" }
+      ] },
+      { id: "6", name: "Meena Sundarajan", age: 55, gender: "Female", phone: "+91 86860 11223", time: "11:30 AM", type: "in-person", status: "waiting", reason: "Wrist pain and numbness – suspected carpal tunnel", roomNumber: "203", history: [] },
+      { id: "7", name: "Vijay Anand", age: 41, gender: "Male", phone: "+91 99990 77654", time: "12:00 PM", type: "phone", status: "waiting", reason: "Post-op follow-up – knee arthroscopy 4 weeks ago", history: [
+        { date: "May 14, 2026", reason: "Knee arthroscopy", diagnosis: "Meniscal tear – repaired", doctor: "Dr. M. Kumar" }
+      ] },
+      { id: "8", name: "Kavitha Raj", age: 33, gender: "Female", phone: "+91 81810 44332", time: "12:30 PM", type: "in-person", status: "waiting", reason: "Neck pain and headache after road accident", roomNumber: "204", history: [] }
+    ];
+
+    const DAILY_DATA = [
+      { label: "Mon", patients: 9, newPatients: 3, followUp: 6 },
+      { label: "Tue", patients: 12, newPatients: 5, followUp: 7 },
+      { label: "Wed", patients: 8, newPatients: 2, followUp: 6 },
+      { label: "Thu", patients: 14, newPatients: 6, followUp: 8 },
+      { label: "Fri", patients: 11, newPatients: 4, followUp: 7 },
+      { label: "Sat", patients: 6, newPatients: 3, followUp: 3 },
+      { label: "Sun", patients: 0, newPatients: 0, followUp: 0 }
+    ];
+
+    const WEEKLY_DATA = [
+      { label: "Week 1 May", patients: 52, newPatients: 18, followUp: 34 },
+      { label: "Week 2 May", patients: 61, newPatients: 22, followUp: 39 },
+      { label: "Week 3 May", patients: 47, newPatients: 14, followUp: 33 },
+      { label: "Week 4 May", patients: 58, newPatients: 20, followUp: 38 },
+      { label: "Week 1 Jun", patients: 63, newPatients: 25, followUp: 38 },
+      { label: "Week 2 Jun", patients: 55, newPatients: 19, followUp: 36 }
+    ];
+
+    const MONTHLY_DATA = [
+      { label: "Jan", patients: 198, newPatients: 72, followUp: 126 },
+      { label: "Feb", patients: 213, newPatients: 80, followUp: 133 },
+      { label: "Mar", patients: 187, newPatients: 65, followUp: 122 },
+      { label: "Apr", patients: 224, newPatients: 88, followUp: 136 },
+      { label: "May", patients: 241, newPatients: 95, followUp: 146 },
+      { label: "Jun", patients: 118, newPatients: 46, followUp: 72 }
+    ];
+
+    const CONDITIONS = [
+      ["Knee Pain", 89, "#0f766e"], ["Back Pain", 67, "#2563eb"],
+      ["Joint Pain", 54, "#d97706"], ["Fracture", 32, "#dc2626"],
+      ["Shoulder", 28, "#7c3aed"], ["Leg Pain", 22, "#059669"], ["Other", 18, "#0891b2"]
+    ];
+
+    const VISIT_TYPES = [["In-Person", 210, "#0f766e"], ["Video Call", 65, "#2563eb"], ["Phone", 35, "#d97706"]];
+    const AGE_GROUPS = [["0–18", 12], ["19–30", 38], ["31–45", 92], ["46–60", 118], ["61–75", 87], ["75+", 43]];
+
+    const STORAGE_KEY = "vaidya-html-dashboard-patients";
+    let patients = loadPatients();
+    let selectedId = patients.find(p => p.status === "in-progress")?.id || null;
+    let activeSection = "today";
+    let groupBy = "daily";
+    let chartType = "area";
+    let toastTimer;
+
+    function loadPatients() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? JSON.parse(saved) : structuredClone(INITIAL_PATIENTS);
+      } catch {
+        return JSON.parse(JSON.stringify(INITIAL_PATIENTS));
+      }
+    }
+
+    function savePatients() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" }[char]));
+    }
+
+    function typeText(patient) {
+      if (patient.type === "in-person") return `Room ${patient.roomNumber || "—"}`;
+      return patient.type;
+    }
+
+    function typeIcon(type) {
+      if (type === "video") return "▣";
+      if (type === "phone") return "☎";
+      return "⌖";
+    }
+
+    function statusLabel(status) {
+      return { waiting: "Waiting", "in-progress": "In Progress", visited: "Visited", skipped: "Skipped" }[status] || status;
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
+    }
+
+    function setSection(section) {
+      activeSection = section;
+      document.getElementById("todaySection").classList.toggle("hidden", section !== "today");
+      document.getElementById("analyticsSection").classList.toggle("hidden", section !== "analytics");
+      document.querySelectorAll(".nav-btn[data-section]").forEach(btn => btn.classList.toggle("active", btn.dataset.section === section));
+      render();
+    }
+
+    function render() {
+      document.getElementById("sidebarCount").textContent = patients.length;
+      if (activeSection === "today") renderToday();
+      if (activeSection === "analytics") renderAnalytics();
+    }
+
+    function patientCard(patient) {
+      const selected = selectedId === patient.id ? " selected" : "";
+      const diagnosis = patient.status === "visited" && patient.diagnosis
+        ? `<div class="diagnosis-box"><b>Dx:</b> ${escapeHtml(patient.diagnosis)}</div>` : "";
+      const actions = patient.status !== "in-progress" ? `
+        <div class="card-actions" onclick="event.stopPropagation()">
+          <button class="btn small blue" onclick="startConsultation('${patient.id}')">› Start Consultation</button>
+          ${patient.status === "waiting" ? `<button class="btn small warn" onclick="skipPatient('${patient.id}')">Skip</button>` : ""}
+        </div>` : "";
+      const progress = patient.status === "in-progress" ? `<div class="progress-note">⚠ Consultation in progress — see panel below</div>` : "";
+
+      return `
+        <article class="queue-card${selected}" onclick="selectPatient('${patient.id}')">
+          <div class="queue-card-top">
+            <div class="patient-main">
+              <div class="patient-name-row">
+                <span class="patient-name">${escapeHtml(patient.name)}</span>
+                <span class="patient-age">${patient.age}y · ${escapeHtml(patient.gender[0])}</span>
+              </div>
+              <div class="reason">${escapeHtml(patient.reason)}</div>
+              <div class="queue-meta">
+                <span>◷ ${escapeHtml(patient.time)}</span>
+                <span>${typeIcon(patient.type)} ${escapeHtml(typeText(patient))}</span>
+              </div>
+            </div>
+            <div class="card-side">
+              <span class="chip ${patient.status}">${statusLabel(patient.status)}</span>
+              ${patient.status === "visited" ? "<span style='color:#059669'>✓</span>" : ""}
+            </div>
+          </div>
+          ${actions}
+          ${progress}
+          ${diagnosis}
+        </article>`;
+    }
+
+    function renderGroup(title, icon, color, list) {
+      if (!list.length) return "";
+      return `
+        <div class="group">
+          <div class="section-title"><span style="color:${color}">${icon}</span> ${title} (${list.length})</div>
+          <div class="queue-list">${list.map(patientCard).join("")}</div>
+        </div>`;
+    }
+
+    function renderConsultationPanel(patient) {
+      const savedAdvice = patient.advice || patient["pres" + "cription"] || "";
+      const history = patient.history?.length ? `
+        <div class="history-list">
+          ${patient.history.map((h, index) => `
+            <button class="history-item history-button" type="button" onclick="showHistory('${patient.id}', ${index})">
+              <span class="history-dot"></span>
+              <div class="history-date">${escapeHtml(h.date)}</div>
+              <div class="history-reason">${escapeHtml(h.reason)}</div>
+              <div class="history-dx">Dx: ${escapeHtml(h.diagnosis)}</div>
+              <div class="history-doctor">by ${escapeHtml(h.doctor)}</div>
+            </button>`).join("")}
+        </div>` : `<div class="empty">No previous visits on record.</div>`;
+
+      return `
+        <aside class="consultation-panel">
+          <div class="consult-header">
+            <div class="consult-top">
+              <div>
+                <div class="eyebrow">Current Consultation</div>
+                <div class="consult-name">${escapeHtml(patient.name)}</div>
+                <div class="consult-meta">${patient.age} yrs · ${escapeHtml(patient.gender)} · ${escapeHtml(patient.phone)}</div>
+              </div>
+              <div>
+                <div class="consult-time">${escapeHtml(patient.time)}</div>
+                <div class="consult-type">${typeIcon(patient.type)} ${escapeHtml(typeText(patient))}</div>
+              </div>
+            </div>
+            <div class="complaint"><b>Chief Complaint:</b> ${escapeHtml(patient.reason)}</div>
+          </div>
+          <div class="consult-body">
+            <div>
+              <div class="section-title"><span style="color:var(--brand)">↺</span> Visit History</div>
+              ${history}
+            </div>
+            <div>
+              <div class="section-title"><span style="color:var(--brand)">⚕</span> Examination Notes</div>
+              <div class="field-group">
+                <label for="noteField">Findings / Notes</label>
+                <textarea id="noteField" placeholder="Enter examination findings, observations...">${escapeHtml(patient.visitNote || "")}</textarea>
+              </div>
+              <div class="field-group">
+                <label for="diagnosisField">Diagnosis</label>
+                <input id="diagnosisField" placeholder="e.g. Osteoarthritis Grade II – Left Knee" value="${escapeHtml(patient.diagnosis || "")}" />
+              </div>
+              <div class="field-group">
+                <label for="adviceField">Advice</label>
+                <textarea id="adviceField" placeholder="Advice, medicines, dosage, follow-up instructions...">${escapeHtml(savedAdvice)}</textarea>
+              </div>
+              <div class="form-actions">
+                <button class="btn small secondary" onclick="saveDraft('${patient.id}')">☷ Save Draft</button>
+                <button class="btn primary" onclick="markVisited('${patient.id}')">✓ Mark as Visited</button>
+              </div>
+            </div>
+          </div>
+        </aside>`;
+    }
+
+    function renderToday() {
+      const waiting = patients.filter(p => p.status === "waiting");
+      const inProgress = patients.find(p => p.status === "in-progress");
+      const visited = patients.filter(p => p.status === "visited");
+      const skipped = patients.filter(p => p.status === "skipped");
+      const currentPatient = patients.find(p => p.id === selectedId);
+
+      document.getElementById("todaySection").innerHTML = `
+        <div class="topbar">
+          <div>
+            <h1>Today's Queue</h1>
+            <p class="subtitle">Friday, June 12, 2026 · Morning shift · 9:00 AM – 1:00 PM</p>
+          </div>
+        </div>
+
+        <div class="hero">
+          <div>
+            <h2>${patients.length} appointments today</h2>
+            <p>${visited.length} completed · ${waiting.length} remaining · ${inProgress ? "1 in progress" : "none in progress"}</p>
+            <div class="tag-row">
+              <span class="tag">Morning 9AM–1PM</span>
+              <span class="tag">Evening 5PM–9PM</span>
+              <span class="tag">Orthopaedic</span>
+            </div>
+          </div>
+          <div class="stat-grid">
+            <div class="hero-stat"><strong>${waiting.length}</strong><span>Waiting</span></div>
+            <div class="hero-stat"><strong>${inProgress ? 1 : 0}</strong><span>In Progress</span></div>
+            <div class="hero-stat"><strong>${visited.length}</strong><span>Visited</span></div>
+            <div class="hero-stat"><strong>${patients.length}</strong><span>Total</span></div>
+          </div>
+        </div>
+
+        <div class="split ${inProgress ? "has-panel" : ""}">
+          <div>
+            ${inProgress ? renderGroup("In Progress", "⚕", "#1d4ed8", [inProgress]) : ""}
+            ${renderGroup("Waiting", "◷", "#d97706", waiting)}
+            ${renderGroup("Visited", "✓", "#059669", visited)}
+            ${renderGroup("Skipped", "⚠", "#94a3b8", skipped)}
+            ${patients.length === 0 ? `<div class="card" style="text-align:center;color:#94a3b8;padding:48px 24px;">No appointments scheduled for today.</div>` : ""}
+          </div>
+          ${inProgress && currentPatient?.status === "in-progress" ? renderConsultationPanel(currentPatient) : ""}
+        </div>`;
+
+    }
+
+    function selectPatient(id) {
+      selectedId = id;
+      renderToday();
+    }
+
+    function startConsultation(id) {
+      patients = patients.map(p => {
+        if (p.id === id) return { ...p, status: "in-progress" };
+        if (p.status === "in-progress") return { ...p, status: "waiting" };
+        return p;
+      });
+      selectedId = id;
+      savePatients();
+      renderToday();
+      showToast("Consultation started.");
+    }
+
+    function showHistory(patientId, historyIndex) {
+      const patient = patients.find(p => p.id === patientId);
+      const history = patient?.history?.[historyIndex];
+      if (!patient || !history) return;
+      document.getElementById("historyModalTitle").textContent = `${patient.name} - Previous Visit`;
+      document.getElementById("historyModalSubtitle").textContent = history.date;
+      document.getElementById("historyModalBody").innerHTML = `
+        <div class="history-detail-grid">
+          <div class="history-detail-card">
+            <span>Reason</span>
+            <p>${escapeHtml(history.reason)}</p>
+          </div>
+          <div class="history-detail-card">
+            <span>Diagnosis</span>
+            <p>${escapeHtml(history.diagnosis)}</p>
+          </div>
+          <div class="history-detail-card">
+            <span>Doctor</span>
+            <strong>${escapeHtml(history.doctor)}</strong>
+          </div>
+        </div>`;
+      document.getElementById("historyModal").classList.remove("hidden");
+    }
+
+    function hideHistory() {
+      document.getElementById("historyModal").classList.add("hidden");
+    }
+
+    function skipPatient(id) {
+      patients = patients.map(p => p.id === id ? { ...p, status: "skipped" } : p);
+      if (selectedId === id) selectedId = null;
+      savePatients();
+      renderToday();
+      showToast("Patient skipped.");
+    }
+
+    function readConsultFields() {
+      return {
+        visitNote: document.getElementById("noteField")?.value || "",
+        diagnosis: document.getElementById("diagnosisField")?.value || "",
+        advice: document.getElementById("adviceField")?.value || ""
+      };
+    }
+
+    function saveDraft(id) {
+      const fields = readConsultFields();
+      patients = patients.map(p => p.id === id ? { ...p, ...fields } : p);
+      savePatients();
+      renderToday();
+      showToast("Draft saved.");
+    }
+
+    function markVisited(id) {
+      const fields = readConsultFields();
+      patients = patients.map(p => p.id === id ? { ...p, ...fields, status: "visited" } : p);
+      selectedId = null;
+      savePatients();
+      renderToday();
+      showToast("Marked as visited.");
+    }
+
+    function dataForGroup() {
+      if (groupBy === "weekly") return WEEKLY_DATA;
+      if (groupBy === "monthly") return MONTHLY_DATA;
+      return DAILY_DATA;
+    }
+
+    function renderTrendChart(data) {
+      const max = Math.max(...data.map(d => d.patients), 1);
+      if (chartType === "bar") {
+        return `
+          <div class="bar-chart">
+            ${data.map(d => {
+              const totalHeight = Math.max(8, (d.patients / max) * 205);
+              const newHeight = totalHeight * (d.newPatients / d.patients || 0);
+              const followHeight = totalHeight - newHeight;
+              return `<div class="bar-group" title="${d.label}: ${d.patients} patients">
+                <div class="bar-stack" style="height:${totalHeight}px">
+                  <div class="bar-follow" style="height:${followHeight}px"></div>
+                  <div class="bar-new" style="height:${newHeight}px"></div>
+                </div>
+                <div class="bar-label">${escapeHtml(d.label)}</div>
+              </div>`;
+            }).join("")}
+          </div>`;
+      }
+
+      const points = data.map((d, i) => {
+        const x = data.length === 1 ? 40 : 40 + i * (520 / (data.length - 1));
+        const y = 220 - (d.patients / max) * 180;
+        return [x, y, d];
+      });
+      const line = points.map(p => p[0] + "," + p[1]).join(" ");
+      const area = chartType === "area" ? `
+        <polygon class="area-fill" points="40,220 ${line} 560,220"></polygon>` : "";
+      return `
+        <div class="line-chart">
+          <svg viewBox="0 0 600 260" role="img" aria-label="Patient trend chart">
+            <line class="grid-line" x1="40" y1="40" x2="560" y2="40"></line>
+            <line class="grid-line" x1="40" y1="100" x2="560" y2="100"></line>
+            <line class="grid-line" x1="40" y1="160" x2="560" y2="160"></line>
+            <line class="grid-line" x1="40" y1="220" x2="560" y2="220"></line>
+            ${area}
+            <polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+            ${points.map(([x, y, d]) => `<circle cx="${x}" cy="${y}" r="5" fill="#0f766e"><title>${escapeHtml(d.label)}: ${d.patients} patients</title></circle>`).join("")}
+            ${points.map(([x, , d]) => `<text x="${x}" y="245" text-anchor="middle" fill="#94a3b8" font-size="12">${escapeHtml(d.label)}</text>`).join("")}
+          </svg>
+        </div>`;
+    }
+
+    function legendRows(items, maxRows = items.length) {
+      return items.slice(0, maxRows).map(([name, value, color]) => `
+        <div class="legend-row">
+          <span class="legend-item"><span class="legend-dot" style="background:${color}"></span>${escapeHtml(name)}</span>
+          <strong>${value}</strong>
+        </div>`).join("");
+    }
+
+    function renderAnalytics() {
+      const data = dataForGroup();
+      const totalThisMonth = MONTHLY_DATA.at(-1).patients;
+      const totalNew = MONTHLY_DATA.at(-1).newPatients;
+      const avgPerDay = Math.round(totalThisMonth / 18);
+      const maxAge = Math.max(...AGE_GROUPS.map(([, count]) => count));
+
+      document.getElementById("analyticsSection").innerHTML = `
+        <div class="topbar">
+          <div>
+            <h1>Patient Analytics</h1>
+            <p class="subtitle">Visualise patient visits, conditions, and trends for Dr. M. Kumar</p>
+          </div>
+        </div>
+
+        <div class="analytics-stats">
+          ${statCard("Total This Month", totalThisMonth, "+12% vs last month", "👥")}
+          ${statCard("New Patients", totalNew, "of this month's total", "📅")}
+          ${statCard("Avg Per Day", avgPerDay, "across working days", "↗")}
+          ${statCard("Follow-ups", totalThisMonth - totalNew, "returning patients", "▣")}
+        </div>
+
+        <div class="card">
+          <div class="card-title-row">
+            <div>
+              <div class="card-title">Patient Visit Trends</div>
+              <div class="card-sub">Total, new, and follow-up patients over time</div>
+            </div>
+            <div class="filter-row">
+              <div class="filter-box">
+                ${["daily", "weekly", "monthly"].map(g => `<button class="filter-btn ${groupBy === g ? "active" : ""}" onclick="setGroupBy('${g}')">${g[0].toUpperCase() + g.slice(1)}</button>`).join("")}
+              </div>
+              <div class="filter-box">
+                ${["area", "bar", "line"].map(c => `<button class="filter-btn ${chartType === c ? "active" : ""}" onclick="setChartType('${c}')">${c[0].toUpperCase() + c.slice(1)}</button>`).join("")}
+              </div>
+            </div>
+          </div>
+          <div class="chart-wrap">${renderTrendChart(data)}</div>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#0f766e"></span>Total</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#2563eb"></span>New</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#d97706"></span>Follow-up</span>
+          </div>
+        </div>
+
+        <div class="bottom-grid">
+          <div class="card">
+            <div class="mini-title">◉ Top Conditions</div>
+            <div class="donut-layout">
+              <div class="donut"></div>
+              <div class="legend-list">${legendRows(CONDITIONS, 5)}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="mini-title">▥ Visit Type</div>
+            <div class="donut-layout">
+              <div class="donut visit"></div>
+              <div class="legend-list">${legendRows(VISIT_TYPES)}</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="mini-title">👥 Age Distribution</div>
+            <div class="age-bars">
+              ${AGE_GROUPS.map(([label, count]) => `
+                <div class="age-bar" title="${label}: ${count}">
+                  <div class="age-fill" style="height:${Math.max(8, count / maxAge * 180)}px"></div>
+                  <div class="age-label">${label}</div>
+                </div>`).join("")}
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:18px;">
+          <div class="mini-title">Monthly Summary</div>
+          <table>
+            <thead><tr><th>Month</th><th>Total Patients</th><th>New Patients</th><th>Follow-ups</th><th>Avg / Day</th></tr></thead>
+            <tbody>
+              ${MONTHLY_DATA.map(row => {
+                const workDays = row.label === "Jun" ? 10 : 22;
+                return `<tr>
+                  <td><strong>${row.label} 2026</strong></td>
+                  <td>${row.patients}</td>
+                  <td><span class="chip in-progress">${row.newPatients}</span></td>
+                  <td><span class="chip visited">${row.followUp}</span></td>
+                  <td style="color:var(--muted)">${Math.round(row.patients / workDays)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    function statCard(label, value, sub, icon) {
+      return `
+        <div class="card stat-card">
+          <div class="stat-card-top">
+            <div>
+              <div class="stat-label">${label}</div>
+              <div class="stat-value">${value}</div>
+              <div class="stat-sub">${sub}</div>
+            </div>
+            <div class="stat-icon">${icon}</div>
+          </div>
+        </div>`;
+    }
+
+    function setGroupBy(value) {
+      groupBy = value;
+      renderAnalytics();
+    }
+
+    function setChartType(value) {
+      chartType = value;
+      renderAnalytics();
+    }
+
+    document.querySelectorAll(".nav-btn[data-section]").forEach(btn => {
+      btn.addEventListener("click", () => setSection(btn.dataset.section));
+    });
+
+    document.getElementById("closeHistoryModal").addEventListener("click", hideHistory);
+    document.getElementById("historyModal").addEventListener("click", event => {
+      if (event.target.id === "historyModal") hideHistory();
+    });
+
+    window.selectPatient = selectPatient;
+    window.startConsultation = startConsultation;
+    window.skipPatient = skipPatient;
+    window.saveDraft = saveDraft;
+    window.markVisited = markVisited;
+    window.showHistory = showHistory;
+    window.setGroupBy = setGroupBy;
+    window.setChartType = setChartType;
+
+    renderToday();
+    renderAnalytics();
+  </script>
+</body>
+</html>

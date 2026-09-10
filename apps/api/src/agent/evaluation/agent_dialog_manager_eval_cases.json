@@ -1,0 +1,273 @@
+[
+  {
+    "name": "side question timing during booking",
+    "category": "side_question_structured_db",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_PROBLEM_OR_DOCTOR",
+      "lastAssistantTemplateKey": "booking.ask_problem_or_doctor",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_PROBLEM_OR_DOCTOR",
+        "promptKey": "booking.ask_problem_or_doctor",
+        "expectedFields": ["reason_for_visit", "doctor_name"]
+      }
+    },
+    "messageVariants": [
+      "clinic timing enna?",
+      "what is clinic timing?",
+      "today open ah?",
+      "sunday working ah?",
+      "hospital open time enna?",
+      "inniku open-a?",
+      "clinic timings sollunga"
+    ],
+    "expected": {
+      "turnType": "answer_question_and_resume",
+      "capability": "ask_timing",
+      "handler": "TimingHandler",
+      "shouldResumeActiveTask": true
+    }
+  },
+  {
+    "name": "vague information during booking",
+    "category": "vague_information_request",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_PROBLEM_OR_DOCTOR",
+      "lastAssistantTemplateKey": "booking.ask_problem_or_doctor",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_PROBLEM_OR_DOCTOR",
+        "promptKey": "booking.ask_problem_or_doctor",
+        "expectedFields": ["reason_for_visit", "doctor_name"]
+      }
+    },
+    "messageVariants": [
+      "I need some details",
+      "Need some information",
+      "Enakku oru details venum",
+      "Konjam information venum",
+      "oru doubt irukku",
+      "I have a doubt"
+    ],
+    "expected": {
+      "turnType": "ask_clarification_and_keep_task",
+      "userMove": "vague_information_request",
+      "capability": "unknown"
+    }
+  },
+  {
+    "name": "thanks after final booking message",
+    "category": "thanks_or_closing",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "DONE",
+      "lastAssistantTemplateKey": "booking.created_pending",
+      "collected": { "awaiting_terminal_ack": "booking_complete" }
+    },
+    "messageVariants": ["thanks", "thank you", "nandri", "done", "super"],
+    "expected": {
+      "turnType": "complete_acknowledgement",
+      "capability": "thanks_acknowledgement"
+    }
+  },
+  {
+    "name": "okay after unknown clarify",
+    "category": "thanks_or_closing",
+    "context": {
+      "currentFlow": "none",
+      "currentState": "IDLE",
+      "lastAssistantTemplateKey": "unknown.clarify"
+    },
+    "messageVariants": ["okay", "ok", "seri", "sari"],
+    "expected": {
+      "turnType": "complete_acknowledgement",
+      "capability": "thanks_acknowledgement"
+    }
+  },
+  {
+    "name": "out of scope during booking",
+    "category": "out_of_scope_interruption",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_DATE",
+      "lastAssistantTemplateKey": "booking.ask_date",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_DATE",
+        "promptKey": "booking.ask_date",
+        "expectedFields": ["date", "timePreference"]
+      }
+    },
+    "messageVariants": ["cricket score enna?", "weather eppadi?", "movie ticket"],
+    "expected": {
+      "turnType": "out_of_scope_redirect",
+      "capability": "out_of_scope",
+      "shouldResumeActiveTask": true
+    }
+  },
+  {
+    "name": "medical advice during booking",
+    "category": "medical_advice_interruption",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_PROBLEM_OR_DOCTOR",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_PROBLEM_OR_DOCTOR",
+        "promptKey": "booking.ask_problem_or_doctor",
+        "expectedFields": ["reason_for_visit"]
+      }
+    },
+    "messageVariants": [
+      "Fever-ku enna tablet?",
+      "dosage evlo?",
+      "antibiotic eduthukalama?",
+      "painkiller sollunga"
+    ],
+    "expected": {
+      "turnType": "medical_advice_refusal",
+      "capability": "medical_advice_request"
+    }
+  },
+  {
+    "name": "emergency during booking",
+    "category": "emergency_interruption",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_PROBLEM_OR_DOCTOR",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_PROBLEM_OR_DOCTOR",
+        "promptKey": "booking.ask_problem_or_doctor",
+        "expectedFields": ["reason_for_visit"]
+      }
+    },
+    "messageVariants": [
+      "chest pain irukku",
+      "breathing difficulty",
+      "severe bleeding",
+      "child not breathing"
+    ],
+    "expected": {
+      "turnType": "emergency_response",
+      "capability": "emergency"
+    }
+  },
+  {
+    "name": "human request during booking",
+    "category": "human_request_interruption",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_DATE",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_DATE",
+        "promptKey": "booking.ask_date",
+        "expectedFields": ["date"]
+      }
+    },
+    "messageVariants": [
+      "receptionist kitta pesanum",
+      "staff call pannunga",
+      "human kitta pesanum"
+    ],
+    "expected": {
+      "turnType": "handoff_to_staff",
+      "capability": "ask_human_agent"
+    }
+  },
+  {
+    "name": "booking answer fever",
+    "category": "answer_to_previous_question",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_PROBLEM_OR_DOCTOR",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_PROBLEM_OR_DOCTOR",
+        "promptKey": "booking.ask_problem_or_doctor",
+        "expectedFields": ["reason_for_visit"]
+      }
+    },
+    "messageVariants": ["Fever", "knee pain", "headache"],
+    "expected": {
+      "turnType": "continue_current_task",
+      "capability": "book_appointment"
+    }
+  },
+  {
+    "name": "fee side question during booking",
+    "category": "side_question_structured_db",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_DATE",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_DATE",
+        "promptKey": "booking.ask_date",
+        "expectedFields": ["date"]
+      }
+    },
+    "messageVariants": ["Dr Priya fees evlo?", "fees evlo?", "consultation fee?"],
+    "expected": {
+      "turnType": "answer_question_and_resume",
+      "capability": "ask_fee",
+      "handler": "FeeHandler",
+      "shouldResumeActiveTask": true
+    }
+  },
+  {
+    "name": "parking knowledge side question",
+    "category": "side_question_approved_knowledge",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "ASK_TIME",
+      "activeTask": {
+        "flow": "booking",
+        "state": "ASK_TIME",
+        "promptKey": "booking.ask_time",
+        "expectedFields": ["timePreference"]
+      }
+    },
+    "messageVariants": ["Parking irukka?", "parking available ah?", "car parking irukka?"],
+    "expected": {
+      "turnType": "answer_question_and_resume",
+      "capability": "ask_previsit_instruction",
+      "shouldResumeActiveTask": true
+    }
+  },
+  {
+    "name": "standalone clinic timing",
+    "category": "standalone clinic question",
+    "context": {
+      "currentFlow": "none",
+      "currentState": "IDLE"
+    },
+    "messageVariants": ["clinic timing enna?", "today open ah?"],
+    "expected": {
+      "turnType": "answer_question",
+      "capability": "ask_timing"
+    }
+  },
+  {
+    "name": "booking rejection vendam",
+    "category": "rejection/cancel context",
+    "context": {
+      "currentFlow": "booking",
+      "currentState": "CONFIRM_DETAILS",
+      "activeTask": {
+        "flow": "booking",
+        "state": "CONFIRM_DETAILS",
+        "promptKey": "booking.confirm_details",
+        "expectedFields": ["confirmation"]
+      }
+    },
+    "messageVariants": ["vendam", "no", "venda"],
+    "expected": {
+      "turnType": "cancel_current_task",
+      "userMove": "rejection"
+    }
+  }
+]

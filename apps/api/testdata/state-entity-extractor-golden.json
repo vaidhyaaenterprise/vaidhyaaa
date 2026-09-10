@@ -1,0 +1,354 @@
+[
+  {
+    "id": "booking_date_001",
+    "category": "booking_ask_date",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "inaiku iruka",
+    "referenceDate": "2026-05-16",
+    "timezone": "Asia/Kolkata",
+    "expected": {
+      "recognizedAs": "date_answer",
+      "entities": { "date": "2026-05-16" }
+    }
+  },
+  {
+    "id": "booking_date_002",
+    "category": "booking_ask_date",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "inniku",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "date_answer",
+      "entities": { "date": "2026-05-16" }
+    }
+  },
+  {
+    "id": "booking_date_003",
+    "category": "booking_ask_date",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "naalaikku",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "date_answer",
+      "entities": { "date": "2026-05-17" }
+    }
+  },
+  {
+    "id": "booking_date_004",
+    "category": "booking_ask_date",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "May 16 2026",
+    "referenceDate": "2026-05-10",
+    "expected": {
+      "recognizedAs": "date_answer",
+      "entities": { "date": "2026-05-16" }
+    }
+  },
+  {
+    "id": "booking_time_001",
+    "category": "booking_ask_time",
+    "currentFlow": "booking",
+    "currentState": "ASK_TIME",
+    "messageText": "morning",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "time_answer",
+      "entities": { "timePreference": "morning" }
+    }
+  },
+  {
+    "id": "booking_time_002",
+    "category": "booking_ask_time",
+    "currentFlow": "booking",
+    "currentState": "ASK_TIME",
+    "messageText": "evening",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "time_answer",
+      "entities": { "timePreference": "evening" }
+    }
+  },
+  {
+    "id": "booking_time_003",
+    "category": "booking_ask_time",
+    "currentFlow": "booking",
+    "currentState": "ASK_TIME",
+    "messageText": "6:30",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "time_answer"
+    }
+  },
+  {
+    "id": "booking_slots_001",
+    "category": "booking_propose_slots",
+    "currentFlow": "booking",
+    "currentState": "PROPOSE_SLOTS",
+    "messageText": "first one",
+    "referenceDate": "2026-05-16",
+    "offeredSlots": [
+      {
+        "slotId": "slot_630",
+        "startTime": "2026-05-16 18:30:00",
+        "endTime": "2026-05-16 18:45:00",
+        "displayTime": "6:30 PM"
+      },
+      {
+        "slotId": "slot_715",
+        "startTime": "2026-05-16 19:15:00",
+        "endTime": "2026-05-16 19:30:00",
+        "displayTime": "7:15 PM"
+      }
+    ],
+    "expected": {
+      "recognizedAs": "slot_selection",
+      "entities": { "selectedSlotId": "slot_630" }
+    }
+  },
+  {
+    "id": "booking_slots_002",
+    "category": "booking_propose_slots",
+    "currentFlow": "booking",
+    "currentState": "PROPOSE_SLOTS",
+    "messageText": "6:30",
+    "referenceDate": "2026-05-16",
+    "offeredSlots": [
+      {
+        "slotId": "slot_630",
+        "startTime": "2026-05-16 18:30:00",
+        "endTime": "2026-05-16 18:45:00",
+        "displayTime": "6:30 PM"
+      },
+      {
+        "slotId": "slot_715",
+        "startTime": "2026-05-16 19:15:00",
+        "endTime": "2026-05-16 19:30:00",
+        "displayTime": "7:15 PM"
+      }
+    ],
+    "expected": {
+      "recognizedAs": "slot_selection",
+      "entities": { "selectedSlotId": "slot_630" }
+    }
+  },
+  {
+    "id": "booking_slots_003",
+    "category": "booking_propose_slots",
+    "currentFlow": "booking",
+    "currentState": "PROPOSE_SLOTS",
+    "messageText": "8 PM",
+    "referenceDate": "2026-05-16",
+    "offeredSlots": [
+      {
+        "slotId": "slot_630",
+        "startTime": "2026-05-16 18:30:00",
+        "endTime": "2026-05-16 18:45:00",
+        "displayTime": "6:30 PM"
+      }
+    ],
+    "expected": {
+      "recognizedAs": "unknown",
+      "needsClarification": true,
+      "entities": { "selectedSlotId": null }
+    }
+  },
+  {
+    "id": "booking_name_001",
+    "category": "booking_ask_patient_name",
+    "currentFlow": "booking",
+    "currentState": "ASK_PATIENT_NAME",
+    "messageText": "Kumar",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "patient_name"
+    }
+  },
+  {
+    "id": "booking_confirm_001",
+    "category": "booking_confirm_details",
+    "currentFlow": "booking",
+    "currentState": "CONFIRM_DETAILS",
+    "messageText": "Seri",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "yes_confirmation"
+    }
+  },
+  {
+    "id": "booking_confirm_002",
+    "category": "booking_confirm_details",
+    "currentFlow": "booking",
+    "currentState": "CONFIRM_DETAILS",
+    "messageText": "vendam",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "no_rejection"
+    }
+  },
+  {
+    "id": "cancel_confirm_001",
+    "category": "cancel_confirm_request",
+    "currentFlow": "cancel",
+    "currentState": "CONFIRM_CANCEL_REQUEST",
+    "messageText": "seri",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "yes_confirmation"
+    }
+  },
+  {
+    "id": "cancel_confirm_002",
+    "category": "cancel_confirm_request",
+    "currentFlow": "cancel",
+    "currentState": "CONFIRM_CANCEL_REQUEST",
+    "messageText": "venda",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "no_rejection"
+    }
+  },
+  {
+    "id": "reschedule_date_001",
+    "category": "reschedule_ask_new_date",
+    "currentFlow": "reschedule",
+    "currentState": "ASK_NEW_DATE",
+    "messageText": "naalaikku",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "date_answer",
+      "entities": { "date": "2026-05-17" }
+    }
+  },
+  {
+    "id": "reschedule_time_001",
+    "category": "reschedule_ask_new_time",
+    "currentFlow": "reschedule",
+    "currentState": "ASK_NEW_TIME",
+    "messageText": "evening",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "time_answer",
+      "entities": { "timePreference": "evening" }
+    }
+  },
+  {
+    "id": "handoff_reason_001",
+    "category": "handoff_collect_reason_name_phone",
+    "currentFlow": "handoff",
+    "currentState": "ASK_REASON_OPTIONAL",
+    "messageText": "Need billing help",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "unknown"
+    }
+  },
+  {
+    "id": "handoff_name_001",
+    "category": "handoff_collect_reason_name_phone",
+    "currentFlow": "handoff",
+    "currentState": "ASK_NAME_IF_NEEDED",
+    "messageText": "Kumar",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "patient_name"
+    }
+  },
+  {
+    "id": "handoff_phone_001",
+    "category": "handoff_collect_reason_name_phone",
+    "currentFlow": "handoff",
+    "currentState": "ASK_PHONE_IF_NEEDED",
+    "messageText": "9876543210",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "unknown"
+    }
+  },
+  {
+    "id": "side_fee_001",
+    "category": "side_questions_inside_booking",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "Dr Priya fees evlo?",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "side_question",
+      "entities": { "sideQuestionIntent": "ask_fee" }
+    }
+  },
+  {
+    "id": "side_parking_001",
+    "category": "side_questions_inside_booking",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "Parking irukka?",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "side_question",
+      "entities": { "sideQuestionIntent": "ask_previsit_instruction" }
+    }
+  },
+  {
+    "id": "side_timing_001",
+    "category": "side_questions_inside_booking",
+    "currentFlow": "booking",
+    "currentState": "ASK_TIME",
+    "messageText": "Sunday open-a?",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "side_question",
+      "entities": { "sideQuestionIntent": "ask_timing" }
+    }
+  },
+  {
+    "id": "emergency_override_001",
+    "category": "emergency_override_inside_flow",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "chest pain irukku",
+    "referenceDate": "2026-05-16",
+    "safetyPreempted": "emergency"
+  },
+  {
+    "id": "emergency_override_002",
+    "category": "emergency_override_inside_flow",
+    "currentFlow": "booking",
+    "currentState": "ASK_TIME",
+    "messageText": "accident aayiduchu",
+    "referenceDate": "2026-05-16",
+    "safetyPreempted": "emergency"
+  },
+  {
+    "id": "medical_advice_override_001",
+    "category": "medical_advice_override_inside_flow",
+    "currentFlow": "booking",
+    "currentState": "ASK_DATE",
+    "messageText": "fever-ku enna tablet?",
+    "referenceDate": "2026-05-16",
+    "safetyPreempted": "medical_advice"
+  },
+  {
+    "id": "medical_advice_override_002",
+    "category": "medical_advice_override_inside_flow",
+    "currentFlow": "booking",
+    "currentState": "PROPOSE_SLOTS",
+    "messageText": "Fever-ku enna medicine?",
+    "referenceDate": "2026-05-16",
+    "safetyPreempted": "medical_advice"
+  },
+  {
+    "id": "flow_cancel_001",
+    "category": "booking_ask_patient_name",
+    "currentFlow": "booking",
+    "currentState": "ASK_PATIENT_NAME",
+    "messageText": "vendam",
+    "referenceDate": "2026-05-16",
+    "expected": {
+      "recognizedAs": "flow_cancel"
+    }
+  }
+]
