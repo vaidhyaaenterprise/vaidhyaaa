@@ -26,11 +26,11 @@
     "@vaidya/config": "workspace:*",
     "@vaidya/shared": "workspace:*",
     "drizzle-orm": "^0.38.2",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "typescript": "^5.7.2"
   },
   "devDependencies": {
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
 }
