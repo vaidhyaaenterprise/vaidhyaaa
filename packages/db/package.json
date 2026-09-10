@@ -13,8 +13,8 @@
     }
   },
   "scripts": {
-    "build": "npx tsc -p tsconfig.json",
-    "typecheck": "npx tsc -p tsconfig.json --noEmit && npx tsc -p tsconfig.test.json --noEmit",
+    "build": "pnpm exec tsc -p tsconfig.json",
+    "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit && pnpm exec tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint src test --max-warnings 0",
     "test": "vitest run",
     "db:migrate": "tsx src/cli/migrate.ts",

@@ -43,8 +43,8 @@
     }
   },
   "scripts": {
-    "build": "npx tsc -p tsconfig.json",
-    "typecheck": "npx tsc -p tsconfig.json --noEmit",
+    "build": "pnpm exec tsc -p tsconfig.json",
+    "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run"
   },
