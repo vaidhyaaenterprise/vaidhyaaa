@@ -1,6 +1,6 @@
 {
   "framework": "nextjs",
-  "buildCommand": "pnpm --filter @vaidya/config build && pnpm --filter @vaidya/shared build && pnpm --filter @vaidya/db build && pnpm --filter @vaidya/web build",
+  "buildCommand": "pnpm --filter @vaidya/web build",
   "installCommand": "pnpm install --frozen-lockfile",
   "outputDirectory": "apps/web/.next"
 }

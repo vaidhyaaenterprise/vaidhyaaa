@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node ./scripts/run-next.mjs dev",
-    "build": "pnpm exec next build",
+    "build": "pnpm --filter @vaidya/config build && pnpm --filter @vaidya/shared build && pnpm --filter @vaidya/db build && pnpm exec next build",
     "start": "node ./scripts/run-next.mjs start",
     "typecheck": "pnpm exec tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --max-warnings 0",
