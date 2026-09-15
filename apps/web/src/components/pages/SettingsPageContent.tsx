@@ -19,7 +19,11 @@ import {
   fetchSupportedLanguages,
   replaceClinicLanguages,
 } from '@/lib/api/clinic-subscription';
-import { fetchClinicSettings, patchClinicSettings, type ClinicSettingsResponse } from '@/lib/api/clinic-settings';
+import {
+  fetchClinicSettings,
+  patchClinicSettings,
+  type ClinicSettingsResponse,
+} from '@/lib/api/clinic-settings';
 import type {
   AgentSettings as AgentSettingsType,
   Language,
@@ -156,14 +160,14 @@ export function SettingsPageContent() {
       return;
     }
     const next = { ...agentSettings, ...settings };
-    setAgentSettings(next);
-    await patchClinicSettings(clinicId, {
+    const saved = await patchClinicSettings(clinicId, {
       agent_enabled: next.agentEnabled,
       answering_mode: next.answeringMode,
       booking_mode: next.bookingMode,
       fallback_phone: next.fallbackPhone,
       overflow_after_rings: next.overflowAfterRings,
     });
+    setAgentSettings(mapSettingsToAgent(saved));
   };
 
   const handleUpdateNotificationSettings = async (settings: Partial<NotificationSettingsType>) => {
@@ -171,11 +175,11 @@ export function SettingsPageContent() {
       return;
     }
     const next = { ...notificationSettings, ...settings };
-    setNotificationSettings(next);
-    await patchClinicSettings(clinicId, {
+    const saved = await patchClinicSettings(clinicId, {
       notify_staff_on_pending_appointment: next.notifyStaffOnPendingAppointment,
       pending_appointment_notification_channel: next.pendingNotificationChannel,
     });
+    setNotificationSettings(mapSettingsToNotification(saved));
   };
 
   const handleTestNotification = () => {
@@ -187,14 +191,20 @@ export function SettingsPageContent() {
       return;
     }
     const next = { ...languageSettings, ...settings };
-    setLanguageSettings(next);
-    await replaceClinicLanguages(clinicId, {
+    const saved = await replaceClinicLanguages(clinicId, {
       default_language_code: next.defaultLanguage,
       languages: next.supportedLanguages.map((language) => ({
         language_code: language,
         enabled: next.clinicLanguages.includes(language),
         is_default: language === next.defaultLanguage,
       })),
+    });
+    setLanguageSettings({
+      ...next,
+      clinicLanguages: saved.languages
+        .filter((language) => language.enabled)
+        .map((language) => language.language_code as Language),
+      defaultLanguage: saved.default_language_code as Language,
     });
   };
 
@@ -208,18 +218,25 @@ export function SettingsPageContent() {
       trial_end: change.trialEnd ?? null,
       notes: change.notes ?? null,
     });
-    setSubscription((prev) => ({
-      ...prev,
-      planKey: change.planKey,
-      status: change.status,
-      ...(change.trialEnd !== undefined ? { trialEnd: change.trialEnd } : {}),
-      ...(change.notes !== undefined ? { notes: change.notes } : {}),
+    const saved = await fetchClinicSubscription(clinicId);
+    setSubscription((previous) => ({
+      planKey: saved.plan_key,
+      planName: saved.plan_name,
+      status: saved.status as SubscriptionPlan['status'],
+      includedVoiceMinutes: saved.included_voice_minutes,
+      usedVoiceMinutes: previous.usedVoiceMinutes,
+      maxConcurrentCalls: saved.max_concurrent_calls,
+      recordingRetentionDays: saved.recording_retention_days,
+      transcriptRetentionDays: saved.transcript_retention_days,
+      ...(saved.trial_end ? { trialEnd: saved.trial_end } : {}),
+      ...(saved.notes ? { notes: saved.notes } : {}),
     }));
-    await loadSettings();
   };
 
   if (loading) {
-    return <LoadingState title="Loading settings" description="Fetching clinic settings from the API." />;
+    return (
+      <LoadingState title="Loading settings" description="Fetching clinic settings from the API." />
+    );
   }
 
   if (error) {
@@ -260,14 +277,17 @@ export function SettingsPageContent() {
           </>
         )}
 
-        <LanguageSettings settings={languageSettings} onUpdateSettings={handleUpdateLanguageSettings} />
+        <LanguageSettings
+          settings={languageSettings}
+          onUpdateSettings={handleUpdateLanguageSettings}
+        />
 
         {isAdmin && <SubscriptionDisplay subscription={subscription} />}
 
         {isAdmin && (
           <PlatformSubscriptionManager
             subscription={subscription}
-            onPlanChange={(change) => void handlePlanChange(change)}
+            onPlanChange={handlePlanChange}
           />
         )}
       </div>

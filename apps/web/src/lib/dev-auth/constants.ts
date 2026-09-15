@@ -25,11 +25,9 @@ export type DevAuthProfile = {
 };
 
 export const DEV_AUTH_STORAGE_KEY = 'vaidya_dev_auth';
+export const AUTH_TOKEN_STORAGE_KEY = 'vaidya_access_token';
 
-export const DEV_AUTH_PRESETS: Record<
-  DevAuthRole,
-  { label: string; profile: DevAuthProfile }
-> = {
+export const DEV_AUTH_PRESETS: Record<DevAuthRole, { label: string; profile: DevAuthProfile }> = {
   platform_admin: {
     label: 'Platform admin',
     profile: {

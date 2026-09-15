@@ -7,7 +7,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { ForgotPasswordFlow } from '@/components/auth/ForgotPasswordFlow';
 import { RegisterClinicForm } from '@/components/auth/RegisterClinicForm';
 import { LoadingState } from '@/components/ui/StateViews';
-import { writeDevAuthProfile } from '@/lib/dev-auth/storage';
+import { writeAccessToken, writeDevAuthProfile } from '@/lib/dev-auth/storage';
 import { loginWithUsernamePassword } from '@/lib/api/auth';
 import { ApiRequestError } from '@/lib/api/client';
 
@@ -281,7 +281,10 @@ function VaidhyaaLogo({ className = '' }: IconProps) {
         d="M 122 148 C 150 140 178 136 198 152 C 202 156 199 163 192 164 C 164 182 138 182 122 168 C 118 162 118 154 122 148 Z"
         fill="url(#vh-leaf-base)"
       />
-      <path d="M 120 154 C 113 165 113 177 120 188 C 127 177 127 165 120 154 Z" fill="url(#vh-leaf-base)" />
+      <path
+        d="M 120 154 C 113 165 113 177 120 188 C 127 177 127 165 120 154 Z"
+        fill="url(#vh-leaf-base)"
+      />
 
       {/* Human figure with raised arms — bold V (chevron) */}
       <path
@@ -293,7 +296,15 @@ function VaidhyaaLogo({ className = '' }: IconProps) {
       <circle cx="120" cy="74" r="13" fill="url(#vh-emblem)" />
 
       {/* Rod of Asclepius — white staff over the green torso */}
-      <line x1="120" y1="104" x2="120" y2="152" stroke="#ffffff" strokeWidth="6.5" strokeLinecap="round" />
+      <line
+        x1="120"
+        y1="104"
+        x2="120"
+        y2="152"
+        stroke="#ffffff"
+        strokeWidth="6.5"
+        strokeLinecap="round"
+      />
       <path
         d="M 127 110 C 112 113 110 120 119 124 C 128 128 130 134 121 138 C 112 142 110 149 120 153 C 127 156 129 152 126 149"
         stroke="#ffffff"
@@ -336,55 +347,99 @@ function LeafBranch() {
     'M 146 88 C 138 132 118 178 88 220',
     'M 82 102 C 70 152 52 210 24 272',
   ];
-  const L = (x: number, y: number, r: number, s: number, c: string): LeafSpec => ({ x, y, r, s, c });
+  const L = (x: number, y: number, r: number, s: number, c: string): LeafSpec => ({
+    x,
+    y,
+    r,
+    s,
+    c,
+  });
   const leaves: LeafSpec[] = [
     // Larger leaves hugging the top edge, like the reference cluster
-    L(18, 6, 95, 1.6, GREENS[0]), L(44, 2, 68, 1.5, GREENS[1]),
-    L(102, -3, 58, 1.5, GREENS[4]), L(12, 36, 110, 1.45, GREENS[2]),
-    L(158, -5, 48, 1.4, GREENS[0]), L(212, 10, 40, 1.3, GREENS[1]),
+    L(18, 6, 95, 1.6, GREENS[0]),
+    L(44, 2, 68, 1.5, GREENS[1]),
+    L(102, -3, 58, 1.5, GREENS[4]),
+    L(12, 36, 110, 1.45, GREENS[2]),
+    L(158, -5, 48, 1.4, GREENS[0]),
+    L(212, 10, 40, 1.3, GREENS[1]),
     L(250, 4, 52, 1.25, GREENS[3]),
     // Dense corner cluster
-    L(52, 20, 80, 1.15, GREENS[0]), L(78, 10, 55, 1.35, GREENS[1]),
-    L(104, 22, 100, 1.1, GREENS[2]), L(66, 44, 120, 1.25, GREENS[3]),
-    L(96, 40, 70, 1.2, GREENS[0]), L(126, 6, 30, 1.05, GREENS[4]),
-    L(140, 26, 60, 1.2, GREENS[1]), L(118, 48, 95, 1.3, GREENS[2]),
-    L(152, 44, 45, 1.0, GREENS[0]), L(40, 60, 115, 1.15, GREENS[3]),
-    L(84, 62, 95, 1.05, GREENS[1]), L(170, 18, 35, 1.0, GREENS[4]),
-    L(188, 38, 60, 1.15, GREENS[2]), L(22, 92, 125, 1.2, GREENS[0]),
+    L(52, 20, 80, 1.15, GREENS[0]),
+    L(78, 10, 55, 1.35, GREENS[1]),
+    L(104, 22, 100, 1.1, GREENS[2]),
+    L(66, 44, 120, 1.25, GREENS[3]),
+    L(96, 40, 70, 1.2, GREENS[0]),
+    L(126, 6, 30, 1.05, GREENS[4]),
+    L(140, 26, 60, 1.2, GREENS[1]),
+    L(118, 48, 95, 1.3, GREENS[2]),
+    L(152, 44, 45, 1.0, GREENS[0]),
+    L(40, 60, 115, 1.15, GREENS[3]),
+    L(84, 62, 95, 1.05, GREENS[1]),
+    L(170, 18, 35, 1.0, GREENS[4]),
+    L(188, 38, 60, 1.15, GREENS[2]),
+    L(22, 92, 125, 1.2, GREENS[0]),
     // Main diagonal bough, alternating leaf pairs
-    L(320, 21, 30, 1.0, GREENS[1]), L(330, 30, 115, 0.95, GREENS[3]),
-    L(287, 36, 35, 1.05, GREENS[0]), L(297, 44, 112, 1.0, GREENS[2]),
-    L(254, 51, 42, 1.1, GREENS[4]), L(263, 60, 118, 1.05, GREENS[1]),
-    L(220, 66, 38, 1.0, GREENS[0]), L(230, 75, 110, 1.1, GREENS[3]),
-    L(187, 81, 45, 1.05, GREENS[1]), L(196, 90, 122, 0.95, GREENS[2]),
-    L(154, 96, 35, 1.0, GREENS[4]), L(163, 105, 116, 1.05, GREENS[0]),
-    L(120, 111, 40, 0.95, GREENS[2]), L(130, 120, 112, 1.0, GREENS[1]),
-    L(87, 126, 44, 1.0, GREENS[3]), L(96, 135, 120, 0.9, GREENS[0]),
-    L(54, 141, 48, 0.95, GREENS[1]), L(63, 150, 124, 0.9, GREENS[4]),
+    L(320, 21, 30, 1.0, GREENS[1]),
+    L(330, 30, 115, 0.95, GREENS[3]),
+    L(287, 36, 35, 1.05, GREENS[0]),
+    L(297, 44, 112, 1.0, GREENS[2]),
+    L(254, 51, 42, 1.1, GREENS[4]),
+    L(263, 60, 118, 1.05, GREENS[1]),
+    L(220, 66, 38, 1.0, GREENS[0]),
+    L(230, 75, 110, 1.1, GREENS[3]),
+    L(187, 81, 45, 1.05, GREENS[1]),
+    L(196, 90, 122, 0.95, GREENS[2]),
+    L(154, 96, 35, 1.0, GREENS[4]),
+    L(163, 105, 116, 1.05, GREENS[0]),
+    L(120, 111, 40, 0.95, GREENS[2]),
+    L(130, 120, 112, 1.0, GREENS[1]),
+    L(87, 126, 44, 1.0, GREENS[3]),
+    L(96, 135, 120, 0.9, GREENS[0]),
+    L(54, 141, 48, 0.95, GREENS[1]),
+    L(63, 150, 124, 0.9, GREENS[4]),
     // Drooping strand 1
-    L(272, 48, 75, 1.0, GREENS[0]), L(276, 58, 125, 0.95, GREENS[2]),
-    L(268, 72, 78, 1.05, GREENS[3]), L(272, 82, 120, 1.0, GREENS[1]),
-    L(262, 96, 82, 0.95, GREENS[4]), L(266, 106, 126, 0.9, GREENS[0]),
-    L(256, 120, 86, 0.9, GREENS[1]), L(258, 132, 130, 0.85, GREENS[3]),
+    L(272, 48, 75, 1.0, GREENS[0]),
+    L(276, 58, 125, 0.95, GREENS[2]),
+    L(268, 72, 78, 1.05, GREENS[3]),
+    L(272, 82, 120, 1.0, GREENS[1]),
+    L(262, 96, 82, 0.95, GREENS[4]),
+    L(266, 106, 126, 0.9, GREENS[0]),
+    L(256, 120, 86, 0.9, GREENS[1]),
+    L(258, 132, 130, 0.85, GREENS[3]),
     // Drooping strand 2
-    L(206, 66, 78, 1.0, GREENS[1]), L(210, 76, 124, 0.95, GREENS[3]),
-    L(201, 90, 82, 1.0, GREENS[4]), L(205, 100, 128, 0.95, GREENS[0]),
-    L(194, 114, 86, 0.95, GREENS[2]), L(197, 124, 124, 0.9, GREENS[1]),
-    L(184, 138, 90, 0.9, GREENS[0]), L(185, 150, 132, 0.85, GREENS[3]),
+    L(206, 66, 78, 1.0, GREENS[1]),
+    L(210, 76, 124, 0.95, GREENS[3]),
+    L(201, 90, 82, 1.0, GREENS[4]),
+    L(205, 100, 128, 0.95, GREENS[0]),
+    L(194, 114, 86, 0.95, GREENS[2]),
+    L(197, 124, 124, 0.9, GREENS[1]),
+    L(184, 138, 90, 0.9, GREENS[0]),
+    L(185, 150, 132, 0.85, GREENS[3]),
     L(172, 164, 95, 0.85, GREENS[1]),
     // Drooping strand 3
-    L(142, 96, 80, 0.95, GREENS[2]), L(146, 106, 126, 0.9, GREENS[0]),
-    L(136, 120, 84, 1.0, GREENS[4]), L(139, 130, 130, 0.95, GREENS[1]),
-    L(127, 144, 88, 0.95, GREENS[3]), L(128, 156, 134, 0.9, GREENS[0]),
-    L(114, 170, 94, 0.9, GREENS[1]), L(113, 182, 138, 0.85, GREENS[2]),
-    L(98, 196, 98, 0.85, GREENS[0]), L(96, 208, 142, 0.8, GREENS[4]),
+    L(142, 96, 80, 0.95, GREENS[2]),
+    L(146, 106, 126, 0.9, GREENS[0]),
+    L(136, 120, 84, 1.0, GREENS[4]),
+    L(139, 130, 130, 0.95, GREENS[1]),
+    L(127, 144, 88, 0.95, GREENS[3]),
+    L(128, 156, 134, 0.9, GREENS[0]),
+    L(114, 170, 94, 0.9, GREENS[1]),
+    L(113, 182, 138, 0.85, GREENS[2]),
+    L(98, 196, 98, 0.85, GREENS[0]),
+    L(96, 208, 142, 0.8, GREENS[4]),
     // Long leftmost drooping strand
-    L(78, 110, 84, 0.95, GREENS[1]), L(80, 120, 130, 0.9, GREENS[3]),
-    L(68, 136, 90, 0.95, GREENS[0]), L(68, 148, 136, 0.9, GREENS[2]),
-    L(57, 162, 96, 0.9, GREENS[4]), L(55, 174, 140, 0.85, GREENS[1]),
-    L(45, 188, 100, 0.85, GREENS[3]), L(42, 200, 144, 0.8, GREENS[0]),
-    L(34, 216, 104, 0.8, GREENS[1]), L(30, 230, 148, 0.75, GREENS[2]),
-    L(24, 246, 108, 0.75, GREENS[0]), L(20, 260, 152, 0.7, GREENS[4]),
+    L(78, 110, 84, 0.95, GREENS[1]),
+    L(80, 120, 130, 0.9, GREENS[3]),
+    L(68, 136, 90, 0.95, GREENS[0]),
+    L(68, 148, 136, 0.9, GREENS[2]),
+    L(57, 162, 96, 0.9, GREENS[4]),
+    L(55, 174, 140, 0.85, GREENS[1]),
+    L(45, 188, 100, 0.85, GREENS[3]),
+    L(42, 200, 144, 0.8, GREENS[0]),
+    L(34, 216, 104, 0.8, GREENS[1]),
+    L(30, 230, 148, 0.75, GREENS[2]),
+    L(24, 246, 108, 0.75, GREENS[0]),
+    L(20, 260, 152, 0.7, GREENS[4]),
   ];
   return (
     <svg
@@ -422,9 +477,29 @@ function WaveDecor() {
       preserveAspectRatio="none"
       aria-hidden
     >
-      <path d="M520 0 C420 140 380 260 330 380 S220 620 160 760 C120 850 90 900 60 900" stroke="#2f9e44" strokeWidth="18" fill="none" strokeLinecap="round" />
-      <path d="M600 120 C500 260 460 380 410 500 S300 740 240 880" stroke="#5db76d" strokeWidth="12" fill="none" strokeLinecap="round" opacity="0.6" />
-      <path d="M600 300 C520 420 480 520 430 640 S330 860 300 900" stroke="#2f9e44" strokeWidth="8" fill="none" strokeLinecap="round" opacity="0.4" />
+      <path
+        d="M520 0 C420 140 380 260 330 380 S220 620 160 760 C120 850 90 900 60 900"
+        stroke="#2f9e44"
+        strokeWidth="18"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <path
+        d="M600 120 C500 260 460 380 410 500 S300 740 240 880"
+        stroke="#5db76d"
+        strokeWidth="12"
+        fill="none"
+        strokeLinecap="round"
+        opacity="0.6"
+      />
+      <path
+        d="M600 300 C520 420 480 520 430 640 S330 860 300 900"
+        stroke="#2f9e44"
+        strokeWidth="8"
+        fill="none"
+        strokeLinecap="round"
+        opacity="0.4"
+      />
     </svg>
   );
 }
@@ -443,8 +518,16 @@ const FEATURES: Array<{ icon: (p: IconProps) => ReactNode; title: string }> = [
 
 const BENEFITS: Array<{ icon: (p: IconProps) => ReactNode; title: string; body: string }> = [
   { icon: ShieldCheckIcon, title: 'Secure & Compliant', body: 'Your data is safe with us.' },
-  { icon: HeadsetIcon, title: 'AI Voice Assistant', body: 'Automate calls and manage appointments effortlessly.' },
-  { icon: UsersIcon, title: 'Multi-User Access', body: 'Role-based access for staff, doctors and administrators.' },
+  {
+    icon: HeadsetIcon,
+    title: 'AI Voice Assistant',
+    body: 'Automate calls and manage appointments effortlessly.',
+  },
+  {
+    icon: UsersIcon,
+    title: 'Multi-User Access',
+    body: 'Role-based access for staff, doctors and administrators.',
+  },
   { icon: CloudIcon, title: 'Cloud Based', body: 'Access anytime, anywhere from any device.' },
 ];
 
@@ -483,6 +566,7 @@ export default function LoginPage() {
         message: 'This login has no active clinic membership.',
       });
     }
+    writeAccessToken(result.access_token);
     writeDevAuthProfile({
       userId: result.user.id,
       role: membership.role,
@@ -557,7 +641,13 @@ export default function LoginPage() {
                   fill="currentColor"
                   aria-hidden
                 >
-                  <path d="M12 20v-7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+                  <path
+                    d="M12 20v-7"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
                   <path d="M12 13c0-4.5-3-6.5-7-6 0 5 2.5 7.5 7 6.5Z" />
                   <path d="M12 13c0-4.5 3-6.5 7-6 0 5-2.5 7.5-7 6.5Z" />
                 </svg>
@@ -585,7 +675,8 @@ export default function LoginPage() {
 
             <p className="mt-6 max-w-[620px] text-[17px] font-semibold leading-relaxed text-[#1c2b45] lg:mt-7 lg:text-[18px] 2xl:mt-9 2xl:max-w-[720px] 2xl:text-[21px]">
               All-in-one solution to simplify hospital operations,
-              <br className="hidden sm:block" /> enhance patient care and empower healthcare providers.
+              <br className="hidden sm:block" /> enhance patient care and empower healthcare
+              providers.
             </p>
 
             {/* Six features */}
@@ -595,7 +686,10 @@ export default function LoginPage() {
                 return (
                   <Fragment key={feature.title}>
                     {index > 0 ? (
-                      <span className="mx-1 mt-3 h-14 w-px shrink-0 bg-[#cfd8e3] xl:mx-2 2xl:h-16" aria-hidden />
+                      <span
+                        className="mx-1 mt-3 h-14 w-px shrink-0 bg-[#cfd8e3] xl:mx-2 2xl:h-16"
+                        aria-hidden
+                      />
                     ) : null}
                     <div className="flex w-[104px] flex-col items-center xl:w-[118px] 2xl:w-[136px]">
                       <Icon className="h-9 w-9 text-[#0B7A2A] xl:h-10 xl:w-10 2xl:h-12 2xl:w-12" />
@@ -613,7 +707,8 @@ export default function LoginPage() {
               <LeafIcon className="h-8 w-8 shrink-0 text-[#0B7A2A] 2xl:h-10 2xl:w-10" />
               <p className="flex-1 text-center text-[14.5px] font-semibold leading-relaxed text-[#1c2b45] xl:text-[15.5px] 2xl:text-[17px]">
                 Empowering healthcare providers to deliver better care,
-                <br className="hidden xl:block" /> streamline operations and build healthier communities.
+                <br className="hidden xl:block" /> streamline operations and build healthier
+                communities.
               </p>
               <span className="hidden h-10 w-px shrink-0 bg-[#cfe8d3] lg:block" aria-hidden />
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#cfe8d3] bg-white text-[#0B7A2A] 2xl:h-12 2xl:w-12">
@@ -689,7 +784,10 @@ export default function LoginPage() {
                 />
               </div>
             ) : mode === 'forgot' ? (
-              <ForgotPasswordFlow onBack={() => setMode('signin')} onDone={() => setMode('signin')} />
+              <ForgotPasswordFlow
+                onBack={() => setMode('signin')}
+                onDone={() => setMode('signin')}
+              />
             ) : (
               <>
                 <h2
@@ -767,7 +865,11 @@ export default function LoginPage() {
                     className="absolute right-4 top-1/2 -translate-y-1/2 rounded-lg p-2 text-[#8b9bb4] transition-colors hover:text-[#0B7A2A]"
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? <EyeOffIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
+                    {showPassword ? (
+                      <EyeOffIcon className="h-5 w-5" />
+                    ) : (
+                      <EyeIcon className="h-5 w-5" />
+                    )}
                   </button>
                 </div>
 

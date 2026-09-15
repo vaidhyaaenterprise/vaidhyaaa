@@ -59,13 +59,16 @@ const [tempDoctors, setTempDoctors] = useState<Doctor[]>([]);
   const [deletedDoctorIds, setDeletedDoctorIds] = useState<string[]>([]);
   const [deletedServiceIds, setDeletedServiceIds] = useState<string[]>([]);
   const [deletedMappingIds, setDeletedMappingIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (showLoading = true) => {
     if (!isAdmin || !clinicId) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [doctorRows, serviceRows, mappingRows] = await Promise.all([
@@ -120,7 +123,9 @@ setDoctors(mappedDoctors);
           : 'Failed to load doctors and services.',
       );
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, [isAdmin, clinicId]);
 
@@ -144,6 +149,7 @@ const handleSave = async () => {
     }
 
     setError(null);
+    setSaving(true);
 
     try {
       // First, handle deletions
@@ -274,7 +280,7 @@ const handleSave = async () => {
       }
 
       setIsEditing(false);
-      await loadData();
+      await loadData(false);
     } catch (err) {
       setError(
         err instanceof ApiRequestError
@@ -283,6 +289,8 @@ const handleSave = async () => {
             ? err.message
             : 'Failed to save doctors and services.',
       );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -570,12 +578,14 @@ const removeDoctor = (id: string) => {
           <div className="flex gap-2">
             <button
               onClick={() => void handleSave()}
-              className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800"
+              disabled={saving}
+              className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Save
+              {saving ? 'Saving…' : 'Save'}
             </button>
             <button
               onClick={handleCancel}
+              disabled={saving}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
             >
               Cancel

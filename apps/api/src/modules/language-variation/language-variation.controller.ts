@@ -1,5 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { FastifyRequest } from 'fastify';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 
 import {
   addLanguagePackWordsSchema,
@@ -28,10 +27,7 @@ export class LanguageVariationController {
 
   @Patch('language-packs/:languageCode/words')
   @Roles('platform_admin')
-  async addLanguagePackWords(
-    @Param('languageCode') languageCode: string,
-    @Body() body: unknown,
-  ) {
+  async addLanguagePackWords(@Param('languageCode') languageCode: string, @Body() body: unknown) {
     const parsed = addLanguagePackWordsSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError('VALIDATION_ERROR', 'Invalid language pack words payload.');
@@ -53,7 +49,9 @@ export class LanguageVariationController {
       ...(parsed.data.yes_words !== undefined ? { yes_words: parsed.data.yes_words } : {}),
       ...(parsed.data.no_words !== undefined ? { no_words: parsed.data.no_words } : {}),
       ...(parsed.data.today_words !== undefined ? { today_words: parsed.data.today_words } : {}),
-      ...(parsed.data.tomorrow_words !== undefined ? { tomorrow_words: parsed.data.tomorrow_words } : {}),
+      ...(parsed.data.tomorrow_words !== undefined
+        ? { tomorrow_words: parsed.data.tomorrow_words }
+        : {}),
     });
     return { pack };
   }

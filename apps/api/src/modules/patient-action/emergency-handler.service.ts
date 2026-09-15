@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type ConversationSessionRow, type Repositories } from '@vaidya/db';
-import type { IntentClassifierResult, LanguageCode, MessageTemplateKey } from '@vaidya/shared';
+import type { IntentClassifierResult, LanguageCode } from '@vaidya/shared';
 import { isActiveReceptionistFlow } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';

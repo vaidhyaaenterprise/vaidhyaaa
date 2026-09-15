@@ -1,4 +1,5 @@
 import {
+  AUTH_TOKEN_STORAGE_KEY,
   DEV_AUTH_STORAGE_KEY,
   type DevAuthProfile,
   type DevAuthRole,
@@ -96,6 +97,37 @@ export function clearDevAuthProfile(): void {
 
   try {
     window.localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+  } catch {
+    // noop
+  }
+
+  try {
+    window.sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // noop
+  }
+}
+
+export function readAccessToken(): string | null {
+  if (!hasWindow()) {
+    return null;
+  }
+
+  try {
+    const token = window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY)?.trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeAccessToken(token: string): void {
+  if (!hasWindow() || !token.trim()) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
   } catch {
     // noop
   }

@@ -32,11 +32,10 @@ async function bootstrap(): Promise<void> {
     const url = request.raw.url ?? '';
     if (!url.includes('/api/tools')) return;
     logger.log(
-      `Incoming tool payload >> ${request.method} ${url} | headers=${JSON.stringify({
+      `Incoming tool request >> ${request.method} ${url} | metadata=${JSON.stringify({
         'content-type': request.headers['content-type'],
         'x-request-id': request.headers['x-request-id'],
-        'user-agent': request.headers['user-agent'],
-      })} | query=${JSON.stringify(request.query)} | body=${JSON.stringify(request.body)}`,
+      })}`,
       'SarvamPayload',
     );
   });

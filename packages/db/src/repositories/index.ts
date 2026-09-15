@@ -140,10 +140,7 @@ export class ClinicsRepository {
       .limit(1);
   }
 
-  updateClinicSettings(
-    clinicId: string,
-    values: Partial<typeof clinicSettings.$inferInsert>,
-  ) {
+  updateClinicSettings(clinicId: string, values: Partial<typeof clinicSettings.$inferInsert>) {
     return this.db
       .update(clinicSettings)
       .set(values)
@@ -205,10 +202,7 @@ export class ClinicalRepository {
       .select()
       .from(clinicKnowledgeBase)
       .where(
-        and(
-          eq(clinicKnowledgeBase.clinicId, clinicId),
-          eq(clinicKnowledgeBase.status, 'approved'),
-        ),
+        and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.status, 'approved')),
       );
 
     let best: (typeof rows)[number] | null = null;
@@ -250,10 +244,16 @@ export class ClinicalRepository {
         clinicServiceId: clinicServices.id,
       })
       .from(doctorServices)
-      .innerJoin(doctors, and(eq(doctors.clinicId, doctorServices.clinicId), eq(doctors.id, doctorServices.doctorId)))
+      .innerJoin(
+        doctors,
+        and(eq(doctors.clinicId, doctorServices.clinicId), eq(doctors.id, doctorServices.doctorId)),
+      )
       .innerJoin(
         clinicServices,
-        and(eq(clinicServices.clinicId, doctorServices.clinicId), eq(clinicServices.id, doctorServices.clinicServiceId)),
+        and(
+          eq(clinicServices.clinicId, doctorServices.clinicId),
+          eq(clinicServices.id, doctorServices.clinicServiceId),
+        ),
       )
       .where(
         and(
@@ -275,10 +275,16 @@ export class ClinicalRepository {
         clinicServiceId: clinicServices.id,
       })
       .from(doctorServices)
-      .innerJoin(doctors, and(eq(doctors.clinicId, doctorServices.clinicId), eq(doctors.id, doctorServices.doctorId)))
+      .innerJoin(
+        doctors,
+        and(eq(doctors.clinicId, doctorServices.clinicId), eq(doctors.id, doctorServices.doctorId)),
+      )
       .innerJoin(
         clinicServices,
-        and(eq(clinicServices.clinicId, doctorServices.clinicId), eq(clinicServices.id, doctorServices.clinicServiceId)),
+        and(
+          eq(clinicServices.clinicId, doctorServices.clinicId),
+          eq(clinicServices.id, doctorServices.clinicServiceId),
+        ),
       )
       .where(
         and(
@@ -296,9 +302,7 @@ export class ClinicalRepository {
       .select()
       .from(doctors)
       .where(and(eq(doctors.clinicId, clinicId), eq(doctors.active, true)))
-      .then((rows) =>
-        rows.filter((doctor) => doctor.name.toLowerCase().includes(normalized)),
-      );
+      .then((rows) => rows.filter((doctor) => doctor.name.toLowerCase().includes(normalized)));
   }
 
   isDoctorMappedToService(clinicId: string, doctorId: string, clinicServiceId: string) {
@@ -383,10 +387,7 @@ export class PlatformRepository {
   }
 
   listClinicLanguages(clinicId: string) {
-    return this.db
-      .select()
-      .from(clinicLanguages)
-      .where(eq(clinicLanguages.clinicId, clinicId));
+    return this.db.select().from(clinicLanguages).where(eq(clinicLanguages.clinicId, clinicId));
   }
 
   listSupportedLanguages() {
@@ -398,21 +399,23 @@ export class PlatformRepository {
     defaultLanguageCode: string,
     languages: Array<{ languageCode: string; enabled: boolean }>,
   ) {
-    await this.db.delete(clinicLanguages).where(eq(clinicLanguages.clinicId, clinicId));
-    if (languages.length === 0) {
-      return [];
-    }
-    return this.db
-      .insert(clinicLanguages)
-      .values(
-        languages.map((row) => ({
-          clinicId,
-          languageCode: row.languageCode,
-          enabled: row.enabled,
-          isDefault: row.languageCode === defaultLanguageCode,
-        })),
-      )
-      .returning();
+    return this.db.transaction(async (transaction) => {
+      await transaction.delete(clinicLanguages).where(eq(clinicLanguages.clinicId, clinicId));
+      if (languages.length === 0) {
+        return [];
+      }
+      return transaction
+        .insert(clinicLanguages)
+        .values(
+          languages.map((row) => ({
+            clinicId,
+            languageCode: row.languageCode,
+            enabled: row.enabled,
+            isDefault: row.languageCode === defaultLanguageCode,
+          })),
+        )
+        .returning();
+    });
   }
 
   findUsageForMonth(clinicId: string, billingMonth: string) {
@@ -443,10 +446,7 @@ export class PlatformRepository {
       .returning();
   }
 
-  updateClinic(
-    clinicId: string,
-    values: Partial<typeof clinics.$inferInsert>,
-  ) {
+  updateClinic(clinicId: string, values: Partial<typeof clinics.$inferInsert>) {
     return this.db.update(clinics).set(values).where(eq(clinics.id, clinicId)).returning();
   }
 }

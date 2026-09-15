@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   addDays,
   addMinutes,
+  appointmentSlots,
   combineDateAndTime,
   createRepositories,
   dayOfWeekMon1,
@@ -77,17 +78,33 @@ export class SlotGenerationService {
     const today = formatDateInTimezone(new Date(), timezone);
     const endDate = addDays(today, horizonDays, timezone);
 
-    const [batch] = await this.repos.slots.insertBatch({
-      clinicId,
-      triggerSource: 'daily_job',
-      ruleId: rule.id,
-      status: 'running',
-      summaryJson: {},
-    });
-
-    const schedules = await this.repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId);
-    const clinicHours = await this.repos.slots.listClinicHours(clinicId);
-    const holidays = await this.repos.slots.listClinicHolidays(clinicId, today, endDate, doctorId);
+    const rangeStart = `${today} 00:00:00`;
+    const rangeEnd = `${endDate} 23:59:59`;
+    const [[batch], schedules, clinicHours, holidays, blocked, existingSlots] = await Promise.all([
+      this.repos.slots.insertBatch({
+        clinicId,
+        triggerSource: 'daily_job',
+        ruleId: rule.id,
+        status: 'running',
+        summaryJson: {},
+      }),
+      this.repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId),
+      this.repos.slots.listClinicHours(clinicId),
+      this.repos.slots.listClinicHolidays(clinicId, today, endDate, doctorId),
+      this.repos.slots.listDoctorBlockedSlots(
+        clinicId,
+        doctorId,
+        combineDateAndTime(today, '00:00:00', timezone),
+        combineDateAndTime(endDate, '23:59:59', timezone),
+      ),
+      this.repos.slots.listExistingSlotWindows(
+        clinicId,
+        doctorId,
+        clinicServiceId,
+        rangeStart,
+        rangeEnd,
+      ),
+    ]);
     const holidayDates = new Set(
       holidays.filter((holiday) => holiday.isFullDay).map((holiday) => holiday.holidayDate),
     );
@@ -105,8 +122,11 @@ export class SlotGenerationService {
       holidayWindowsByDate.set(key, list);
     }
 
-    let inserted = 0;
     let skipped = 0;
+    const knownSlotWindows = new Set(
+      existingSlots.map((slot) => `${slot.startTime}|${slot.endTime}`),
+    );
+    const slotsToInsert: Array<typeof appointmentSlots.$inferInsert> = [];
 
     for (let offset = 0; offset <= horizonDays; offset += 1) {
       const dateStr = addDays(today, offset, timezone);
@@ -122,15 +142,6 @@ export class SlotGenerationService {
       }
 
       const dayHours = clinicHours.filter((hours) => hours.dayOfWeek === dayOfWeek);
-      const rangeStart = combineDateAndTime(dateStr, '00:00:00', timezone);
-      const rangeEnd = combineDateAndTime(dateStr, '23:59:59', timezone);
-      const blocked = await this.repos.slots.listDoctorBlockedSlots(
-        clinicId,
-        doctorId,
-        rangeStart,
-        rangeEnd,
-      );
-
       for (const schedule of daySchedules) {
         const windows = intersectWindows(
           [
@@ -165,16 +176,9 @@ export class SlotGenerationService {
             );
 
             if (!overlapsBlocked && !overlapsHoliday) {
-              const [existing] = await this.repos.slots.findSlotWindow(
-                clinicId,
-                doctorId,
-                clinicServiceId,
-                startLocal,
-                endLocal,
-              );
-
-              if (!existing) {
-                await this.repos.slots.insertSlot({
+              const windowKey = `${startLocal}|${endLocal}`;
+              if (!knownSlotWindows.has(windowKey)) {
+                slotsToInsert.push({
                   clinicId,
                   doctorId,
                   clinicServiceId,
@@ -186,7 +190,7 @@ export class SlotGenerationService {
                   generationBatchId: batch?.id,
                   configVersion: rule.version,
                 });
-                inserted += 1;
+                knownSlotWindows.add(windowKey);
               } else {
                 skipped += 1;
               }
@@ -199,6 +203,10 @@ export class SlotGenerationService {
         }
       }
     }
+
+    const insertedSlots = await this.repos.slots.insertSlots(slotsToInsert);
+    const inserted = insertedSlots.length;
+    skipped += slotsToInsert.length - inserted;
 
     const summary = {
       clinic_id: clinicId,

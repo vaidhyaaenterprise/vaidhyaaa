@@ -12,7 +12,12 @@ import { INITIAL_PATIENTS, type Patient, type PatientVisitHistory } from './doct
 import { useDoctorNav } from './DoctorLayout';
 
 function statusLabel(status: Patient['status']): string {
-  return { waiting: 'Waiting', 'in-progress': 'In Progress', visited: 'Visited', skipped: 'Skipped' }[status];
+  return {
+    waiting: 'Waiting',
+    'in-progress': 'In Progress',
+    visited: 'Visited',
+    skipped: 'Skipped',
+  }[status];
 }
 
 function statusChipClass(status: Patient['status']): string {
@@ -102,7 +107,9 @@ function formatQueueDateShort(value: string): string {
   });
 }
 
-const seedByName = new Map(INITIAL_PATIENTS.map((patient) => [patient.name.toLowerCase(), patient]));
+const seedByName = new Map(
+  INITIAL_PATIENTS.map((patient) => [patient.name.toLowerCase(), patient]),
+);
 const seedByPhone = new Map(
   INITIAL_PATIENTS.map((patient) => [normalizePhone(patient.phone), patient]),
 );
@@ -118,7 +125,9 @@ type QueuePatient = Patient & {
 };
 
 function seedForAppointment(row: AppointmentApiRow): Patient | undefined {
-  const byPhone = row.patient_phone ? seedByPhone.get(normalizePhone(row.patient_phone)) : undefined;
+  const byPhone = row.patient_phone
+    ? seedByPhone.get(normalizePhone(row.patient_phone))
+    : undefined;
   if (byPhone) {
     return byPhone;
   }
@@ -170,7 +179,10 @@ export function TodayQueue() {
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [markingVisitedId, setMarkingVisitedId] = useState<string | null>(null);
-  const [historyModal, setHistoryModal] = useState<{ patient: QueuePatient; entry: PatientVisitHistory } | null>(null);
+  const [historyModal, setHistoryModal] = useState<{
+    patient: QueuePatient;
+    entry: PatientVisitHistory;
+  } | null>(null);
   const [visitedDetailsModal, setVisitedDetailsModal] = useState<QueuePatient | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -201,7 +213,10 @@ export function TodayQueue() {
         const previousStatus = new Map(previous.map((patient) => [patient.id, patient.status]));
         return mapped.map((patient) => {
           const lastStatus = previousStatus.get(patient.id);
-          if (patient.status === 'waiting' && (lastStatus === 'in-progress' || lastStatus === 'skipped')) {
+          if (
+            patient.status === 'waiting' &&
+            (lastStatus === 'in-progress' || lastStatus === 'skipped')
+          ) {
             return { ...patient, status: lastStatus };
           }
           return patient;
@@ -243,103 +258,141 @@ export function TodayQueue() {
     toastTimer.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
-  const selectPatient = useCallback((id: string) => {
-    const patient = patients.find((row) => row.id === id);
-    if (!patient) {
-      return;
-    }
+  const selectPatient = useCallback(
+    (id: string) => {
+      const patient = patients.find((row) => row.id === id);
+      if (!patient) {
+        return;
+      }
 
-    if (patient.status === 'visited') {
-      setVisitedDetailsModal(patient);
-      setSelectedId(null);
-      return;
-    }
+      if (patient.status === 'visited') {
+        setVisitedDetailsModal(patient);
+        setSelectedId(null);
+        return;
+      }
 
-    setSelectedId(id);
-  }, [patients]);
+      setSelectedId(id);
+    },
+    [patients],
+  );
 
-  const startConsultation = useCallback((id: string) => {
-    setPatients(prev =>
-      prev.map(p => {
-        if (p.id === id) return { ...p, status: 'in-progress' as const };
-        if (p.status === 'in-progress') return { ...p, status: 'waiting' as const };
-        return p;
-      }),
-    );
-    setSelectedId(id);
-    showToast('Consultation started.');
-  }, [showToast]);
-
-  const skipPatient = useCallback((id: string) => {
-    setPatients(prev => prev.map(p => (p.id === id ? { ...p, status: 'skipped' as const } : p)));
-    if (selectedId === id) setSelectedId(null);
-    showToast('Patient skipped.');
-  }, [selectedId, showToast]);
-
-  const saveDraft = useCallback((id: string) => {
-    const noteEl = document.getElementById('noteField') as HTMLTextAreaElement | null;
-    const diagEl = document.getElementById('diagnosisField') as HTMLInputElement | null;
-    const adviceEl = document.getElementById('adviceField') as HTMLTextAreaElement | null;
-    setPatients(prev =>
-      prev.map(p =>
-        p.id === id
-          ? { ...p, visitNote: noteEl?.value ?? '', diagnosis: diagEl?.value ?? '', advice: adviceEl?.value ?? '' }
-          : p,
-      ),
-    );
-    showToast('Draft saved.');
-  }, [showToast]);
-
-  const markVisited = useCallback(async (id: string) => {
-    if (!clinicId) {
-      showToast('Clinic context missing. Please re-login.');
-      return;
-    }
-
-    const current = patients.find((patient) => patient.id === id);
-    if (!current) {
-      return;
-    }
-
-    const noteEl = document.getElementById('noteField') as HTMLTextAreaElement | null;
-    const diagEl = document.getElementById('diagnosisField') as HTMLInputElement | null;
-    const adviceEl = document.getElementById('adviceField') as HTMLTextAreaElement | null;
-
-    const visitReason =
-      noteEl?.value.trim() || diagEl?.value.trim() || adviceEl?.value.trim() || current.reason;
-
-    const examinationNotes = noteEl?.value.trim() || undefined;
-    const diagnosis = diagEl?.value.trim() || undefined;
-    const advice = adviceEl?.value.trim() || undefined;
-
-    setMarkingVisitedId(id);
-    try {
-      await markAppointmentVisited(clinicId, id, {
-        visit_reason: visitReason,
-        ...(examinationNotes ? { examination_notes: examinationNotes } : {}),
-        ...(diagnosis ? { diagnosis } : {}),
-        ...(advice ? { advice } : {}),
-      });
-      setSelectedId(null);
-      await loadQueue();
-      showToast('Marked as visited.');
-    } catch (error) {
-      showToast(
-        error instanceof ApiRequestError
-          ? error.apiError.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to mark as visited.',
+  const startConsultation = useCallback(
+    (id: string) => {
+      setPatients((prev) =>
+        prev.map((p) => {
+          if (p.id === id) return { ...p, status: 'in-progress' as const };
+          if (p.status === 'in-progress') return { ...p, status: 'waiting' as const };
+          return p;
+        }),
       );
-    } finally {
-      setMarkingVisitedId(null);
-    }
-  }, [clinicId, loadQueue, patients, showToast]);
+      setSelectedId(id);
+      showToast('Consultation started.');
+    },
+    [showToast],
+  );
 
-  const waiting = patients.filter(p => p.status === 'waiting');
-  const inProgress = patients.find(p => p.status === 'in-progress') ?? null;
-  const visited = patients.filter(p => p.status === 'visited');
-  const skipped = patients.filter(p => p.status === 'skipped');
+  const skipPatient = useCallback(
+    (id: string) => {
+      setPatients((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: 'skipped' as const } : p)),
+      );
+      if (selectedId === id) setSelectedId(null);
+      showToast('Patient skipped.');
+    },
+    [selectedId, showToast],
+  );
+
+  const saveDraft = useCallback(
+    (id: string) => {
+      const noteEl = document.getElementById('noteField') as HTMLTextAreaElement | null;
+      const diagEl = document.getElementById('diagnosisField') as HTMLInputElement | null;
+      const adviceEl = document.getElementById('adviceField') as HTMLTextAreaElement | null;
+      setPatients((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                visitNote: noteEl?.value ?? '',
+                diagnosis: diagEl?.value ?? '',
+                advice: adviceEl?.value ?? '',
+              }
+            : p,
+        ),
+      );
+      showToast('Draft saved.');
+    },
+    [showToast],
+  );
+
+  const markVisited = useCallback(
+    async (id: string) => {
+      if (!clinicId) {
+        showToast('Clinic context missing. Please re-login.');
+        return;
+      }
+
+      const current = patients.find((patient) => patient.id === id);
+      if (!current) {
+        return;
+      }
+
+      const noteEl = document.getElementById('noteField') as HTMLTextAreaElement | null;
+      const diagEl = document.getElementById('diagnosisField') as HTMLInputElement | null;
+      const adviceEl = document.getElementById('adviceField') as HTMLTextAreaElement | null;
+
+      const visitReason =
+        noteEl?.value.trim() || diagEl?.value.trim() || adviceEl?.value.trim() || current.reason;
+
+      const examinationNotes = noteEl?.value.trim() || undefined;
+      const diagnosis = diagEl?.value.trim() || undefined;
+      const advice = adviceEl?.value.trim() || undefined;
+
+      setMarkingVisitedId(id);
+      try {
+        await markAppointmentVisited(clinicId, id, {
+          visit_reason: visitReason,
+          ...(examinationNotes ? { examination_notes: examinationNotes } : {}),
+          ...(diagnosis ? { diagnosis } : {}),
+          ...(advice ? { advice } : {}),
+        });
+        setPatients((currentRows) =>
+          currentRows.map((patient) =>
+            patient.id === id
+              ? {
+                  ...patient,
+                  status: 'visited',
+                  visitReason,
+                  visitExaminationNotes: examinationNotes ?? null,
+                  visitDiagnosis: diagnosis ?? null,
+                  visitAdvice: advice ?? null,
+                  ...(examinationNotes ? { visitNote: examinationNotes } : {}),
+                  ...(diagnosis ? { diagnosis } : {}),
+                  ...(advice ? { advice } : {}),
+                }
+              : patient,
+          ),
+        );
+        setSelectedId(null);
+        showToast('Marked as visited.');
+      } catch (error) {
+        showToast(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : error instanceof Error
+              ? error.message
+              : 'Failed to mark as visited.',
+        );
+      } finally {
+        setMarkingVisitedId(null);
+      }
+    },
+    [clinicId, patients, showToast],
+  );
+
+  const waiting = patients.filter((p) => p.status === 'waiting');
+  const inProgress = patients.find((p) => p.status === 'in-progress') ?? null;
+  const visited = patients.filter((p) => p.status === 'visited');
+  const skipped = patients.filter((p) => p.status === 'skipped');
   const currentConsult = inProgress && selectedId === inProgress.id ? inProgress : null;
 
   return (
@@ -348,17 +401,22 @@ export function TodayQueue() {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[26px] font-black tracking-tight text-slate-900">
-            {isViewingToday ? "Today&apos;s Queue" : 'Appointment Queue'}
+            {isViewingToday ? 'Today&apos;s Queue' : 'Appointment Queue'}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             {selectedDateLabel} · Morning shift · 9:00 AM – 1:00 PM
           </p>
-          {loadingQueue && <p className="mt-2 text-xs font-semibold text-slate-500">Syncing queue from DB...</p>}
+          {loadingQueue && (
+            <p className="mt-2 text-xs font-semibold text-slate-500">Syncing queue from DB...</p>
+          )}
           {queueError && <p className="mt-2 text-xs font-semibold text-red-600">{queueError}</p>}
         </div>
 
         <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-sm">
-          <label htmlFor="doctor-queue-date" className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+          <label
+            htmlFor="doctor-queue-date"
+            className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500"
+          >
             Select Date
           </label>
           <div className="mt-1.5 flex items-center gap-2">
@@ -398,14 +456,19 @@ export function TodayQueue() {
         <div className="grid items-center gap-[18px] lg:grid-cols-[1.5fr_1fr]">
           <div>
             <h2 className="mb-1.5 text-xl font-black text-white">
-              {patients.length} appointments {isViewingToday ? 'today' : `on ${selectedDateLabelShort}`}
+              {patients.length} appointments{' '}
+              {isViewingToday ? 'today' : `on ${selectedDateLabelShort}`}
             </h2>
             <p className="text-[13px] leading-relaxed text-teal-100">
-              {visited.length} completed · {waiting.length} remaining · {inProgress ? '1 in progress' : 'none in progress'}
+              {visited.length} completed · {waiting.length} remaining ·{' '}
+              {inProgress ? '1 in progress' : 'none in progress'}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {['Morning 9AM–1PM', 'Evening 5PM–9PM', 'Orthopaedic'].map(tag => (
-                <span key={tag} className="rounded-full border border-white/[0.18] bg-white/[0.12] px-[10px] py-1.5 text-xs font-extrabold text-white">
+              {['Morning 9AM–1PM', 'Evening 5PM–9PM', 'Orthopaedic'].map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-white/[0.18] bg-white/[0.12] px-[10px] py-1.5 text-xs font-extrabold text-white"
+                >
                   {tag}
                 </span>
               ))}
@@ -417,10 +480,15 @@ export function TodayQueue() {
               { value: inProgress ? 1 : 0, label: 'In Progress' },
               { value: visited.length, label: 'Visited' },
               { value: patients.length, label: 'Total' },
-            ].map(stat => (
-              <div key={stat.label} className="rounded-[14px] border border-white/[0.12] bg-white/[0.08] px-3 py-[10px] text-center">
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-[14px] border border-white/[0.12] bg-white/[0.08] px-3 py-[10px] text-center"
+              >
                 <strong className="block text-2xl font-black text-white">{stat.value}</strong>
-                <span className="mt-0.5 block text-[11px] font-bold text-teal-200">{stat.label}</span>
+                <span className="mt-0.5 block text-[11px] font-bold text-teal-200">
+                  {stat.label}
+                </span>
               </div>
             ))}
           </div>
@@ -428,20 +496,58 @@ export function TodayQueue() {
       </div>
 
       {/* Split: Queue + Consultation Panel */}
-      <div className={`grid gap-[18px] ${currentConsult ? 'lg:grid-cols-[1fr_1.3fr]' : 'grid-cols-1'}`}>
+      <div
+        className={`grid gap-[18px] ${currentConsult ? 'lg:grid-cols-[1fr_1.3fr]' : 'grid-cols-1'}`}
+      >
         {/* Queue Column */}
         <div>
           {inProgress && (
-            <PatientGroup title="In Progress" icon="⚕" color="text-blue-700" patients={[inProgress]} selectedId={selectedId} onSelect={selectPatient} onStart={startConsultation} onSkip={skipPatient} />
+            <PatientGroup
+              title="In Progress"
+              icon="⚕"
+              color="text-blue-700"
+              patients={[inProgress]}
+              selectedId={selectedId}
+              onSelect={selectPatient}
+              onStart={startConsultation}
+              onSkip={skipPatient}
+            />
           )}
           {waiting.length > 0 && (
-            <PatientGroup title="Waiting" icon="◷" color="text-amber-600" patients={waiting} selectedId={selectedId} onSelect={selectPatient} onStart={startConsultation} onSkip={skipPatient} />
+            <PatientGroup
+              title="Waiting"
+              icon="◷"
+              color="text-amber-600"
+              patients={waiting}
+              selectedId={selectedId}
+              onSelect={selectPatient}
+              onStart={startConsultation}
+              onSkip={skipPatient}
+            />
           )}
           {visited.length > 0 && (
-            <PatientGroup title="Visited" icon="✓" color="text-green-600" patients={visited} selectedId={selectedId} onSelect={selectPatient} onStart={startConsultation} onSkip={skipPatient} />
+            <PatientGroup
+              title="Visited"
+              icon="✓"
+              color="text-green-600"
+              patients={visited}
+              selectedId={selectedId}
+              onSelect={selectPatient}
+              onStart={startConsultation}
+              onSkip={skipPatient}
+            />
           )}
           {skipped.length > 0 && (
-            <PatientGroup title="Skipped" icon="⚠" color="text-slate-500" patients={skipped} selectedId={selectedId} onSelect={selectPatient} onStart={startConsultation} onSkip={skipPatient} />
+            <PatientGroup
+              title="Skipped"
+              icon="⚠"
+              color="text-slate-500"
+              patients={skipped}
+              selectedId={selectedId}
+              onSelect={selectPatient}
+              onStart={startConsultation}
+              onSkip={skipPatient}
+            />
           )}
           {patients.length === 0 && (
             <div className="rounded-[22px] border border-slate-200 bg-white p-12 text-center text-slate-400">
@@ -468,29 +574,42 @@ export function TodayQueue() {
           className="fixed inset-0 z-10 grid place-items-center bg-slate-900/55 p-5"
           role="dialog"
           aria-modal="true"
-          onClick={(e) => { if (e.target === e.currentTarget) setHistoryModal(null); }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setHistoryModal(null);
+          }}
         >
           <div className="w-full max-w-[620px] rounded-[22px] bg-white p-[22px] shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">{historyModal.patient.name} – Previous Visit</h2>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  {historyModal.patient.name} – Previous Visit
+                </h2>
                 <p className="text-sm text-slate-500">{historyModal.entry.date}</p>
               </div>
-              <button onClick={() => setHistoryModal(null)} className="rounded-[11px] border border-slate-200 bg-slate-50 px-3 py-[7px] text-xs font-extrabold text-slate-600 hover:bg-slate-100">
+              <button
+                onClick={() => setHistoryModal(null)}
+                className="rounded-[11px] border border-slate-200 bg-slate-50 px-3 py-[7px] text-xs font-extrabold text-slate-600 hover:bg-slate-100"
+              >
                 Close
               </button>
             </div>
             <div className="grid gap-3">
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Reason</span>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Reason
+                </span>
                 <p className="text-sm text-slate-900">{historyModal.entry.reason}</p>
               </div>
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Diagnosis</span>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Diagnosis
+                </span>
                 <p className="text-sm text-slate-900">{historyModal.entry.diagnosis}</p>
               </div>
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Doctor</span>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Doctor
+                </span>
                 <p className="text-sm font-bold text-slate-900">{historyModal.entry.doctor}</p>
               </div>
             </div>
@@ -513,9 +632,14 @@ export function TodayQueue() {
           <div className="w-full max-w-[760px] rounded-[22px] bg-white p-[22px] shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">{visitedDetailsModal.name} – Visit Details</h2>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  {visitedDetailsModal.name} – Visit Details
+                </h2>
                 <p className="text-sm text-slate-500">
-                  {formatQueueDateShort(appointmentDatePart(visitedDetailsModal.appointmentStartRaw))} · {formatAppointmentTime(visitedDetailsModal.appointmentStartRaw)}
+                  {formatQueueDateShort(
+                    appointmentDatePart(visitedDetailsModal.appointmentStartRaw),
+                  )}{' '}
+                  · {formatAppointmentTime(visitedDetailsModal.appointmentStartRaw)}
                 </p>
               </div>
               <button
@@ -528,16 +652,22 @@ export function TodayQueue() {
 
             <div className="mb-4 grid gap-3 sm:grid-cols-2">
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Patient</span>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Patient
+                </span>
                 <p className="text-sm font-bold text-slate-900">
                   {visitedDetailsModal.name}
                   {visitedDetailsModal.age ? ` · ${visitedDetailsModal.age}y` : ''}
                   {` · ${visitedDetailsModal.gender}`}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-500">{visitedDetailsModal.phone || 'No phone recorded'}</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {visitedDetailsModal.phone || 'No phone recorded'}
+                </p>
               </div>
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Doctor / Service</span>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Doctor / Service
+                </span>
                 <p className="text-sm font-bold text-slate-900">{visitedDetailsModal.doctorName}</p>
                 <p className="mt-0.5 text-xs text-slate-500">{visitedDetailsModal.serviceName}</p>
               </div>
@@ -545,20 +675,36 @@ export function TodayQueue() {
 
             <div className="grid gap-3">
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Reason</span>
-                <p className="text-sm text-slate-900">{visitedDetailsModal.visitReason ?? visitedDetailsModal.reason}</p>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Reason
+                </span>
+                <p className="text-sm text-slate-900">
+                  {visitedDetailsModal.visitReason ?? visitedDetailsModal.reason}
+                </p>
               </div>
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Examination Notes</span>
-                <p className="text-sm text-slate-900">{formatClinicalField(visitedDetailsModal.visitExaminationNotes)}</p>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Examination Notes
+                </span>
+                <p className="text-sm text-slate-900">
+                  {formatClinicalField(visitedDetailsModal.visitExaminationNotes)}
+                </p>
               </div>
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Diagnosis</span>
-                <p className="text-sm text-slate-900">{formatClinicalField(visitedDetailsModal.visitDiagnosis)}</p>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Diagnosis
+                </span>
+                <p className="text-sm text-slate-900">
+                  {formatClinicalField(visitedDetailsModal.visitDiagnosis)}
+                </p>
               </div>
               <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-[14px] py-3">
-                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Advice</span>
-                <p className="text-sm text-slate-900">{formatClinicalField(visitedDetailsModal.visitAdvice)}</p>
+                <span className="mb-1 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                  Advice
+                </span>
+                <p className="text-sm text-slate-900">
+                  {formatClinicalField(visitedDetailsModal.visitAdvice)}
+                </p>
               </div>
             </div>
           </div>
@@ -588,15 +734,31 @@ type PatientGroupProps = {
   onSkip: (id: string) => void;
 };
 
-function PatientGroup({ title, icon, color, patients, selectedId, onSelect, onStart, onSkip }: PatientGroupProps) {
+function PatientGroup({
+  title,
+  icon,
+  color,
+  patients,
+  selectedId,
+  onSelect,
+  onStart,
+  onSkip,
+}: PatientGroupProps) {
   return (
     <div className="mb-[18px]">
       <div className="mb-[10px] flex items-center gap-2 text-sm font-extrabold text-slate-900">
         <span className={color}>{icon}</span> {title} ({patients.length})
       </div>
       <div className="flex flex-col gap-[10px]">
-        {patients.map(patient => (
-          <PatientCard key={patient.id} patient={patient} selected={selectedId === patient.id} onSelect={onSelect} onStart={onStart} onSkip={onSkip} />
+        {patients.map((patient) => (
+          <PatientCard
+            key={patient.id}
+            patient={patient}
+            selected={selectedId === patient.id}
+            onSelect={onSelect}
+            onStart={onStart}
+            onSkip={onSkip}
+          />
         ))}
       </div>
     </div>
@@ -625,7 +787,9 @@ function PatientCard({ patient, selected, onSelect, onStart, onSkip }: PatientCa
         <div className="min-w-0 flex-1">
           <div className="mb-[3px] flex items-center gap-[7px]">
             <span className="text-[15px] font-extrabold text-slate-900">{patient.name}</span>
-            <span className="text-xs text-slate-400">{patient.age}y · {patient.gender[0]}</span>
+            <span className="text-xs text-slate-400">
+              {patient.age}y · {patient.gender[0]}
+            </span>
           </div>
           <p className="mb-1.5 text-[13px] leading-snug text-slate-500">{patient.reason}</p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -633,7 +797,9 @@ function PatientCard({ patient, selected, onSelect, onStart, onSkip }: PatientCa
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <span className={`inline-block whitespace-nowrap rounded-full border px-[10px] py-1 text-[11px] font-extrabold ${statusChipClass(patient.status)}`}>
+          <span
+            className={`inline-block whitespace-nowrap rounded-full border px-[10px] py-1 text-[11px] font-extrabold ${statusChipClass(patient.status)}`}
+          >
             {statusLabel(patient.status)}
           </span>
           {patient.status === 'visited' && <span className="text-green-600">✓</span>}
@@ -642,7 +808,7 @@ function PatientCard({ patient, selected, onSelect, onStart, onSkip }: PatientCa
 
       {/* Actions for non-in-progress */}
       {patient.status !== 'in-progress' && patient.status !== 'visited' && (
-        <div className="mt-[10px] flex flex-wrap gap-2" onClick={e => e.stopPropagation()}>
+        <div className="mt-[10px] flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => onStart(patient.id)}
             className="rounded-[11px] border border-blue-200 bg-blue-50 px-[11px] py-[7px] text-xs font-extrabold text-blue-700 hover:bg-blue-100"
@@ -662,7 +828,9 @@ function PatientCard({ patient, selected, onSelect, onStart, onSkip }: PatientCa
 
       {/* In-progress note */}
       {patient.status === 'in-progress' && (
-        <p className="mt-2 text-xs font-bold text-teal-700">⚠ Consultation in progress — see panel</p>
+        <p className="mt-2 text-xs font-bold text-teal-700">
+          ⚠ Consultation in progress — see panel
+        </p>
       )}
 
       {/* Visited diagnosis */}
@@ -696,9 +864,13 @@ function ConsultationPanel({
       <div className="bg-gradient-to-br from-teal-700 to-slate-900 px-[22px] py-[18px] text-white">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-teal-200">Current Consultation</p>
+            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-teal-200">
+              Current Consultation
+            </p>
             <p className="text-xl font-black">{patient.name}</p>
-            <p className="mt-1 text-[13px] text-teal-100">{patient.age} yrs · {patient.gender} · {patient.phone}</p>
+            <p className="mt-1 text-[13px] text-teal-100">
+              {patient.age} yrs · {patient.gender} · {patient.phone}
+            </p>
           </div>
           <div className="text-right">
             <p className="text-[22px] font-black">{patient.time}</p>
@@ -744,7 +916,10 @@ function ConsultationPanel({
             <span className="text-teal-700">⚕</span> Examination Notes
           </div>
           <div className="mb-3">
-            <label htmlFor="noteField" className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+            <label
+              htmlFor="noteField"
+              className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500"
+            >
               Findings / Notes
             </label>
             <textarea
@@ -756,7 +931,10 @@ function ConsultationPanel({
             />
           </div>
           <div className="mb-3">
-            <label htmlFor="diagnosisField" className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+            <label
+              htmlFor="diagnosisField"
+              className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500"
+            >
               Diagnosis
             </label>
             <input
@@ -768,7 +946,10 @@ function ConsultationPanel({
             />
           </div>
           <div className="mb-3">
-            <label htmlFor="adviceField" className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+            <label
+              htmlFor="adviceField"
+              className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wide text-slate-500"
+            >
               Advice
             </label>
             <textarea

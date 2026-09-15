@@ -6,7 +6,7 @@ import type { AgentSettings, AnsweringMode, BookingMode } from './types';
 
 interface AgentSettingsProps {
   settings: AgentSettings;
-  onUpdateSettings: (settings: Partial<AgentSettings>) => void;
+  onUpdateSettings: (settings: Partial<AgentSettings>) => Promise<void>;
 }
 
 export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps) {
@@ -15,26 +15,37 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
 
   const [isEditing, setIsEditing] = useState(false);
   const [tempSettings, setTempSettings] = useState<AgentSettings>(settings);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const handleEdit = () => {
     setTempSettings(settings);
+    setSaveError(null);
     setIsEditing(true);
   };
 
   const handleCancel = () => {
     setIsEditing(false);
     setTempSettings(settings);
+    setSaveError(null);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!tempSettings.fallbackPhone) {
       alert('Fallback phone is required before enabling voice agent');
       return;
     }
 
-    onUpdateSettings(tempSettings);
-    setIsEditing(false);
-    // TODO: Call API to save settings
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onUpdateSettings(tempSettings);
+      setIsEditing(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save agent settings.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const getAnsweringModeLabel = (mode: AnsweringMode) => {
@@ -59,13 +70,17 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
         <div className="space-y-3">
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Status</span>
-            <span className={`text-sm font-bold ${settings.agentEnabled ? 'text-green-600' : 'text-slate-500'}`}>
+            <span
+              className={`text-sm font-bold ${settings.agentEnabled ? 'text-green-600' : 'text-slate-500'}`}
+            >
               {settings.agentEnabled ? 'Active' : 'Inactive'}
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Answering mode</span>
-            <span className="text-sm font-bold text-slate-900">{getAnsweringModeLabel(settings.answeringMode)}</span>
+            <span className="text-sm font-bold text-slate-900">
+              {getAnsweringModeLabel(settings.answeringMode)}
+            </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Booking mode</span>
@@ -102,13 +117,17 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
         <div className="space-y-3">
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Status</span>
-            <span className={`text-sm font-bold ${settings.agentEnabled ? 'text-green-600' : 'text-slate-500'}`}>
+            <span
+              className={`text-sm font-bold ${settings.agentEnabled ? 'text-green-600' : 'text-slate-500'}`}
+            >
               {settings.agentEnabled ? 'Active' : 'Inactive'}
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Answering mode</span>
-            <span className="text-sm font-bold text-slate-900">{getAnsweringModeLabel(settings.answeringMode)}</span>
+            <span className="text-sm font-bold text-slate-900">
+              {getAnsweringModeLabel(settings.answeringMode)}
+            </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Booking mode</span>
@@ -137,7 +156,9 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
               <input
                 type="checkbox"
                 checked={tempSettings.agentEnabled}
-                onChange={(e) => setTempSettings({ ...tempSettings, agentEnabled: e.target.checked })}
+                onChange={(e) =>
+                  setTempSettings({ ...tempSettings, agentEnabled: e.target.checked })
+                }
                 disabled={!tempSettings.onboardingComplete}
                 className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
               />
@@ -156,7 +177,9 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             </label>
             <select
               value={tempSettings.answeringMode}
-              onChange={(e) => setTempSettings({ ...tempSettings, answeringMode: e.target.value as AnsweringMode })}
+              onChange={(e) =>
+                setTempSettings({ ...tempSettings, answeringMode: e.target.value as AnsweringMode })
+              }
               className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
             >
               <option value="off">Off</option>
@@ -177,7 +200,9 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
                 min="1"
                 max="10"
                 value={tempSettings.overflowAfterRings}
-                onChange={(e) => setTempSettings({ ...tempSettings, overflowAfterRings: parseInt(e.target.value) })}
+                onChange={(e) =>
+                  setTempSettings({ ...tempSettings, overflowAfterRings: parseInt(e.target.value) })
+                }
                 className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
               />
             </div>
@@ -189,7 +214,9 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             </label>
             <select
               value={tempSettings.bookingMode}
-              onChange={(e) => setTempSettings({ ...tempSettings, bookingMode: e.target.value as BookingMode })}
+              onChange={(e) =>
+                setTempSettings({ ...tempSettings, bookingMode: e.target.value as BookingMode })
+              }
               className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
             >
               <option value="pending_confirmation">Pending confirmation</option>
@@ -210,20 +237,26 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
               required
             />
             {!tempSettings.fallbackPhone && (
-              <p className="mt-1 text-xs text-red-600">Fallback phone is required to enable voice agent</p>
+              <p className="mt-1 text-xs text-red-600">
+                Fallback phone is required to enable voice agent
+              </p>
             )}
           </div>
 
           <div className="flex gap-2">
+            {saveError && (
+              <p className="self-center text-xs font-semibold text-red-600">{saveError}</p>
+            )}
             <button
-              onClick={handleSave}
-              disabled={!tempSettings.fallbackPhone}
+              onClick={() => void handleSave()}
+              disabled={!tempSettings.fallbackPhone || saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save
+              {saving ? 'Saving…' : 'Save'}
             </button>
             <button
               onClick={handleCancel}
+              disabled={saving}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"
             >
               Cancel

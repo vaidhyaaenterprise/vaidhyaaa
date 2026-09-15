@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type ConversationSessionRow, type Repositories } from '@vaidya/db';
-import { BOOKING_FLOW, type IntentClassifierResult, type MessageTemplateKey } from '@vaidya/shared';
+import type { IntentClassifierResult, MessageTemplateKey } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';
 

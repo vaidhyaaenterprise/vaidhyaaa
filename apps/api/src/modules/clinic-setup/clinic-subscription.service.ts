@@ -1,7 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type Repositories } from '@vaidya/db';
-import { AppError, type PlatformSubscriptionChangeInput, type ReplaceClinicLanguagesInput } from '@vaidya/shared';
+import {
+  AppError,
+  type PlatformSubscriptionChangeInput,
+  type ReplaceClinicLanguagesInput,
+} from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 import type { DatabaseConnection } from '@vaidya/db';
@@ -15,8 +19,10 @@ export class ClinicSubscriptionService {
   }
 
   async getSubscription(clinicId: string) {
-    const [subscription] = await this.repos.platform.findClinicSubscription(clinicId);
-    const [settings] = await this.repos.clinics.findClinicSettings(clinicId);
+    const [[subscription], [settings]] = await Promise.all([
+      this.repos.platform.findClinicSubscription(clinicId),
+      this.repos.clinics.findClinicSettings(clinicId),
+    ]);
     if (!subscription) {
       throw new AppError('NOT_FOUND', 'Clinic subscription not found.');
     }
@@ -34,19 +40,28 @@ export class ClinicSubscriptionService {
       max_concurrent_calls: settings?.maxConcurrentCalls ?? 1,
       recording_retention_days: settings?.recordingRetentionDays ?? 10,
       transcript_retention_days: settings?.transcriptRetentionDays ?? 30,
-      trial_end: null,
-      notes: null,
+      trial_end: typeof snapshot.trial_end === 'string' ? snapshot.trial_end : null,
+      notes: typeof snapshot.notes === 'string' ? snapshot.notes : null,
     };
   }
 
   async getCurrentMonthUsage(clinicId: string) {
     const month = new Date().toISOString().slice(0, 7);
-    const [usage] = await this.repos.platform.findUsageForMonth(clinicId, `${month}-01`);
-    const subscription = await this.getSubscription(clinicId);
+    const [[usage], [subscription]] = await Promise.all([
+      this.repos.platform.findUsageForMonth(clinicId, `${month}-01`),
+      this.repos.platform.findClinicSubscription(clinicId),
+    ]);
+    if (!subscription) {
+      throw new AppError('NOT_FOUND', 'Clinic subscription not found.');
+    }
+    const snapshot =
+      subscription.planSnapshotJson && typeof subscription.planSnapshotJson === 'object'
+        ? (subscription.planSnapshotJson as Record<string, unknown>)
+        : {};
     return {
       month,
       used_voice_minutes: usage?.voiceCallCount ?? 0,
-      included_voice_minutes: subscription.included_voice_minutes,
+      included_voice_minutes: Number(snapshot.included_voice_minutes ?? 0),
       voice_call_count: usage?.voiceCallCount ?? 0,
     };
   }
@@ -74,9 +89,15 @@ export class ClinicSubscriptionService {
   }
 
   async replaceClinicLanguages(clinicId: string, input: ReplaceClinicLanguagesInput) {
+    const supportedLanguages = await this.repos.platform.listSupportedLanguages();
+    const enabledLanguageCodes = new Set(
+      supportedLanguages
+        .filter((language) => language.enabledPlatformWide)
+        .map((language) => language.languageCode),
+    );
+
     for (const language of input.languages) {
-      const [supported] = await this.repos.clinical.findSupportedLanguage(language.language_code);
-      if (!supported?.enabledPlatformWide) {
+      if (!enabledLanguageCodes.has(language.language_code)) {
         throw new AppError('VALIDATION_ERROR', `Unsupported language: ${language.language_code}`);
       }
     }

@@ -26,11 +26,7 @@ type ClinicUser = {
 
 function mapUser(row: ClinicUserRow): ClinicUser {
   const role =
-    row.role === 'clinic_admin'
-      ? 'admin'
-      : row.role === 'doctor'
-        ? 'doctor'
-        : 'receptionist';
+    row.role === 'clinic_admin' ? 'admin' : row.role === 'doctor' ? 'doctor' : 'receptionist';
   return {
     id: row.id,
     name: row.user.name ?? 'User',
@@ -63,26 +59,37 @@ export function UserManagement() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadUsers = useCallback(async () => {
-    if (!isAdmin || !clinicId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchClinicUsers(clinicId);
-      setUsers(data.users.map(mapUser));
-      setClinicLoginNumber(data.clinic_login_number ?? null);
-    } catch (err) {
-      setError(
-        err instanceof ApiRequestError ? err.apiError.message : 'Failed to load clinic users.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [isAdmin, clinicId]);
+  const loadUsers = useCallback(
+    async (showLoading = true) => {
+      if (!isAdmin || !clinicId) {
+        setLoading(false);
+        return;
+      }
+      if (showLoading) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const data = await fetchClinicUsers(clinicId);
+        setUsers(data.users.map(mapUser));
+        setClinicLoginNumber(data.clinic_login_number ?? null);
+      } catch (err) {
+        if (showLoading) {
+          setError(
+            err instanceof ApiRequestError ? err.apiError.message : 'Failed to load clinic users.',
+          );
+        }
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [isAdmin, clinicId],
+  );
 
   useEffect(() => {
     void loadUsers();
@@ -102,21 +109,31 @@ export function UserManagement() {
       return;
     }
     const user = users.find((row) => row.id === id);
-    if (!user) {
+    if (!user || updatingUserId) {
       return;
     }
-    if (user.active) {
-      await disableClinicUser(clinicId, id);
-    } else {
-      await enableClinicUser(clinicId, id);
+    setUpdatingUserId(id);
+    setActionError(null);
+    try {
+      if (user.active) {
+        await disableClinicUser(clinicId, id);
+      } else {
+        await enableClinicUser(clinicId, id);
+      }
+      setUsers((current) =>
+        current.map((row) => (row.id === id ? { ...row, active: !user.active } : row)),
+      );
+      void loadUsers(false);
+    } catch (err) {
+      setActionError(
+        err instanceof ApiRequestError ? err.apiError.message : 'Failed to update clinic user.',
+      );
+    } finally {
+      setUpdatingUserId(null);
     }
-    await loadUsers();
   };
 
-  const unlinkedDoctors = useMemo(
-    () => doctors.filter((doctor) => !doctor.user_id),
-    [doctors],
-  );
+  const unlinkedDoctors = useMemo(() => doctors.filter((doctor) => !doctor.user_id), [doctors]);
 
   const previewUsername = useMemo(() => {
     const base =
@@ -158,14 +175,19 @@ export function UserManagement() {
         password: newPassword,
         ...(newRole === 'doctor' ? { doctor_id: newDoctorId } : {}),
       });
-      setCreatedUsername(result.user.username);
+      if (newRole === 'doctor') {
+        setDoctors((current) =>
+          current.map((doctor) =>
+            doctor.id === newDoctorId ? { ...doctor, user_id: result.user.id } : doctor,
+          ),
+        );
+      }
       resetCreateForm();
-      await loadUsers();
+      setCreatedUsername(result.user.username);
+      void loadUsers(false);
     } catch (err) {
       setCreateError(
-        err instanceof ApiRequestError
-          ? err.apiError.message
-          : 'Failed to create user login.',
+        err instanceof ApiRequestError ? err.apiError.message : 'Failed to create user login.',
       );
     } finally {
       setCreating(false);
@@ -205,12 +227,19 @@ export function UserManagement() {
         <h3 className="text-lg font-bold text-slate-900">User management</h3>
       </div>
 
+      {actionError ? (
+        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+          {actionError}
+        </p>
+      ) : null}
+
       <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-4">
         <p className="text-sm font-bold text-slate-900">Add user</p>
         <p className="mt-0.5 text-xs text-slate-500">
           Create a new login for a doctor or an admin. The username is auto-generated with the
-          clinic&apos;s unique number ({clinicLoginNumber ? `name.${clinicLoginNumber}` : 'e.g. name.1000'}) and
-          cannot be changed.
+          clinic&apos;s unique number (
+          {clinicLoginNumber ? `name.${clinicLoginNumber}` : 'e.g. name.1000'}) and cannot be
+          changed.
         </p>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -233,7 +262,10 @@ export function UserManagement() {
 
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700" htmlFor="new-user-name">
+            <label
+              className="mb-1 block text-xs font-semibold text-slate-700"
+              htmlFor="new-user-name"
+            >
               Name
             </label>
             <input
@@ -245,7 +277,10 @@ export function UserManagement() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-700" htmlFor="new-user-password">
+            <label
+              className="mb-1 block text-xs font-semibold text-slate-700"
+              htmlFor="new-user-password"
+            >
               Password
             </label>
             <input
@@ -261,7 +296,10 @@ export function UserManagement() {
 
         {newRole === 'doctor' ? (
           <div className="mt-3">
-            <label className="mb-1 block text-xs font-semibold text-slate-700" htmlFor="new-user-doctor">
+            <label
+              className="mb-1 block text-xs font-semibold text-slate-700"
+              htmlFor="new-user-doctor"
+            >
               Doctor
             </label>
             <select
@@ -329,13 +367,14 @@ export function UserManagement() {
             <button
               type="button"
               onClick={() => void toggleUserActive(user.id)}
+              disabled={updatingUserId !== null}
               className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
                 user.active
                   ? 'border border-red-300 bg-red-50 text-red-700'
                   : 'border border-green-300 bg-green-50 text-green-700'
               }`}
             >
-              {user.active ? 'Disable' : 'Enable'}
+              {updatingUserId === user.id ? 'Updating…' : user.active ? 'Disable' : 'Enable'}
             </button>
           </div>
         ))}

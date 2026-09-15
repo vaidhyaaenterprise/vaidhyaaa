@@ -17,7 +17,6 @@ import {
   doctorWorkingHours,
   doctors,
   generatedSlotBatches,
-  hospitals,
   slotGenerationLogs,
   slotHolds,
 } from '../schema';
@@ -57,8 +56,20 @@ export class SlotsRepository {
       })
       .from(doctorServiceBookingRules)
       .innerJoin(clinics, eq(clinics.id, doctorServiceBookingRules.clinicId))
-      .innerJoin(doctors, and(eq(doctors.clinicId, doctorServiceBookingRules.clinicId), eq(doctors.id, doctorServiceBookingRules.doctorId)))
-      .innerJoin(clinicServices, and(eq(clinicServices.clinicId, doctorServiceBookingRules.clinicId), eq(clinicServices.id, doctorServiceBookingRules.clinicServiceId)))
+      .innerJoin(
+        doctors,
+        and(
+          eq(doctors.clinicId, doctorServiceBookingRules.clinicId),
+          eq(doctors.id, doctorServiceBookingRules.doctorId),
+        ),
+      )
+      .innerJoin(
+        clinicServices,
+        and(
+          eq(clinicServices.clinicId, doctorServiceBookingRules.clinicId),
+          eq(clinicServices.id, doctorServiceBookingRules.clinicServiceId),
+        ),
+      )
       .innerJoin(
         doctorServices,
         and(
@@ -71,7 +82,11 @@ export class SlotsRepository {
   }
 
   findClinicTimezone(clinicId: string) {
-    return this.db.select({ timezone: clinics.timezone }).from(clinics).where(eq(clinics.id, clinicId)).limit(1);
+    return this.db
+      .select({ timezone: clinics.timezone })
+      .from(clinics)
+      .where(eq(clinics.id, clinicId))
+      .limit(1);
   }
 
   listDoctorSchedules(clinicId: string, doctorId: string, doctorServiceId: string) {
@@ -212,8 +227,41 @@ export class SlotsRepository {
       .limit(1);
   }
 
+  listExistingSlotWindows(
+    clinicId: string,
+    doctorId: string,
+    clinicServiceId: string,
+    from: string,
+    to: string,
+  ) {
+    return this.db
+      .select({
+        startTime: appointmentSlots.startTime,
+        endTime: appointmentSlots.endTime,
+      })
+      .from(appointmentSlots)
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          eq(appointmentSlots.doctorId, doctorId),
+          eq(appointmentSlots.clinicServiceId, clinicServiceId),
+          gte(appointmentSlots.startTime, from),
+          lte(appointmentSlots.endTime, to),
+          ne(appointmentSlots.status, 'superseded'),
+        ),
+      );
+  }
+
   insertSlot(values: typeof appointmentSlots.$inferInsert) {
     return this.db.insert(appointmentSlots).values(values).returning();
+  }
+
+  insertSlots(values: Array<typeof appointmentSlots.$inferInsert>) {
+    if (values.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.db.insert(appointmentSlots).values(values).onConflictDoNothing().returning();
   }
 
   insertBatch(values: typeof generatedSlotBatches.$inferInsert) {
@@ -292,9 +340,7 @@ export class SlotsRepository {
       ACTIVE_APPOINTMENT_STATUSES.map((status) => sql`${status}`),
       sql`, `,
     );
-    const holdFilter = options.excludeHoldId
-      ? sql` AND id <> ${options.excludeHoldId}`
-      : sql``;
+    const holdFilter = options.excludeHoldId ? sql` AND id <> ${options.excludeHoldId}` : sql``;
 
     const [row] = await db.execute<{
       active_appointments: number;
@@ -599,7 +645,12 @@ export class SlotsRepository {
     return this.db
       .select()
       .from(doctorServiceBookingRules)
-      .where(and(eq(doctorServiceBookingRules.clinicId, clinicId), eq(doctorServiceBookingRules.id, ruleId)))
+      .where(
+        and(
+          eq(doctorServiceBookingRules.clinicId, clinicId),
+          eq(doctorServiceBookingRules.id, ruleId),
+        ),
+      )
       .limit(1);
   }
 
@@ -611,7 +662,12 @@ export class SlotsRepository {
     return this.db
       .update(doctorServiceBookingRules)
       .set(values)
-      .where(and(eq(doctorServiceBookingRules.clinicId, clinicId), eq(doctorServiceBookingRules.id, ruleId)))
+      .where(
+        and(
+          eq(doctorServiceBookingRules.clinicId, clinicId),
+          eq(doctorServiceBookingRules.id, ruleId),
+        ),
+      )
       .returning();
   }
 
@@ -628,7 +684,9 @@ export class SlotsRepository {
     return db
       .update(appointmentRequests)
       .set({ status })
-      .where(and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)))
+      .where(
+        and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)),
+      )
       .returning();
   }
 
@@ -649,7 +707,9 @@ export class SlotsRepository {
         appointmentStart: values.appointmentStart,
         appointmentEnd: values.appointmentEnd,
       })
-      .where(and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)))
+      .where(
+        and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)),
+      )
       .returning();
   }
 
@@ -720,7 +780,10 @@ export class SlotsRepository {
 
   // --- Daily rolling slot management extensions ---
   listDoctorWorkingHours(doctorId: string) {
-    return this.db.select().from(doctorWorkingHours).where(eq(doctorWorkingHours.doctorId, doctorId));
+    return this.db
+      .select()
+      .from(doctorWorkingHours)
+      .where(eq(doctorWorkingHours.doctorId, doctorId));
   }
 
   listDoctorLeaves(doctorId: string, fromDate: string, toDate: string) {
@@ -766,7 +829,12 @@ export class SlotsRepository {
     return rows.length;
   }
 
-  async blockFutureSlotsForLeave(clinicId: string, doctorId: string, startDate: string, endDate: string): Promise<number> {
+  async blockFutureSlotsForLeave(
+    clinicId: string,
+    doctorId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<number> {
     const rows = await this.db
       .update(appointmentSlots)
       .set({ status: 'blocked', updatedAt: new Date() })
@@ -789,11 +857,19 @@ export class SlotsRepository {
   }
 
   updateSlotGenerationLog(id: string, values: Partial<typeof slotGenerationLogs.$inferInsert>) {
-    return this.db.update(slotGenerationLogs).set(values).where(eq(slotGenerationLogs.id, id)).returning();
+    return this.db
+      .update(slotGenerationLogs)
+      .set(values)
+      .where(eq(slotGenerationLogs.id, id))
+      .returning();
   }
 
   listSlotGenerationLogs(limit = 20) {
-    return this.db.select().from(slotGenerationLogs).orderBy(sql`${slotGenerationLogs.executionStartedAt} DESC`).limit(limit);
+    return this.db
+      .select()
+      .from(slotGenerationLogs)
+      .orderBy(sql`${slotGenerationLogs.executionStartedAt} DESC`)
+      .limit(limit);
   }
 }
 
@@ -827,7 +903,11 @@ function doctorHolidayScopeMatchesClause(
   )`;
 }
 
-function clinicHolidayOverlapsWindowClause(startTime: string | typeof appointmentSlots.startTime, endTime: string | typeof appointmentSlots.endTime, holidayAlias: 'h' | 'clinic_holidays') {
+function clinicHolidayOverlapsWindowClause(
+  startTime: string | typeof appointmentSlots.startTime,
+  endTime: string | typeof appointmentSlots.endTime,
+  holidayAlias: 'h' | 'clinic_holidays',
+) {
   if (holidayAlias === 'h') {
     return sql`(
       h.is_full_day = true

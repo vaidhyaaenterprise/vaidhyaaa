@@ -81,55 +81,68 @@ export function AppointmentsPageContent() {
     Array<{ doctorId: string; serviceId: string }>
   >([]);
 
-  const loadAppointments = useCallback(async () => {
-    if (!clinicId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const [rows, requests, settings, doctors, services, doctorServices] = await Promise.all([
-        fetchAppointments(clinicId),
-        isAdmin ? fetchAppointmentActionRequests(clinicId) : Promise.resolve([]),
-        fetchClinicSettings(clinicId).catch(() => null),
-        fetchDoctors(clinicId).catch(() => []),
-        fetchServices(clinicId).catch(() => []),
-        fetchDoctorServices(clinicId).catch(() => []),
-      ]);
-
-      setDoctorOptions(doctors.map((d) => ({ id: d.id, name: d.name })));
-      setServiceOptions(services.map((s) => ({ id: s.id, name: s.service_name })));
-      setDoctorServiceMappings(
-        doctorServices
-          .filter((mapping) => mapping.active)
-          .map((mapping) => ({
-            doctorId: mapping.doctor_id,
-            serviceId: mapping.clinic_service_id,
-          })),
-      );
-
-      const mapped = rows.map(mapAppointmentRow);
-      setPendingAppointments(mapped.filter((apt) => apt.status === 'pending_confirmation'));
-      setConfirmedAppointments(mapped.filter((apt) => apt.status === 'confirmed'));
-      setVisitedAppointments(mapped.filter((apt) => apt.status === 'visited'));
-      setActionRequests(requests.map(mapActionRequestRow));
-
-      if (settings) {
-        setBookingRules({
-          ...defaultBookingRules,
-          allowDoctorServiceEdit: settings.allow_doctor_service_edit,
-        });
+  const loadAppointments = useCallback(
+    async (showLoading = true, includeReferenceData = true) => {
+      if (!clinicId) {
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      setError(
-        err instanceof ApiRequestError ? err.apiError.message : 'Failed to load appointments.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [clinicId, isAdmin]);
+
+      if (showLoading) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const [rows, requests, settings, doctors, services, doctorServices] = await Promise.all([
+          fetchAppointments(clinicId),
+          isAdmin ? fetchAppointmentActionRequests(clinicId) : Promise.resolve([]),
+          includeReferenceData
+            ? fetchClinicSettings(clinicId).catch(() => null)
+            : Promise.resolve(null),
+          includeReferenceData ? fetchDoctors(clinicId).catch(() => []) : Promise.resolve(null),
+          includeReferenceData ? fetchServices(clinicId).catch(() => []) : Promise.resolve(null),
+          includeReferenceData
+            ? fetchDoctorServices(clinicId).catch(() => [])
+            : Promise.resolve(null),
+        ]);
+
+        if (doctors && services && doctorServices) {
+          setDoctorOptions(doctors.map((d) => ({ id: d.id, name: d.name })));
+          setServiceOptions(services.map((s) => ({ id: s.id, name: s.service_name })));
+          setDoctorServiceMappings(
+            doctorServices
+              .filter((mapping) => mapping.active)
+              .map((mapping) => ({
+                doctorId: mapping.doctor_id,
+                serviceId: mapping.clinic_service_id,
+              })),
+          );
+        }
+
+        const mapped = rows.map(mapAppointmentRow);
+        setPendingAppointments(mapped.filter((apt) => apt.status === 'pending_confirmation'));
+        setConfirmedAppointments(mapped.filter((apt) => apt.status === 'confirmed'));
+        setVisitedAppointments(mapped.filter((apt) => apt.status === 'visited'));
+        setActionRequests(requests.map(mapActionRequestRow));
+
+        if (settings) {
+          setBookingRules({
+            ...defaultBookingRules,
+            allowDoctorServiceEdit: settings.allow_doctor_service_edit,
+          });
+        }
+      } catch (err) {
+        setError(
+          err instanceof ApiRequestError ? err.apiError.message : 'Failed to load appointments.',
+        );
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [clinicId, isAdmin],
+  );
 
   useEffect(() => {
     void loadAppointments();
@@ -160,7 +173,7 @@ export function AppointmentsPageContent() {
       return;
     }
     await confirmAppointment(clinicId, id);
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   const handleEditTime = (id: string, newTime: string) => {
@@ -172,7 +185,7 @@ export function AppointmentsPageContent() {
       return;
     }
     await cancelAppointment(clinicId, id);
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   const handleMarkVisited = async (id: string, visitReason: string) => {
@@ -182,7 +195,7 @@ export function AppointmentsPageContent() {
     await markAppointmentVisited(clinicId, id, {
       visit_reason: visitReason,
     });
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   const handleViewHistory = (patientPhone: string) => {
@@ -222,7 +235,7 @@ export function AppointmentsPageContent() {
       status: 'confirmed',
     });
     setIsManualModalOpen(false);
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   const handleApproveReschedule = async (requestId: string, _newDate: string, _newTime: string) => {
@@ -234,7 +247,7 @@ export function AppointmentsPageContent() {
       status: 'approved',
       ...(request?.requestedNewSlotId ? { new_slot_id: request.requestedNewSlotId } : {}),
     });
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   const handleRejectRequest = async (requestId: string) => {
@@ -242,7 +255,7 @@ export function AppointmentsPageContent() {
       return;
     }
     await resolveAppointmentActionRequest(clinicId, requestId, { status: 'rejected' });
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   const handleCancelAppointment = async (requestId: string) => {
@@ -250,14 +263,17 @@ export function AppointmentsPageContent() {
       return;
     }
     await resolveAppointmentActionRequest(clinicId, requestId, { status: 'approved' });
-    await loadAppointments();
+    await loadAppointments(false, false);
   };
 
   if (loading) {
     return (
       <>
         <PageHeader title="Appointments" description="Loading appointments from the API." />
-        <LoadingState title="Loading appointments" description="Fetching clinic appointment data." />
+        <LoadingState
+          title="Loading appointments"
+          description="Fetching clinic appointment data."
+        />
       </>
     );
   }

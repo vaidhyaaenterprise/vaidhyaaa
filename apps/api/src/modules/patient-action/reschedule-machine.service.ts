@@ -44,10 +44,7 @@ import {
 import { StructuredInfoHandler } from '../structured-info/structured-info-handler.service';
 
 import { AppointmentLookupService } from './appointment-lookup.service';
-import {
-  formatAppointmentList,
-  parseAppointmentSelection,
-} from './lifecycle-field-extractor';
+import { formatAppointmentList, parseAppointmentSelection } from './lifecycle-field-extractor';
 import { StaffNotificationService } from './staff-notification.service';
 
 export type RescheduleMachineInput = {
@@ -246,7 +243,7 @@ export class RescheduleMachineService {
         interpretation && stateBefore === 'ASK_NEW_DATE'
           ? mapStateEntityToBookingFields(interpretation.result)
           : mapClassificationToBookingFields(input.classification);
-      let parsedDate = mapped.preferred_date;
+      const parsedDate = mapped.preferred_date;
       if (
         mapped.time_preference === 'morning' ||
         mapped.time_preference === 'afternoon' ||
@@ -519,7 +516,9 @@ export class RescheduleMachineService {
     );
     if (
       !appointment ||
-      !ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')
+      !ACTIVE_APPOINTMENT_STATUSES.includes(
+        appointment.status as 'pending_confirmation' | 'confirmed',
+      )
     ) {
       return this.result({
         input,
@@ -698,9 +697,7 @@ export class RescheduleMachineService {
     flowBefore: string,
     stateBefore: string,
     collected: RescheduleCollected,
-    interpretation: NonNullable<
-      Awaited<ReturnType<ActiveStateInterpretationService['interpret']>>
-    >,
+    interpretation: NonNullable<Awaited<ReturnType<ActiveStateInterpretationService['interpret']>>>,
   ): Promise<RescheduleMachineResult> {
     const structuredResult = await this.structuredInfoHandler.handle({
       session: input.session,

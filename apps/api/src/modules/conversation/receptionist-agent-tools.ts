@@ -90,8 +90,15 @@ export const RECEPTIONIST_AGENT_TOOLS: LlmToolDefinition[] = [
         type: 'object',
         properties: {
           topic: { type: 'string', enum: [...CLINIC_INFO_TOPICS] },
-          doctorName: { type: ['string', 'null'], description: 'Doctor name when topic is fee or doctor_availability.' },
-          day: { type: ['string', 'null'], description: 'Day hint for timing or doctor_availability (today, tomorrow, Monday, YYYY-MM-DD).' },
+          doctorName: {
+            type: ['string', 'null'],
+            description: 'Doctor name when topic is fee or doctor_availability.',
+          },
+          day: {
+            type: ['string', 'null'],
+            description:
+              'Day hint for timing or doctor_availability (today, tomorrow, Monday, YYYY-MM-DD).',
+          },
         },
         required: ['topic'],
         additionalProperties: false,
@@ -102,7 +109,8 @@ export const RECEPTIONIST_AGENT_TOOLS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'search_knowledge_base',
-      description: 'Search approved clinic knowledge. Returns raw answer text for you to phrase naturally.',
+      description:
+        'Search approved clinic knowledge. Returns raw answer text for you to phrase naturally.',
       parameters: {
         type: 'object',
         properties: {
@@ -150,10 +158,18 @@ export const RECEPTIONIST_AGENT_TOOLS: LlmToolDefinition[] = [
           slotId: { type: 'string' },
           confirmedByPatient: {
             type: 'boolean',
-            description: 'Must be true only after the patient affirmed a prior confirmation prompt.',
+            description:
+              'Must be true only after the patient affirmed a prior confirmation prompt.',
           },
         },
-        required: ['patientName', 'phone', 'reasonForVisit', 'date', 'slotId', 'confirmedByPatient'],
+        required: [
+          'patientName',
+          'phone',
+          'reasonForVisit',
+          'date',
+          'slotId',
+          'confirmedByPatient',
+        ],
         additionalProperties: false,
       },
     },
@@ -167,7 +183,10 @@ export const RECEPTIONIST_AGENT_TOOLS: LlmToolDefinition[] = [
         type: 'object',
         properties: {
           phone: { type: ['string', 'null'] },
-          appointmentRef: { type: ['string', 'null'], description: 'Appointment id or list index label.' },
+          appointmentRef: {
+            type: ['string', 'null'],
+            description: 'Appointment id or list index label.',
+          },
           confirmedByPatient: { type: 'boolean' },
         },
         required: ['confirmedByPatient'],
@@ -234,11 +253,15 @@ export const RECEPTIONIST_AGENT_TOOLS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_appointment_status',
-      description: 'Check the status of a booked appointment (pending, confirmed, cancelled) using patient phone.',
+      description:
+        'Check the status of a booked appointment (pending, confirmed, cancelled) using patient phone.',
       parameters: {
         type: 'object',
         properties: {
-          phone: { type: ['string', 'null'], description: 'Patient phone number to look up appointment.' },
+          phone: {
+            type: ['string', 'null'],
+            description: 'Patient phone number to look up appointment.',
+          },
         },
         additionalProperties: false,
       },
@@ -280,7 +303,8 @@ export class ReceptionistAgentToolsService {
     @Inject(DATABASE_CONNECTION) connection: DatabaseConnection,
     @Inject(SlotService) private readonly slotService: SlotService,
     @Inject(SlotHoldService) private readonly slotHoldService: SlotHoldService,
-    @Inject(BookingAppointmentService) private readonly bookingAppointmentService: BookingAppointmentService,
+    @Inject(BookingAppointmentService)
+    private readonly bookingAppointmentService: BookingAppointmentService,
     @Inject(KnowledgeSearchService) private readonly knowledgeSearchService: KnowledgeSearchService,
     @Inject(AppointmentLookupService) private readonly appointmentLookup: AppointmentLookupService,
     @Inject(StaffNotificationService) private readonly staffNotification: StaffNotificationService,
@@ -301,7 +325,12 @@ export class ReceptionistAgentToolsService {
     if (!collected.reason_for_visit) {
       return null;
     }
-    const result = await this.resolveDoctorAndService(ctx, collected, null, collected.reason_for_visit);
+    const result = await this.resolveDoctorAndService(
+      ctx,
+      collected,
+      null,
+      collected.reason_for_visit,
+    );
     if ('error' in result) {
       return null;
     }
@@ -352,9 +381,12 @@ export class ReceptionistAgentToolsService {
     const timezone = clinic?.timezone ?? 'Asia/Kolkata';
 
     if (topic === 'location') {
-      const addressParts = [clinic?.addressLine1, clinic?.addressLine2, clinic?.city, clinic?.state].filter(
-        (part): part is string => Boolean(part),
-      );
+      const addressParts = [
+        clinic?.addressLine1,
+        clinic?.addressLine2,
+        clinic?.city,
+        clinic?.state,
+      ].filter((part): part is string => Boolean(part));
       return {
         topic,
         found: addressParts.length > 0,
@@ -367,7 +399,12 @@ export class ReceptionistAgentToolsService {
     if (topic === 'timing') {
       const hours = await this.repos.slots.listClinicHours(ctx.clinicId);
       if (!day) {
-        return { topic, found: hours.length > 0, hoursSummary: formatClinicHoursText(hours), timezone };
+        return {
+          topic,
+          found: hours.length > 0,
+          hoursSummary: formatClinicHoursText(hours),
+          timezone,
+        };
       }
       const referenceDate = formatDateInTimezone(new Date(), timezone);
       const resolvedDate =
@@ -424,15 +461,17 @@ export class ReceptionistAgentToolsService {
         return { topic, found: false, doctorName };
       }
       const doctor = doctors[0]!;
-      const mappings = await this.repos.clinical.listActiveDoctorServicesForDoctor(ctx.clinicId, doctor.id);
+      const mappings = await this.repos.clinical.listActiveDoctorServicesForDoctor(
+        ctx.clinicId,
+        doctor.id,
+      );
       if (mappings.length === 0) {
         return { topic, found: false, doctorName: doctor.name, error: 'no_active_services' };
       }
       const mapping = mappings[0]!;
       const referenceDate = formatDateInTimezone(new Date(), timezone);
       const targetDate =
-        (day ? extractActivePreferredDate(day, referenceDate) : null) ??
-        referenceDate;
+        (day ? extractActivePreferredDate(day, referenceDate) : null) ?? referenceDate;
       const slots = await this.slotService.findAvailableSlots(
         ctx.clinicId,
         doctor.id,
@@ -505,11 +544,12 @@ export class ReceptionistAgentToolsService {
     const doctorName = readString(args.doctorName) ?? collected.doctor_name ?? null;
     const reasonForVisit = readString(args.reasonForVisit) ?? collected.reason_for_visit ?? null;
     const dateInput = readString(args.date) ?? collected.preferred_date ?? null;
-    const timePreference = parseTimePreference(args.timePreference) ?? collected.time_preference ?? null;
+    const timePreference =
+      parseTimePreference(args.timePreference) ?? collected.time_preference ?? null;
 
     let preferredDate = dateInput
-      ? extractActivePreferredDate(dateInput, referenceDate) ??
-        (/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : null)
+      ? (extractActivePreferredDate(dateInput, referenceDate) ??
+        (/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : null))
       : null;
 
     if (!preferredDate) {
@@ -523,7 +563,6 @@ export class ReceptionistAgentToolsService {
     }
 
     let resolvedDoctorId: string | null = collected.doctor_id ?? null;
-    let resolvedDoctorName: string | null = collected.doctor_name ?? null;
     let clinicServiceId = collected.clinic_service_id ?? null;
 
     if (doctorName) {
@@ -532,7 +571,6 @@ export class ReceptionistAgentToolsService {
         return { slots: [], ...target };
       }
       resolvedDoctorId = target.doctorId;
-      resolvedDoctorName = target.doctorName;
       clinicServiceId = target.clinicServiceId;
     }
 
@@ -586,9 +624,8 @@ export class ReceptionistAgentToolsService {
     let bestDoctorId = candidates[0]!.doctorId;
     let bestDoctorName = candidates[0]!.doctorName;
 
-    const referenceTime = preferredDate === referenceDate
-      ? formatTimeInTimezone(new Date(), timezone)
-      : undefined;
+    const referenceTime =
+      preferredDate === referenceDate ? formatTimeInTimezone(new Date(), timezone) : undefined;
 
     for (const candidate of candidates) {
       const slots = await this.slotService.findAvailableSlots(
@@ -596,7 +633,13 @@ export class ReceptionistAgentToolsService {
         candidate.doctorId,
         clinicServiceId,
       );
-      const filtered = filterSlotsByDateAndPreference(slots, preferredDate, timePreference ?? undefined, referenceDate, referenceTime);
+      const filtered = filterSlotsByDateAndPreference(
+        slots,
+        preferredDate,
+        timePreference ?? undefined,
+        referenceDate,
+        referenceTime,
+      );
       if (filtered.length > 0) {
         bestSlots = filtered;
         bestDoctorId = candidate.doctorId;
@@ -604,7 +647,13 @@ export class ReceptionistAgentToolsService {
         break;
       }
       if (bestSlots.length === 0) {
-        const anyDate = filterSlotsByDateAndPreference(slots, preferredDate, undefined, referenceDate, referenceTime);
+        const anyDate = filterSlotsByDateAndPreference(
+          slots,
+          preferredDate,
+          undefined,
+          referenceDate,
+          referenceTime,
+        );
         if (anyDate.length > 0) {
           bestSlots = anyDate;
           bestDoctorId = candidate.doctorId;
@@ -629,7 +678,11 @@ export class ReceptionistAgentToolsService {
         ? {
             error: 'no_slots_for_preference',
             availableTimePreferences: getAvailableTimePreferencesForDate(
-              await this.slotService.findAvailableSlots(ctx.clinicId, bestDoctorId, clinicServiceId),
+              await this.slotService.findAvailableSlots(
+                ctx.clinicId,
+                bestDoctorId,
+                clinicServiceId,
+              ),
               preferredDate,
             ),
           }
@@ -732,12 +785,24 @@ export class ReceptionistAgentToolsService {
     }
 
     const phone = readString(args.phone) ?? ctx.patientPhone ?? null;
-    const appointment = await this.resolveAppointmentRef(ctx, phone, readString(args.appointmentRef));
+    const appointment = await this.resolveAppointmentRef(
+      ctx,
+      phone,
+      readString(args.appointmentRef),
+    );
     if (!appointment) {
       return { error: 'appointment_not_found' };
     }
-    if (!ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')) {
-      return { error: 'appointment_not_active', appointmentId: appointment.id, status: appointment.status };
+    if (
+      !ACTIVE_APPOINTMENT_STATUSES.includes(
+        appointment.status as 'pending_confirmation' | 'confirmed',
+      )
+    ) {
+      return {
+        error: 'appointment_not_active',
+        appointmentId: appointment.id,
+        status: appointment.status,
+      };
     }
 
     await this.slotHoldService.cancelAppointment(ctx.clinicId, appointment.id);
@@ -776,12 +841,18 @@ export class ReceptionistAgentToolsService {
     }
 
     const phone = readString(args.phone) ?? ctx.patientPhone ?? null;
-    const appointment = await this.resolveAppointmentRef(ctx, phone, readString(args.appointmentRef));
+    const appointment = await this.resolveAppointmentRef(
+      ctx,
+      phone,
+      readString(args.appointmentRef),
+    );
     if (!appointment) {
       return { error: 'appointment_not_found' };
     }
     if (
-      !ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')
+      !ACTIVE_APPOINTMENT_STATUSES.includes(
+        appointment.status as 'pending_confirmation' | 'confirmed',
+      )
     ) {
       return { error: 'appointment_not_active', appointmentId: appointment.id };
     }
@@ -950,10 +1021,14 @@ export class ReceptionistAgentToolsService {
       ...(patch.doctor_name ? { doctor_name: normalizeDoctorName(String(patch.doctor_name)) } : {}),
       ...(patch.clinic_service_id ? { clinic_service_id: String(patch.clinic_service_id) } : {}),
       ...(patch.preferred_date ? { preferred_date: String(patch.preferred_date) } : {}),
-      ...(patch.time_preference ? { time_preference: parseTimePreference(patch.time_preference) ?? undefined } : {}),
+      ...(patch.time_preference
+        ? { time_preference: parseTimePreference(patch.time_preference) ?? undefined }
+        : {}),
       ...(patch.patient_name ? { patient_name: String(patch.patient_name) } : {}),
       ...(patch.selected_slot_id ? { selected_slot_id: String(patch.selected_slot_id) } : {}),
-      ...(patch.routing_source ? { routing_source: String(patch.routing_source) as typeof collected.routing_source } : {}),
+      ...(patch.routing_source
+        ? { routing_source: String(patch.routing_source) as typeof collected.routing_source }
+        : {}),
     });
 
     if (patch.patient_phone) {
@@ -978,8 +1053,7 @@ export class ReceptionistAgentToolsService {
     doctorName: string | null,
     reasonForVisit: string | null,
   ): Promise<
-    | { doctorId: string; doctorName: string; clinicServiceId: string }
-    | { error: string }
+    { doctorId: string; doctorName: string; clinicServiceId: string } | { error: string }
   > {
     let doctorId = collected.doctor_id ?? null;
     let resolvedDoctorName = collected.doctor_name ?? doctorName;
@@ -1069,10 +1143,14 @@ export class ReceptionistAgentToolsService {
       return null;
     }
     if (!appointmentRef) {
-      return (await this.repos.appointmentLifecycle.findAppointmentById(
-        ctx.clinicId,
-        candidates[0]!.appointment_id,
-      ))?.[0] ?? null;
+      return (
+        (
+          await this.repos.appointmentLifecycle.findAppointmentById(
+            ctx.clinicId,
+            candidates[0]!.appointment_id,
+          )
+        )?.[0] ?? null
+      );
     }
     const index = Number(appointmentRef);
     if (Number.isFinite(index) && index >= 1 && index <= candidates.length) {
@@ -1083,7 +1161,9 @@ export class ReceptionistAgentToolsService {
       );
       return appointment ?? null;
     }
-    const byLabel = candidates.find((candidate) => candidate.display_label.includes(appointmentRef));
+    const byLabel = candidates.find((candidate) =>
+      candidate.display_label.includes(appointmentRef),
+    );
     if (!byLabel) {
       return null;
     }

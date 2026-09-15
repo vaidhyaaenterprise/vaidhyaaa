@@ -106,9 +106,13 @@ export class SlotRuleChangeImpactService {
       normalizedImplementFrom,
     );
     if (conflicts.length > 0) {
-      throw new AppError('CONFLICTING_APPOINTMENTS', 'Capacity decrease would conflict with occupancy.', {
-        conflicts,
-      });
+      throw new AppError(
+        'CONFLICTING_APPOINTMENTS',
+        'Capacity decrease would conflict with occupancy.',
+        {
+          conflicts,
+        },
+      );
     }
 
     const updatedSlots = await this.repos.slots.updateFutureOpenSlotCapacity(
@@ -158,12 +162,14 @@ export class SlotRuleChangeImpactService {
       ruleId,
       normalizedImplementFrom,
     );
+    const occupancyBySlot = await this.getOccupancyBySlot(
+      clinicId,
+      futureSlots.map((slot) => slot.id),
+    );
     const conflicts: RuleChangeConflict[] = [];
 
     for (const slot of futureSlots) {
-      const activeAppointments = await this.repos.slots.countActiveAppointments(clinicId, slot.id);
-      const activeHolds = await this.repos.slots.countActiveHolds(clinicId, slot.id);
-      if (activeAppointments + activeHolds > 0) {
+      if ((occupancyBySlot.get(slot.id) ?? 0) > 0) {
         conflicts.push({
           slot_id: slot.id,
           slot_start: slot.startTime,
@@ -174,9 +180,13 @@ export class SlotRuleChangeImpactService {
     }
 
     if (conflicts.length > 0) {
-      throw new AppError('CONFLICTING_APPOINTMENTS', 'Duration change would conflict with future occupancy.', {
-        conflicts,
-      });
+      throw new AppError(
+        'CONFLICTING_APPOINTMENTS',
+        'Duration change would conflict with future occupancy.',
+        {
+          conflicts,
+        },
+      );
     }
 
     await this.repos.slots.supersedeFutureOpenSlots(clinicId, ruleId, normalizedImplementFrom);
@@ -203,13 +213,19 @@ export class SlotRuleChangeImpactService {
     newCapacity: number,
     implementFrom?: string,
   ): Promise<RuleChangeConflict[]> {
-    const futureSlots = await this.repos.slots.listFutureOpenSlotsForRule(clinicId, ruleId, implementFrom);
+    const futureSlots = await this.repos.slots.listFutureOpenSlotsForRule(
+      clinicId,
+      ruleId,
+      implementFrom,
+    );
+    const occupancyBySlot = await this.getOccupancyBySlot(
+      clinicId,
+      futureSlots.map((slot) => slot.id),
+    );
     const conflicts: RuleChangeConflict[] = [];
 
     for (const slot of futureSlots) {
-      const activeAppointments = await this.repos.slots.countActiveAppointments(clinicId, slot.id);
-      const activeHolds = await this.repos.slots.countActiveHolds(clinicId, slot.id);
-      const occupied = activeAppointments + activeHolds;
+      const occupied = occupancyBySlot.get(slot.id) ?? 0;
 
       if (occupied > newCapacity) {
         conflicts.push({
@@ -252,12 +268,14 @@ export class SlotRuleChangeImpactService {
     }
 
     const futureSlots = await this.repos.slots.listFutureOpenSlotsForRule(clinicId, ruleId);
+    const occupancyBySlot = await this.getOccupancyBySlot(
+      clinicId,
+      futureSlots.map((slot) => slot.id),
+    );
     const conflicts: RuleChangeConflict[] = [];
 
     for (const slot of futureSlots) {
-      const activeAppointments = await this.repos.slots.countActiveAppointments(clinicId, slot.id);
-      const activeHolds = await this.repos.slots.countActiveHolds(clinicId, slot.id);
-      if (activeAppointments + activeHolds > 0) {
+      if ((occupancyBySlot.get(slot.id) ?? 0) > 0) {
         conflicts.push({
           slot_id: slot.id,
           slot_start: slot.startTime,
@@ -300,11 +318,13 @@ export class SlotRuleChangeImpactService {
       return `${formatDateInTimezone(now, timezone)} ${formatTimeInTimezone(now, timezone)}`;
     }
 
+    const occupancyBySlot = await this.getOccupancyBySlot(
+      clinicId,
+      futureSlots.map((slot) => slot.id),
+    );
     const occupiedSlots: string[] = [];
     for (const slot of futureSlots) {
-      const activeAppointments = await this.repos.slots.countActiveAppointments(clinicId, slot.id);
-      const activeHolds = await this.repos.slots.countActiveHolds(clinicId, slot.id);
-      const occupied = activeAppointments + activeHolds;
+      const occupied = occupancyBySlot.get(slot.id) ?? 0;
 
       if (patch.slot_duration_minutes !== undefined) {
         if (occupied > 0) {
@@ -328,5 +348,22 @@ export class SlotRuleChangeImpactService {
     }
 
     return midnightAfterDate(datePartOfTimestamp(latestOccupied), timezone);
+  }
+
+  private async getOccupancyBySlot(
+    clinicId: string,
+    slotIds: string[],
+  ): Promise<Map<string, number>> {
+    const [appointmentCounts, holdCounts] = await Promise.all([
+      this.repos.slots.countActiveAppointmentsBySlots(clinicId, slotIds),
+      this.repos.slots.countActiveHoldsBySlots(clinicId, slotIds),
+    ]);
+
+    return new Map(
+      slotIds.map((slotId) => [
+        slotId,
+        (appointmentCounts.get(slotId) ?? 0) + (holdCounts.get(slotId) ?? 0),
+      ]),
+    );
   }
 }

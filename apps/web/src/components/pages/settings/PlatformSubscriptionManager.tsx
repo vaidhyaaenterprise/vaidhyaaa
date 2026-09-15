@@ -22,7 +22,7 @@ const PLAN_OPTIONS = [
 
 interface PlatformSubscriptionManagerProps {
   subscription: SubscriptionPlan;
-  onPlanChange: (change: PlatformSubscriptionChange) => void;
+  onPlanChange: (change: PlatformSubscriptionChange) => Promise<void>;
 }
 
 export function PlatformSubscriptionManager({
@@ -36,6 +36,8 @@ export function PlatformSubscriptionManager({
   const [status, setStatus] = useState<SubscriptionStatus>(subscription.status);
   const [trialEnd, setTrialEnd] = useState(subscription.trialEnd ?? '');
   const [notes, setNotes] = useState(subscription.notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (!isPlatformAdmin) {
     return null;
@@ -46,6 +48,7 @@ export function PlatformSubscriptionManager({
     setStatus(subscription.status);
     setTrialEnd(subscription.trialEnd ?? '');
     setNotes(subscription.notes ?? '');
+    setSaveError(null);
     setIsEditing(true);
   };
 
@@ -53,12 +56,20 @@ export function PlatformSubscriptionManager({
     setIsEditing(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const change: PlatformSubscriptionChange = { planKey, status };
     if (trialEnd) change.trialEnd = trialEnd;
     if (notes) change.notes = notes;
-    onPlanChange(change);
-    setIsEditing(false);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onPlanChange(change);
+      setIsEditing(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save subscription.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -162,7 +173,9 @@ export function PlatformSubscriptionManager({
               <input
                 type="date"
                 value={trialEnd ? trialEnd.split('T')[0] : ''}
-                onChange={(e) => setTrialEnd(e.target.value ? `${e.target.value}T00:00:00.000Z` : '')}
+                onChange={(e) =>
+                  setTrialEnd(e.target.value ? `${e.target.value}T00:00:00.000Z` : '')
+                }
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
               />
             </div>
@@ -181,14 +194,19 @@ export function PlatformSubscriptionManager({
             </div>
 
             <div className="flex gap-2 pt-2">
+              {saveError && (
+                <p className="self-center text-xs font-semibold text-red-600">{saveError}</p>
+              )}
               <button
-                onClick={handleSave}
+                onClick={() => void handleSave()}
+                disabled={saving}
                 className="rounded-xl bg-amber-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-amber-800"
               >
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </button>
               <button
                 onClick={handleCancel}
+                disabled={saving}
                 className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-100"
               >
                 Cancel

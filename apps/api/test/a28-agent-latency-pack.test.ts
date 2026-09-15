@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import { parseApiEnv } from '@vaidya/config';
-import type { LlmChatRequest, LlmChatResponse } from '@vaidya/shared';
+import type { LlmChatResponse } from '@vaidya/shared';
 
 import { API_ENV } from '../src/config/api-config.module';
 import { AgentTurnAuditService } from '../src/modules/conversation/agent-turn-audit.service';
@@ -31,7 +31,7 @@ const auditMock = {
   recordAgentReply: vi.fn(),
 };
 
-function buildModule(llm: ReceptionistAgentLlmPort, toolsExecute = vi.fn()) {
+function buildModule(llm: ReceptionistAgentLlmPort, toolsExecute = vi.fn().mockResolvedValue({})) {
   return Test.createTestingModule({
     providers: [
       ReceptionistAgentService,
@@ -187,9 +187,15 @@ describe('A28 agent latency pack', () => {
     });
 
     const toolsExecute = vi.fn(async (toolName: string) => {
-      await new Promise((resolve) => setTimeout(resolve, toolName === 'check_slot_availability' ? 80 : 40));
+      await new Promise((resolve) =>
+        setTimeout(resolve, toolName === 'check_slot_availability' ? 80 : 40),
+      );
       if (toolName === 'check_slot_availability') {
-        return { slots: [{ slotId: 'slot-1', doctorName: 'Dr Kumar', dateDisplay: '2026-07-11', time: '6:30' }] };
+        return {
+          slots: [
+            { slotId: 'slot-1', doctorName: 'Dr Kumar', dateDisplay: '2026-07-11', time: '6:30' },
+          ],
+        };
       }
       return { address: 'Chennai' };
     });
@@ -210,7 +216,7 @@ describe('A28 agent latency pack', () => {
 
     const elapsed = Date.now() - startedAt;
     expect(outcome.kind).toBe('agent');
-    expect(toolsExecute).toHaveBeenCalledTimes(2);
+    expect(toolsExecute).toHaveBeenCalledTimes(3);
     expect(elapsed).toBeLessThan(200);
   });
 

@@ -21,7 +21,6 @@ import {
   isActiveFlowClassifierInterrupt,
   isActiveStateInterpreterContext,
   isCapabilityFlowInterrupt,
-  isCapabilityLifecycleInterrupt,
   normalizeIntentClassification,
   parseActivePrompt,
   resolveCapabilityForIntent,
@@ -126,10 +125,6 @@ function buildActiveFlowClassification(languageCode: LanguageCode): IntentClassi
     },
     needsClarification: false,
   };
-}
-
-function isLifecycleInterruptIntent(intent: string): boolean {
-  return isCapabilityLifecycleInterrupt(intent);
 }
 
 function buildSafetyClassification(
@@ -319,7 +314,9 @@ export class ConversationOrchestrator {
     }
   }
 
-  private async handlePatientMessageInternal(input: OrchestratorInput): Promise<OrchestratorResult> {
+  private async handlePatientMessageInternal(
+    input: OrchestratorInput,
+  ): Promise<OrchestratorResult> {
     const { clinicName, messageText } = input;
     const session = applyPromptAwareSession(resumeBookingSession(input.session));
 
@@ -384,8 +381,7 @@ export class ConversationOrchestrator {
     lastAssistantMessageText?: string | null;
     languageSource?: 'patient_requested';
   }): Promise<
-    | { handled: true; result: OrchestratorResult }
-    | { handled: false; fallbackReason?: string }
+    { handled: true; result: OrchestratorResult } | { handled: false; fallbackReason?: string }
   > {
     const safety = detectMessageSafety(input.messageText);
     if (safety.isEmergency) {
@@ -447,11 +443,11 @@ export class ConversationOrchestrator {
     return {
       handled: true,
       result: this.buildAgentOrchestratorResult({
-      flowBefore: input.flowBefore,
-      stateBefore: input.stateBefore,
-      languageCode: input.languageCode,
-      agentResult: agentOutcome.result,
-      ...(input.languageSource ? { languageSource: input.languageSource } : {}),
+        flowBefore: input.flowBefore,
+        stateBefore: input.stateBefore,
+        languageCode: input.languageCode,
+        agentResult: agentOutcome.result,
+        ...(input.languageSource ? { languageSource: input.languageSource } : {}),
       }),
     };
   }
@@ -490,7 +486,7 @@ export class ConversationOrchestrator {
 
     let flowAfter = input.flowBefore;
     let stateAfter = input.stateBefore;
-    let sessionStatus = input.agentResult.sessionStatus;
+    const sessionStatus = input.agentResult.sessionStatus;
 
     if (sessionStatus === 'completed' || sessionStatus === 'escalated') {
       flowAfter = 'none';
@@ -861,11 +857,9 @@ export class ConversationOrchestrator {
         safety: classification.safety,
       });
       if (policy?.resumeFlow) {
-        const rendered = await this.templateRenderer.render(
-          policy.templateKey,
-          languageCode,
-          { clinic_name: clinicName },
-        );
+        const rendered = await this.templateRenderer.render(policy.templateKey, languageCode, {
+          clinic_name: clinicName,
+        });
         const answerText = await appendBookingResumeText(
           this.templateRenderer,
           rendered.message_text,
@@ -975,8 +969,7 @@ export class ConversationOrchestrator {
     }
 
     const shouldRunCancel =
-      flowBefore === CANCEL_FLOW ||
-      (CANCEL_INTENTS.has(intent) && intent !== 'language_switch');
+      flowBefore === CANCEL_FLOW || (CANCEL_INTENTS.has(intent) && intent !== 'language_switch');
 
     if (shouldRunCancel && intent !== 'language_switch') {
       const cancelResult = await this.cancelMachine.handle({
@@ -999,12 +992,16 @@ export class ConversationOrchestrator {
         messageText,
         classification,
       });
-      return this.wrapLifecycleResult(rescheduleResult, languageCode, languageSource, 'a05_reschedule');
+      return this.wrapLifecycleResult(
+        rescheduleResult,
+        languageCode,
+        languageSource,
+        'a05_reschedule',
+      );
     }
 
     const shouldRunHandoff =
-      flowBefore === HANDOFF_FLOW ||
-      (HANDOFF_INTENTS.has(intent) && intent !== 'language_switch');
+      flowBefore === HANDOFF_FLOW || (HANDOFF_INTENTS.has(intent) && intent !== 'language_switch');
 
     if (shouldRunHandoff && intent !== 'language_switch') {
       const handoffResult = await this.handoffMachine.handle({
@@ -1071,8 +1068,7 @@ export class ConversationOrchestrator {
     }
 
     const shouldRunBooking =
-      flowBefore === BOOKING_FLOW ||
-      (BOOKING_INTENTS.has(intent) && intent !== 'language_switch');
+      flowBefore === BOOKING_FLOW || (BOOKING_INTENTS.has(intent) && intent !== 'language_switch');
 
     if (shouldRunBooking && intent !== 'language_switch') {
       const bookingResult = await this.bookingMachine.handle({
@@ -1095,11 +1091,7 @@ export class ConversationOrchestrator {
       });
     }
 
-    if (
-      flowBefore === 'none' &&
-      stateBefore === 'IDLE' &&
-      intent === 'acknowledgment'
-    ) {
+    if (flowBefore === 'none' && stateBefore === 'IDLE' && intent === 'acknowledgment') {
       return {
         intent: 'acknowledgment',
         templateKey: 'booking.offer_help',
@@ -1138,9 +1130,10 @@ export class ConversationOrchestrator {
           flowAfter: 'none',
           stateAfter: 'IDLE',
           languageCode,
-          collectedJson: parseBookingCollected(
-            routingSession.collectedJson,
-          ) as Record<string, unknown>,
+          collectedJson: parseBookingCollected(routingSession.collectedJson) as Record<
+            string,
+            unknown
+          >,
           ...(languageSource ? { languageSource } : {}),
           ...(this.env.DEBUG_API && this.env.NODE_ENV !== 'production'
             ? {
@@ -1232,7 +1225,6 @@ export class ConversationOrchestrator {
       intent,
       intentClassifierLlm,
       genericClassifierCalled,
-      nluTrace,
       llmRuntime,
       lastAssistantMessageText,
       lastAssistantTemplateKey,
@@ -1256,7 +1248,12 @@ export class ConversationOrchestrator {
         messageText,
         classification,
       });
-      return this.wrapLifecycleResult(rescheduleResult, languageCode, languageSource, 'a05_reschedule');
+      return this.wrapLifecycleResult(
+        rescheduleResult,
+        languageCode,
+        languageSource,
+        'a05_reschedule',
+      );
     }
 
     if (HANDOFF_INTENTS.has(intent) && intent !== 'active_flow_answer') {
@@ -1286,7 +1283,12 @@ export class ConversationOrchestrator {
         messageText,
         classification,
       });
-      return this.wrapLifecycleResult(rescheduleResult, languageCode, languageSource, 'a05_reschedule');
+      return this.wrapLifecycleResult(
+        rescheduleResult,
+        languageCode,
+        languageSource,
+        'a05_reschedule',
+      );
     }
 
     if (flowBefore === HANDOFF_FLOW) {
@@ -1424,8 +1426,9 @@ export class ConversationOrchestrator {
   ): Record<string, unknown> {
     const stateEntityLlm =
       (debug.llm as LlmInvocationDebug | null | undefined) ??
-      ((debug as { state_entity_extractor_llm?: LlmInvocationDebug | null }).state_entity_extractor_llm ??
-        null);
+      (debug as { state_entity_extractor_llm?: LlmInvocationDebug | null })
+        .state_entity_extractor_llm ??
+      null;
 
     return {
       ...debug,
@@ -1441,7 +1444,11 @@ export class ConversationOrchestrator {
     flowBefore: string;
     stateBefore: string;
     languageCode: LanguageCode;
-    templateKey: 'safety.emergency' | 'safety.emergency_active_flow' | 'safety.medical_advice_refusal' | 'safety.medical_advice_refusal_resume';
+    templateKey:
+      | 'safety.emergency'
+      | 'safety.emergency_active_flow'
+      | 'safety.medical_advice_refusal'
+      | 'safety.medical_advice_refusal_resume';
     intent: string;
     classification: IntentClassifierResult;
     genericClassifierCalled?: boolean;

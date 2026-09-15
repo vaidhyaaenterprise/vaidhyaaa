@@ -1,11 +1,10 @@
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NestFastifyApplication } from '@nestjs/platform-fastify';
 
 import { EnvValidationError, parseApiEnv } from '@vaidya/config';
 import { addDays, formatDateInTimezone } from '@vaidya/db';
 import {
-  ADAPTER_TOKENS,
   apiSuccessBodySchema,
   extractStateEntitiesMock,
   getDefaultLanguagePack,
@@ -408,7 +407,9 @@ describe('A05C active-state variation interpreter and language packs', () => {
       const sessionId = await createConversation(app, '+919222224030');
       await sendMessage(app, sessionId, 'Fever appointment venum', 'a05c_30a');
       const step2 = await sendMessage(app, sessionId, 'fever-ku enna tablet', 'a05c_30b');
-      expect(step2.assistant_message.reply_template_key).toBe('safety.medical_advice_refusal_resume');
+      expect(step2.assistant_message.reply_template_key).toBe(
+        'safety.medical_advice_refusal_resume',
+      );
       expect(step2.session.current_state).toBe('ASK_DATE');
     });
 

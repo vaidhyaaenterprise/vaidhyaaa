@@ -1,11 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import {
-  createRepositories,
-  type ConversationSessionRow,
-  type Repositories,
-} from '@vaidya/db';
-import { BOOKING_FLOW, type IntentClassifierResult, type MessageTemplateKey } from '@vaidya/shared';
+import { createRepositories, type ConversationSessionRow, type Repositories } from '@vaidya/db';
+import type { IntentClassifierResult, MessageTemplateKey } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';
 
@@ -57,9 +53,7 @@ export class DoctorAvailabilityHandler {
         templateVariables: { doctor_name: 'Doctor' },
         flowAfter: preserveBooking ? session.currentFlow : 'none',
         stateAfter: preserveBooking ? stateBefore : 'IDLE',
-        collectedJson: preserveBooking
-          ? (session.collectedJson as Record<string, unknown>)
-          : {},
+        collectedJson: preserveBooking ? (session.collectedJson as Record<string, unknown>) : {},
       };
     }
 
@@ -74,9 +68,7 @@ export class DoctorAvailabilityHandler {
         templateVariables: { doctor_name: doctorFragment },
         flowAfter: preserveBooking ? session.currentFlow : 'none',
         stateAfter: preserveBooking ? stateBefore : 'IDLE',
-        collectedJson: preserveBooking
-          ? (session.collectedJson as Record<string, unknown>)
-          : {},
+        collectedJson: preserveBooking ? (session.collectedJson as Record<string, unknown>) : {},
       };
     }
 
@@ -92,9 +84,7 @@ export class DoctorAvailabilityHandler {
         templateVariables: { doctor_name: doctor.name },
         flowAfter: preserveBooking ? session.currentFlow : 'none',
         stateAfter: preserveBooking ? stateBefore : 'IDLE',
-        collectedJson: preserveBooking
-          ? (session.collectedJson as Record<string, unknown>)
-          : {},
+        collectedJson: preserveBooking ? (session.collectedJson as Record<string, unknown>) : {},
       };
     }
 
@@ -144,9 +134,7 @@ export class DoctorAvailabilityHandler {
       });
     }
 
-    const slotList = dateSlots
-      .map((slot) => slotDisplayTime(slot.start_time))
-      .join(', ');
+    const slotList = dateSlots.map((slot) => slotDisplayTime(slot.start_time)).join(', ');
 
     return this.wrapResult({
       session,
