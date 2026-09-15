@@ -15,10 +15,9 @@ import { DEV_SEED } from '../dev-auth/constants';
 import type { ApiClientError } from './types';
 
 export function getApiBaseUrl(): string {
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (!base) {
-    throw new Error('NEXT_PUBLIC_API_BASE_URL is not configured.');
-  }
+  // Prefer the same-origin server proxy. Unlike a NEXT_PUBLIC value, the upstream
+  // API URL can then be changed at runtime without rebuilding the browser bundle.
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || '/api/backend';
 
   const normalizedBase = base.replace(/\/$/, '');
   if (typeof window === 'undefined') {

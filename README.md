@@ -34,7 +34,7 @@ All application instances must use the same Supabase PostgreSQL connection strin
 4. Run `pnpm install` and `pnpm db:migrate` against the Supabase database.
 5. Start the API and web applications. Every clone configured with the same `DATABASE_URL` will read and write the same Supabase data.
 
-The web application also needs `apps/web/.env.local` with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for browser Realtime subscriptions. These are not database credentials. The current Realtime subscription refreshes the knowledge-base page when `clinic_knowledge_base` changes.
+The web application also needs `apps/web/.env.local` with `API_BASE_URL` pointing to the running backend. In hosted environments, configure `API_BASE_URL` as a server-side environment variable (for example, `https://api.example.com`) and do not expose backend secrets to the browser. The web app sends browser requests through its same-origin `/api/backend` proxy, avoiding cross-origin and mixed-content failures. `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are only used for browser Realtime subscriptions; they are not database credentials. The current Realtime subscription refreshes the knowledge-base page when `clinic_knowledge_base` changes.
 
 Tests are the only supported local-database workflow. Set `NODE_ENV=test`/`APP_ENV=local` and use `TEST_DATABASE_URL` for the test Postgres container.
 

@@ -603,34 +603,33 @@ export default function LoginPage() {
 
   if (status === 'loading' || status === 'authenticated') {
     return (
-      <main className="flex min-h-screen items-center justify-center px-6">
+      <main className="flex min-h-screen min-h-dvh items-center justify-center px-6">
         <LoadingState title="Preparing sign in" description="Checking your dev session." />
       </main>
     );
   }
 
   const inputClass =
-    'h-14 w-full rounded-2xl border border-[#dbe3ec] bg-white pl-14 text-[16px] text-[#0f2440] placeholder:text-[#94a3b8] outline-none transition focus:border-[#0B7A2A] focus:ring-4 focus:ring-[#0B7A2A]/10 xl:h-[58px] xl:text-[17px]';
+    'h-[52px] w-full rounded-2xl border border-[#dbe3ec] bg-white pl-12 text-[16px] text-[#0f2440] placeholder:text-[#94a3b8] outline-none transition focus:border-[#0B7A2A] focus:ring-4 focus:ring-[#0B7A2A]/10 sm:h-14 sm:pl-14 xl:h-[58px] xl:text-[17px]';
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[radial-gradient(1200px_700px_at_15%_0%,#eef8ee_0%,#f7fbf6_45%,#ffffff_100%)] text-[#0f2440]">
-      <LeafBranch />
-      <WaveDecor />
-      <div
-        className="pointer-events-none absolute -bottom-48 right-[-10%] h-[560px] w-[760px] rounded-full bg-[radial-gradient(closest-side,rgba(11,122,42,0.10),transparent)]"
-        aria-hidden
-      />
+    <main className="relative min-h-screen min-h-dvh overflow-x-clip bg-[radial-gradient(1200px_700px_at_15%_0%,#eef8ee_0%,#f7fbf6_45%,#ffffff_100%)] text-[#0f2440]">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+        <LeafBranch />
+        <WaveDecor />
+        <div className="absolute -bottom-48 right-[-10%] h-[560px] w-[760px] rounded-full bg-[radial-gradient(closest-side,rgba(11,122,42,0.10),transparent)]" />
+      </div>
 
-      <div className="relative mx-auto grid min-h-screen w-full max-w-[1920px] grid-cols-1 lg:grid-cols-[55fr_45fr]">
+      <div className="relative mx-auto grid min-h-screen min-h-dvh w-full max-w-[1920px] grid-cols-1 lg:grid-cols-[minmax(0,55fr)_minmax(460px,45fr)]">
         {/* ---------------------------------------------------------- */}
         {/* LEFT — branding                                             */}
         {/* ---------------------------------------------------------- */}
-        <section className="flex flex-col items-center justify-center px-6 pb-6 pt-12 lg:px-10 lg:py-8 xl:px-14 2xl:px-20">
+        <section className="login-brand-panel flex flex-col items-center justify-center px-4 pb-5 pt-9 sm:px-6 sm:pt-11 lg:px-8 lg:py-6 xl:px-12">
           <div className="flex w-full max-w-[860px] flex-col items-center text-center">
-            <VaidhyaaLogo className="h-[110px] w-[110px] lg:h-[128px] lg:w-[128px] xl:h-[150px] xl:w-[150px] 2xl:h-[180px] 2xl:w-[180px]" />
+            <VaidhyaaLogo className="login-brand-logo h-[clamp(88px,24vw,110px)] w-[clamp(88px,24vw,110px)] lg:h-[clamp(104px,12vh,144px)] lg:w-[clamp(104px,12vh,144px)] xl:h-[clamp(120px,14vh,158px)] xl:w-[clamp(120px,14vh,158px)]" />
 
             <h1
-              className="mt-4 font-display font-bold leading-none tracking-tight text-[56px] lg:mt-5 lg:text-[64px] xl:text-[76px] 2xl:text-[92px]"
+              className="login-brand-title mt-3 font-display text-[clamp(48px,14vw,58px)] font-bold leading-none tracking-tight lg:mt-4 lg:text-[clamp(56px,7vh,76px)] xl:text-[clamp(64px,8vh,82px)]"
               style={{ color: GREEN }}
             >
               <span className="relative inline-block">
@@ -654,46 +653,46 @@ export default function LoginPage() {
               </span>
             </h1>
 
-            <div className="mt-3 flex items-center gap-3 lg:mt-4">
+            <div className="login-brand-tagline mt-3 flex items-center gap-3 lg:mt-3">
               <span className="hidden h-px w-10 bg-[#0B7A2A]/60 sm:block" aria-hidden />
               <p
-                className="text-[13px] font-semibold uppercase tracking-[0.32em] lg:text-[15px] 2xl:text-[17px]"
+                className="text-[11px] font-semibold uppercase tracking-[0.25em] sm:text-[13px] sm:tracking-[0.32em] lg:text-[14px] xl:text-[15px]"
                 style={{ color: GREEN }}
               >
                 SMART-CARE — SIMPLIFIED
               </p>
-              <ECGLine className="hidden h-5 w-[110px] sm:block 2xl:w-[140px]" />
+              <ECGLine className="hidden h-5 w-[100px] sm:block xl:w-[110px]" />
             </div>
 
             <div className="mt-2.5 flex items-center gap-3">
               <span className="h-[2px] w-8 rounded-full bg-[#0B7A2A]/50" aria-hidden />
-              <p className="text-[14px] font-semibold text-[#14611F] lg:text-[15px] 2xl:text-[16px]">
+              <p className="text-[13px] font-semibold text-[#14611F] sm:text-[14px] lg:text-[15px]">
                 Hospital Management Portal
               </p>
               <span className="h-[2px] w-8 rounded-full bg-[#0B7A2A]/50" aria-hidden />
             </div>
 
-            <p className="mt-6 max-w-[620px] text-[17px] font-semibold leading-relaxed text-[#1c2b45] lg:mt-7 lg:text-[18px] 2xl:mt-9 2xl:max-w-[720px] 2xl:text-[21px]">
+            <p className="login-brand-intro mt-5 max-w-[620px] text-[15px] font-semibold leading-relaxed text-[#1c2b45] sm:text-[16px] lg:mt-5 lg:text-[17px] xl:text-[18px]">
               All-in-one solution to simplify hospital operations,
               <br className="hidden sm:block" /> enhance patient care and empower healthcare
               providers.
             </p>
 
             {/* Six features */}
-            <div className="mt-8 hidden w-full items-start justify-center lg:flex lg:mt-9 2xl:mt-12">
+            <div className="login-feature-list mt-6 hidden w-full items-start justify-center lg:flex">
               {FEATURES.map((feature, index) => {
                 const Icon = feature.icon;
                 return (
                   <Fragment key={feature.title}>
                     {index > 0 ? (
                       <span
-                        className="mx-1 mt-3 h-14 w-px shrink-0 bg-[#cfd8e3] xl:mx-2 2xl:h-16"
+                        className="mx-0.5 mt-3 h-12 w-px shrink-0 bg-[#cfd8e3] xl:mx-1 xl:h-14"
                         aria-hidden
                       />
                     ) : null}
-                    <div className="flex w-[104px] flex-col items-center xl:w-[118px] 2xl:w-[136px]">
-                      <Icon className="h-9 w-9 text-[#0B7A2A] xl:h-10 xl:w-10 2xl:h-12 2xl:w-12" />
-                      <span className="mt-2.5 text-[12.5px] font-semibold leading-snug text-[#1c2b45] xl:text-[13.5px] 2xl:text-[15px]">
+                    <div className="flex w-[88px] flex-col items-center xl:w-[108px] 2xl:w-[118px]">
+                      <Icon className="h-8 w-8 text-[#0B7A2A] xl:h-10 xl:w-10" />
+                      <span className="mt-2 text-[11.5px] font-semibold leading-snug text-[#1c2b45] xl:text-[13px] 2xl:text-[13.5px]">
                         {feature.title}
                       </span>
                     </div>
@@ -703,31 +702,31 @@ export default function LoginPage() {
             </div>
 
             {/* Message card */}
-            <div className="mt-8 hidden w-full max-w-[720px] items-center gap-5 rounded-2xl border border-[#cfe8d3] bg-[#eef8ef] px-7 py-5 shadow-[0_8px_24px_rgba(11,122,42,0.07)] lg:flex lg:mt-9 2xl:mt-12 2xl:max-w-[800px] 2xl:px-9 2xl:py-6">
-              <LeafIcon className="h-8 w-8 shrink-0 text-[#0B7A2A] 2xl:h-10 2xl:w-10" />
-              <p className="flex-1 text-center text-[14.5px] font-semibold leading-relaxed text-[#1c2b45] xl:text-[15.5px] 2xl:text-[17px]">
+            <div className="login-message-card mt-6 hidden w-full max-w-[720px] items-center gap-4 rounded-2xl border border-[#cfe8d3] bg-[#eef8ef] px-5 py-4 shadow-[0_8px_24px_rgba(11,122,42,0.07)] lg:flex xl:px-7 xl:py-5">
+              <LeafIcon className="h-8 w-8 shrink-0 text-[#0B7A2A]" />
+              <p className="flex-1 text-center text-[13.5px] font-semibold leading-relaxed text-[#1c2b45] xl:text-[15px]">
                 Empowering healthcare providers to deliver better care,
                 <br className="hidden xl:block" /> streamline operations and build healthier
                 communities.
               </p>
               <span className="hidden h-10 w-px shrink-0 bg-[#cfe8d3] lg:block" aria-hidden />
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#cfe8d3] bg-white text-[#0B7A2A] 2xl:h-12 2xl:w-12">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#cfe8d3] bg-white text-[#0B7A2A] xl:h-11 xl:w-11">
                 <HeartPulseIcon className="h-6 w-6" />
               </span>
             </div>
 
             {/* Four benefits */}
-            <div className="mt-9 hidden w-full max-w-[860px] grid-cols-4 gap-x-6 lg:grid lg:mt-10 2xl:mt-14 2xl:gap-x-8">
+            <div className="login-benefit-list mt-6 hidden w-full max-w-[860px] grid-cols-4 gap-x-4 lg:grid xl:gap-x-6">
               {BENEFITS.map((benefit) => {
                 const Icon = benefit.icon;
                 return (
                   <div key={benefit.title} className="flex items-start gap-3 text-left">
-                    <Icon className="mt-0.5 h-7 w-7 shrink-0 text-[#0B7A2A] 2xl:h-8 2xl:w-8" />
+                    <Icon className="mt-0.5 h-6 w-6 shrink-0 text-[#0B7A2A] xl:h-7 xl:w-7" />
                     <div>
-                      <p className="text-[13.5px] font-bold leading-tight text-[#1c2b45] 2xl:text-[15px]">
+                      <p className="text-[12.5px] font-bold leading-tight text-[#1c2b45] xl:text-[13.5px]">
                         {benefit.title}
                       </p>
-                      <p className="mt-1 text-[12px] leading-snug text-[#5b6b8c] 2xl:text-[13px]">
+                      <p className="mt-1 text-[11.5px] leading-snug text-[#5b6b8c] xl:text-[12px]">
                         {benefit.body}
                       </p>
                     </div>
@@ -741,14 +740,14 @@ export default function LoginPage() {
         {/* ---------------------------------------------------------- */}
         {/* RIGHT — login card                                          */}
         {/* ---------------------------------------------------------- */}
-        <section className="flex items-center justify-center px-4 pb-12 pt-4 sm:px-8 lg:px-8 lg:py-8 xl:px-12">
-          <div className="w-full max-w-[560px] rounded-[28px] border border-[#e6eef0] bg-white px-7 py-8 shadow-[0_24px_64px_rgba(15,36,64,0.08)] sm:px-10 sm:py-10 xl:max-w-[620px] xl:px-12 xl:py-12 2xl:max-w-[680px] 2xl:px-14">
+        <section className="login-form-panel flex items-center justify-center px-3 pb-8 pt-3 sm:px-6 sm:pb-10 lg:min-h-dvh lg:px-6 lg:py-4 xl:px-9">
+          <div className="login-card w-full max-w-[600px] rounded-[24px] border border-[#e6eef0] bg-white px-5 py-6 shadow-[0_24px_64px_rgba(15,36,64,0.08)] sm:rounded-[28px] sm:px-8 sm:py-8 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto xl:max-w-[620px] xl:px-10 xl:py-9">
             {mode !== 'forgot' ? (
               <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-[#eef2f7] p-1.5">
                 <button
                   type="button"
                   onClick={() => setMode('signin')}
-                  className={`h-12 rounded-xl text-[15px] font-bold transition-colors xl:h-[52px] xl:text-[16px] ${
+                  className={`h-11 rounded-xl text-[14px] font-bold transition-colors sm:h-12 sm:text-[15px] xl:h-[52px] xl:text-[16px] ${
                     mode === 'signin'
                       ? 'bg-white text-[#0f2440] shadow-[0_2px_10px_rgba(15,36,64,0.10)]'
                       : 'text-[#5b6b8c] hover:text-[#0f2440]'
@@ -760,7 +759,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setMode('register')}
-                  className={`h-12 rounded-xl text-[15px] font-bold transition-colors xl:h-[52px] xl:text-[16px] ${
+                  className={`h-11 rounded-xl text-[14px] font-bold transition-colors sm:h-12 sm:text-[15px] xl:h-[52px] xl:text-[16px] ${
                     mode === 'register'
                       ? 'bg-white text-[#0f2440] shadow-[0_2px_10px_rgba(15,36,64,0.10)]'
                       : 'text-[#5b6b8c] hover:text-[#0f2440]'
@@ -773,7 +772,7 @@ export default function LoginPage() {
             ) : null}
 
             {mode === 'register' ? (
-              <div className="mt-8">
+              <div className="mt-6 sm:mt-8">
                 <RegisterClinicForm
                   onRegistered={(email) => {
                     setMode('signin');
@@ -791,7 +790,7 @@ export default function LoginPage() {
             ) : (
               <>
                 <h2
-                  className="mt-8 text-[34px] font-extrabold leading-none tracking-tight xl:mt-9 xl:text-[40px] 2xl:text-[44px]"
+                  className="login-card-heading mt-6 text-[30px] font-extrabold leading-none tracking-tight sm:mt-7 sm:text-[34px] xl:mt-8 xl:text-[40px]"
                   style={{ color: NAVY }}
                 >
                   Welcome back
@@ -801,7 +800,7 @@ export default function LoginPage() {
                 </p>
 
                 {/* Role cards */}
-                <div className="mt-7 grid grid-cols-2 gap-4 xl:mt-8">
+                <div className="login-role-list mt-5 grid grid-cols-2 gap-3 sm:mt-6 sm:gap-4 xl:mt-7">
                   {ROLE_ORDER.map((role) => {
                     const isActive = role === selectedRole;
                     const Icon = role === 'clinic_admin' ? ClinicIcon : DoctorIcon;
@@ -811,19 +810,19 @@ export default function LoginPage() {
                         type="button"
                         onClick={() => setSelectedRole(role)}
                         aria-pressed={isActive}
-                        className={`flex h-[118px] flex-col items-center justify-center rounded-2xl border transition-all xl:h-[128px] ${
+                        className={`login-role-card flex h-[104px] flex-col items-center justify-center rounded-2xl border transition-all sm:h-[112px] xl:h-[120px] ${
                           isActive
                             ? 'border-[#9fd3ac] bg-[#eef8ef] shadow-[inset_0_-4px_0_0_#0B7A2A]'
                             : 'border-[#dbe3ec] bg-white hover:border-[#b9c7d6]'
                         }`}
                       >
                         <Icon
-                          className={`h-10 w-10 xl:h-11 xl:w-11 ${
+                          className={`h-9 w-9 sm:h-10 sm:w-10 xl:h-11 xl:w-11 ${
                             isActive ? 'text-[#0B7A2A]' : 'text-[#1c2b45]'
                           }`}
                         />
                         <span
-                          className={`mt-3 text-[15px] font-bold xl:text-[16px] ${
+                          className={`mt-2.5 text-[14px] font-bold sm:text-[15px] xl:text-[16px] ${
                             isActive ? 'text-[#0B5F22]' : 'text-[#1c2b45]'
                           }`}
                         >
@@ -835,8 +834,8 @@ export default function LoginPage() {
                 </div>
 
                 {/* Email */}
-                <div className="relative mt-6 xl:mt-7">
-                  <MailIcon className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8b9bb4]" />
+                <div className="login-field relative mt-5 sm:mt-6 xl:mt-7">
+                  <MailIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8b9bb4] sm:left-5" />
                   <input
                     id="role-email"
                     value={roleEmail}
@@ -848,8 +847,8 @@ export default function LoginPage() {
                 </div>
 
                 {/* Password */}
-                <div className="relative mt-4">
-                  <LockIcon className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8b9bb4]" />
+                <div className="relative mt-3.5 sm:mt-4">
+                  <LockIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8b9bb4] sm:left-5" />
                   <input
                     id="role-password"
                     type={showPassword ? 'text' : 'password'}
@@ -887,29 +886,34 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => void handleRoleSignIn()}
                   disabled={pendingLogin || !roleEmail.trim() || !rolePassword}
-                  className="relative mt-6 flex h-14 w-full items-center justify-center rounded-2xl bg-[linear-gradient(180deg,#1e9e3c_0%,#136e22_55%,#0b5717_100%)] text-[17px] font-bold text-white shadow-[0_12px_28px_rgba(11,96,29,0.35)] transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 xl:mt-7 xl:h-[58px] xl:text-[18px]"
+                  className="login-submit relative mt-5 flex h-[52px] w-full items-center justify-center rounded-2xl bg-[linear-gradient(180deg,#1e9e3c_0%,#136e22_55%,#0b5717_100%)] text-[16px] font-bold text-white shadow-[0_12px_28px_rgba(11,96,29,0.35)] transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:h-14 sm:text-[17px] xl:mt-6 xl:h-[58px] xl:text-[18px]"
                 >
                   {pendingLogin ? 'Signing in...' : 'Sign In'}
                   <ArrowRightIcon className="absolute right-6 top-1/2 h-5 w-5 -translate-y-1/2" />
                 </button>
 
                 {loginError ? (
-                  <p className="mt-3 text-sm font-semibold text-red-600">{loginError}</p>
+                  <p className="mt-3 break-words text-sm font-semibold text-red-600" role="alert">
+                    {loginError}
+                  </p>
                 ) : null}
 
-                <div className="mt-8 flex items-center gap-4 xl:mt-9" aria-hidden>
+                <div
+                  className="login-divider mt-6 flex items-center gap-3 sm:mt-7 sm:gap-4 xl:mt-8"
+                  aria-hidden
+                >
                   <span className="h-px flex-1 bg-[#dbe3ec]" />
                   <span className="text-[13.5px] text-[#8b9bb4]">or continue with</span>
                   <span className="h-px flex-1 bg-[#dbe3ec]" />
                 </div>
 
-                <div className="mt-6 text-center xl:mt-7">
+                <div className="login-contact mt-5 text-center sm:mt-6">
                   <p className="text-[15px] font-semibold" style={{ color: NAVY }}>
                     For any problem contact
                   </p>
                   <a
                     href="mailto:vaidhyaaenterprises@gmail.com"
-                    className="mt-1 inline-block text-[16px] font-bold text-[#0B7A2A] hover:underline xl:text-[17px]"
+                    className="mt-1 inline-block break-all text-[15px] font-bold text-[#0B7A2A] hover:underline sm:text-[16px] xl:text-[17px]"
                   >
                     vaidhyaaenterprises@gmail.com
                   </a>

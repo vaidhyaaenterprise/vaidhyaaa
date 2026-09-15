@@ -111,8 +111,9 @@ describe('parseWebEnv', () => {
     const env = parseWebEnv({
       NODE_ENV: 'development',
       WEB_PORT: '3001',
-      NEXT_PUBLIC_API_BASE_URL: 'http://localhost:3000',
+      API_BASE_URL: 'http://localhost:3000',
     });
     expect(env.WEB_PORT).toBe(3001);
+    expect(env.API_BASE_URL).toBe('http://localhost:3000');
   });
 });

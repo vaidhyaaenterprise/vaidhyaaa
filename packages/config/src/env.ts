@@ -8,7 +8,12 @@ const queueModeSchema = z.preprocess(
   z.enum(['inline', 'bullmq']),
 );
 const llmProviderSchema = z.enum(['mock', 'sarvam']);
-const receptionistAgentProviderSchema = z.enum(['mock', 'sarvam', 'openai_compatible', 'anthropic']);
+const receptionistAgentProviderSchema = z.enum([
+  'mock',
+  'sarvam',
+  'openai_compatible',
+  'anthropic',
+]);
 const conversationAgentModeSchema = z.enum(['legacy', 'agent']);
 const providerSchema = z.enum(['mock', 'real']);
 
@@ -68,113 +73,110 @@ export const apiEnvSchema = z
       .optional()
       .transform((value) => value === 'true' || value === '1'),
     AUTH_MODE: authModeSchema.default('dev'),
-  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
-  DEV_CLINIC_ID: z.string().uuid().optional(),
-  DEV_USER_ID: z.string().uuid().optional(),
-  DEV_USER_ROLE: z.enum(['clinic_admin', 'doctor', 'platform_admin']).optional(),
-  DEV_DOCTOR_ID: z.string().uuid().optional(),
-  API_BASE_URL: z.string().url().default('http://localhost:3000'),
-  PRIMARY_LLM_PROVIDER: llmProviderSchema.default('mock'),
-  SERVICE_ROUTER_PROVIDER: llmProviderSchema.default('mock'),
-  STATE_ENTITY_EXTRACTOR_PROVIDER: llmProviderSchema.default('mock'),
-  STATE_ENTITY_EXTRACTOR_MODEL: z.string().default('sarvam-30b'),
-  STATE_ENTITY_EXTRACTOR_FALLBACK_MODEL: z.string().default('sarvam-105b'),
-  STATE_ENTITY_EXTRACTOR_ENABLE_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? true : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  STATE_ENTITY_EXTRACTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
-  STATE_ENTITY_EXTRACTOR_LOG_RAW: z.preprocess(
-    (value) => value === 'true' || value === '1',
-    z.boolean(),
-  ),
-  ACTIVE_STATE_INTERPRETER_PROVIDER: z.enum(['composite', 'mock', 'sarvam']).default('composite'),
-  ACTIVE_STATE_LLM_PROVIDER: llmProviderSchema.default('mock'),
-  ACTIVE_STATE_LLM_MODEL: z.string().default('sarvam-30b'),
-  ACTIVE_STATE_LLM_FALLBACK_MODEL: z.string().default('sarvam-105b'),
-  ACTIVE_STATE_LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
-  ACTIVE_STATE_LLM_ENABLE_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? true : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  RECEPTIONIST_DIALOG_PLANNER_PROVIDER: llmProviderSchema.default('mock'),
-  RECEPTIONIST_DIALOG_PLANNER_MODEL: z.string().default('sarvam-30b'),
-  RECEPTIONIST_DIALOG_PLANNER_FALLBACK_MODEL: z.string().default('sarvam-105b'),
-  RECEPTIONIST_DIALOG_PLANNER_ENABLE_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? true : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  RECEPTIONIST_DIALOG_PLANNER_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
-  CONVERSATION_AGENT_MODE: conversationAgentModeSchema.default('legacy'),
-  RECEPTIONIST_AGENT_PROVIDER: receptionistAgentProviderSchema.default('mock'),
-  RECEPTIONIST_AGENT_MODEL: z.string().default('sarvam-105b'),
-  RECEPTIONIST_AGENT_FASTPATH_MODEL: z.string().default('sarvam-30b'),
-  RECEPTIONIST_AGENT_FALLBACK_MODEL: z.string().default('sarvam-105b'),
-  RECEPTIONIST_AGENT_ENABLE_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? true : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  RECEPTIONIST_AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
-  RECEPTIONIST_AGENT_TURN_BUDGET_MS: z.coerce.number().int().positive().default(15000),
-  RECEPTIONIST_AGENT_MAX_TOKENS: z.coerce.number().int().positive().default(1000),
-  RECEPTIONIST_AGENT_MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(4),
-  OPENAI_COMPAT_BASE_URL: z.string().url().optional(),
-  OPENAI_COMPAT_API_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  PRIMARY_LLM_MODEL: z.string().default('sarvam-30b'),
-  FALLBACK_LLM_MODEL: z.string().default('sarvam-105b'),
-  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
-  LLM_ENABLE_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? true : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  LLM_LATENCY_MODE: z.enum(['auto', 'fast', 'standard']).default('auto'),
-  LLM_FAST_CHANNELS: z.string().default('web_demo,voice_call,admin_test'),
-  LLM_FAST_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-  LLM_FAST_ENABLE_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? false : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  LLM_FAST_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(280),
-  LLM_SERVICE_ROUTER_MEMORY_CACHE_TTL_SEC: z.coerce.number().int().nonnegative().default(3600),
-  LLM_LOG_RAW: z.preprocess(
-    (value) => value === 'true' || value === '1',
-    z.boolean(),
-  ),
-  SARVAM_API_KEY: z.string().optional(),
-  SARVAM_AUTH_MODE: z.enum(['subscription', 'bearer', 'api_key', 'auto']).default('auto'),
-  STT_PROVIDER: providerSchema.default('mock'),
-  TTS_PROVIDER: providerSchema.default('mock'),
-  TELEPHONY_PROVIDER: providerSchema.default('mock'),
-  MESSAGING_PROVIDER: providerSchema.default('mock'),
-  OBJECT_STORAGE_PROVIDER: providerSchema.default('mock'),
-  DEFAULT_RECORDING_RETENTION_DAYS: z.coerce.number().int().positive().default(10),
-  DEFAULT_TRANSCRIPT_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
-  VOICE_SILENCE_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(5),
-  VOICE_NO_SPEECH_RETRY_COUNT: z.coerce.number().int().nonnegative().default(2),
-  VOICE_MAX_CALL_DURATION_SECONDS: z.coerce.number().int().positive().default(300),
-  VOICE_STT_LOW_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.55),
-  VOICE_TTS_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
-  DEBUG_API: z
-    .string()
-    .optional()
-    .transform((v) => v === 'true' || v === '1'),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-  KNOWLEDGE_SEARCH_PROVIDER: z.enum(['text', 'pgvector', 'hybrid']).default('text'),
-  EMBEDDING_PROVIDER: z.enum(['mock', 'sarvam', 'gemini', 'openai', 'nvidia']).default('mock'),
-  EMBEDDING_MODEL: z.string().default('mock-embedding-v1'),
-  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),
-  KNOWLEDGE_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.7),
-  KNOWLEDGE_VECTOR_MAX_RESULTS: z.coerce.number().int().positive().default(5),
-  KNOWLEDGE_VECTOR_USE_HYBRID_FALLBACK: z.preprocess(
-    (value) => (value === undefined ? true : value === 'true' || value === '1'),
-    z.boolean(),
-  ),
-  EMBEDDING_MOCK_FAIL_KNOWLEDGE_IDS: z.string().optional(),
-  GEMINI_API_KEY: z.string().optional(),
-  NVIDIA_API_KEY: z.string().optional(),
-  NVIDIA_API_BASE_URL: z.string().url().optional(),
-  CORS_ORIGINS: z.string().default('http://localhost:3001'),
+    JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
+    DEV_CLINIC_ID: z.string().uuid().optional(),
+    DEV_USER_ID: z.string().uuid().optional(),
+    DEV_USER_ROLE: z.enum(['clinic_admin', 'doctor', 'platform_admin']).optional(),
+    DEV_DOCTOR_ID: z.string().uuid().optional(),
+    API_BASE_URL: z.string().url().default('http://localhost:3000'),
+    PRIMARY_LLM_PROVIDER: llmProviderSchema.default('mock'),
+    SERVICE_ROUTER_PROVIDER: llmProviderSchema.default('mock'),
+    STATE_ENTITY_EXTRACTOR_PROVIDER: llmProviderSchema.default('mock'),
+    STATE_ENTITY_EXTRACTOR_MODEL: z.string().default('sarvam-30b'),
+    STATE_ENTITY_EXTRACTOR_FALLBACK_MODEL: z.string().default('sarvam-105b'),
+    STATE_ENTITY_EXTRACTOR_ENABLE_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? true : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    STATE_ENTITY_EXTRACTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+    STATE_ENTITY_EXTRACTOR_LOG_RAW: z.preprocess(
+      (value) => value === 'true' || value === '1',
+      z.boolean(),
+    ),
+    ACTIVE_STATE_INTERPRETER_PROVIDER: z.enum(['composite', 'mock', 'sarvam']).default('composite'),
+    ACTIVE_STATE_LLM_PROVIDER: llmProviderSchema.default('mock'),
+    ACTIVE_STATE_LLM_MODEL: z.string().default('sarvam-30b'),
+    ACTIVE_STATE_LLM_FALLBACK_MODEL: z.string().default('sarvam-105b'),
+    ACTIVE_STATE_LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+    ACTIVE_STATE_LLM_ENABLE_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? true : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    RECEPTIONIST_DIALOG_PLANNER_PROVIDER: llmProviderSchema.default('mock'),
+    RECEPTIONIST_DIALOG_PLANNER_MODEL: z.string().default('sarvam-30b'),
+    RECEPTIONIST_DIALOG_PLANNER_FALLBACK_MODEL: z.string().default('sarvam-105b'),
+    RECEPTIONIST_DIALOG_PLANNER_ENABLE_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? true : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    RECEPTIONIST_DIALOG_PLANNER_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+    CONVERSATION_AGENT_MODE: conversationAgentModeSchema.default('legacy'),
+    RECEPTIONIST_AGENT_PROVIDER: receptionistAgentProviderSchema.default('mock'),
+    RECEPTIONIST_AGENT_MODEL: z.string().default('sarvam-105b'),
+    RECEPTIONIST_AGENT_FASTPATH_MODEL: z.string().default('sarvam-30b'),
+    RECEPTIONIST_AGENT_FALLBACK_MODEL: z.string().default('sarvam-105b'),
+    RECEPTIONIST_AGENT_ENABLE_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? true : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    RECEPTIONIST_AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    RECEPTIONIST_AGENT_TURN_BUDGET_MS: z.coerce.number().int().positive().default(15000),
+    RECEPTIONIST_AGENT_MAX_TOKENS: z.coerce.number().int().positive().default(1000),
+    RECEPTIONIST_AGENT_MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(4),
+    OPENAI_COMPAT_BASE_URL: z.string().url().optional(),
+    OPENAI_COMPAT_API_KEY: z.string().optional(),
+    ANTHROPIC_API_KEY: z.string().optional(),
+    PRIMARY_LLM_MODEL: z.string().default('sarvam-30b'),
+    FALLBACK_LLM_MODEL: z.string().default('sarvam-105b'),
+    LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+    LLM_ENABLE_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? true : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    LLM_LATENCY_MODE: z.enum(['auto', 'fast', 'standard']).default('auto'),
+    LLM_FAST_CHANNELS: z.string().default('web_demo,voice_call,admin_test'),
+    LLM_FAST_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+    LLM_FAST_ENABLE_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? false : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    LLM_FAST_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(280),
+    LLM_SERVICE_ROUTER_MEMORY_CACHE_TTL_SEC: z.coerce.number().int().nonnegative().default(3600),
+    LLM_LOG_RAW: z.preprocess((value) => value === 'true' || value === '1', z.boolean()),
+    SARVAM_API_KEY: z.string().optional(),
+    SARVAM_AUTH_MODE: z.enum(['subscription', 'bearer', 'api_key', 'auto']).default('auto'),
+    STT_PROVIDER: providerSchema.default('mock'),
+    TTS_PROVIDER: providerSchema.default('mock'),
+    TELEPHONY_PROVIDER: providerSchema.default('mock'),
+    MESSAGING_PROVIDER: providerSchema.default('mock'),
+    OBJECT_STORAGE_PROVIDER: providerSchema.default('mock'),
+    DEFAULT_RECORDING_RETENTION_DAYS: z.coerce.number().int().positive().default(10),
+    DEFAULT_TRANSCRIPT_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+    VOICE_SILENCE_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(5),
+    VOICE_NO_SPEECH_RETRY_COUNT: z.coerce.number().int().nonnegative().default(2),
+    VOICE_MAX_CALL_DURATION_SECONDS: z.coerce.number().int().positive().default(300),
+    VOICE_STT_LOW_CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.55),
+    VOICE_TTS_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+    DEBUG_API: z
+      .string()
+      .optional()
+      .transform((v) => v === 'true' || v === '1'),
+    LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    KNOWLEDGE_SEARCH_PROVIDER: z.enum(['text', 'pgvector', 'hybrid']).default('text'),
+    EMBEDDING_PROVIDER: z.enum(['mock', 'sarvam', 'gemini', 'openai', 'nvidia']).default('mock'),
+    EMBEDDING_MODEL: z.string().default('mock-embedding-v1'),
+    EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),
+    KNOWLEDGE_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.7),
+    KNOWLEDGE_VECTOR_MAX_RESULTS: z.coerce.number().int().positive().default(5),
+    KNOWLEDGE_VECTOR_USE_HYBRID_FALLBACK: z.preprocess(
+      (value) => (value === undefined ? true : value === 'true' || value === '1'),
+      z.boolean(),
+    ),
+    EMBEDDING_MOCK_FAIL_KNOWLEDGE_IDS: z.string().optional(),
+    GEMINI_API_KEY: z.string().optional(),
+    NVIDIA_API_KEY: z.string().optional(),
+    NVIDIA_API_BASE_URL: z.string().url().optional(),
+    CORS_ORIGINS: z.string().default('http://localhost:3001'),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
     SMTP_HOST: z.string().optional(),
@@ -257,7 +259,8 @@ export const apiEnvSchema = z
 export const webEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema.default('development'),
   WEB_PORT: z.coerce.number().int().positive().default(3001),
-  NEXT_PUBLIC_API_BASE_URL: z.string().url().default('http://localhost:3000'),
+  API_BASE_URL: z.string().url().default('http://localhost:3000'),
+  NEXT_PUBLIC_API_BASE_URL: z.string().url().optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
@@ -311,9 +314,7 @@ function normalizeReceptionistAgentEnv(
   return normalized;
 }
 
-export function parseApiEnv(
-  env: Record<string, string | undefined> = process.env,
-): ApiEnv {
+export function parseApiEnv(env: Record<string, string | undefined> = process.env): ApiEnv {
   const result = apiEnvSchema.safeParse(normalizeReceptionistAgentEnv(env));
   if (!result.success) {
     throw new EnvValidationError(
@@ -324,9 +325,7 @@ export function parseApiEnv(
   return result.data;
 }
 
-export function parseWebEnv(
-  env: Record<string, string | undefined> = process.env,
-): WebEnv {
+export function parseWebEnv(env: Record<string, string | undefined> = process.env): WebEnv {
   const result = webEnvSchema.safeParse(env);
   if (!result.success) {
     throw new EnvValidationError(

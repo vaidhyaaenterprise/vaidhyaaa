@@ -11,8 +11,15 @@ import {
 describe('api client', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     window.localStorage.clear();
     window.sessionStorage.clear();
+  });
+
+  it('uses the same-origin API proxy when no public API URL is configured', () => {
+    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', '');
+
+    expect(getApiBaseUrl()).toBe('/api/backend');
   });
 
   it('uses NEXT_PUBLIC_API_BASE_URL and dev auth headers', async () => {

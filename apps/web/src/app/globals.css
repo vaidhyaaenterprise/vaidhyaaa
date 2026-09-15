@@ -9,7 +9,7 @@
 }
 
 html {
-  overflow-x: hidden;
+  overflow-x: clip;
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
@@ -20,11 +20,69 @@ html {
 }
 
 body {
-  @apply min-h-screen overflow-x-hidden bg-page text-slate-900 antialiased;
+  @apply min-h-screen bg-page text-slate-900 antialiased;
+  min-height: 100dvh;
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code {
   @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em];
+}
+
+/* Keep the two-column sign-in screen usable on short laptop and tablet displays. */
+@media (min-width: 1024px) and (max-height: 900px) {
+  .login-brand-panel {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .login-brand-logo {
+    width: clamp(88px, 12vh, 116px);
+    height: clamp(88px, 12vh, 116px);
+  }
+
+  .login-brand-title {
+    margin-top: 0.5rem;
+    font-size: clamp(3.25rem, 8vh, 4.25rem);
+  }
+
+  .login-brand-tagline {
+    margin-top: 0.5rem;
+  }
+
+  .login-brand-intro,
+  .login-feature-list,
+  .login-message-card,
+  .login-benefit-list {
+    margin-top: clamp(0.75rem, 2vh, 1.25rem);
+  }
+
+  .login-message-card {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .login-card {
+    padding-top: clamp(1rem, 2.5vh, 1.5rem);
+    padding-bottom: clamp(1rem, 2.5vh, 1.5rem);
+  }
+
+  .login-card-heading {
+    margin-top: clamp(1.25rem, 3vh, 1.75rem);
+    font-size: clamp(2rem, 5vh, 2.5rem);
+  }
+
+  .login-role-list,
+  .login-field,
+  .login-submit,
+  .login-divider,
+  .login-contact {
+    margin-top: clamp(0.75rem, 2vh, 1.25rem);
+  }
+
+  .login-role-card {
+    height: clamp(5.5rem, 13vh, 6.5rem);
+  }
 }
