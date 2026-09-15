@@ -38,12 +38,12 @@ describe('API proxy route', () => {
     await expect(response.json()).resolves.toMatchObject({ data: { ok: true } });
   });
 
-  it('returns a structured error when a production API is not configured', async () => {
+  it('uses the same-server API default in production and returns structured failures', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('API_BASE_URL', '');
     vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', '');
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('connection refused'));
     vi.stubGlobal('fetch', fetchMock);
     const request = new NextRequest('https://web.example.test/api/backend/v1/health');
 
@@ -52,12 +52,14 @@ describe('API proxy route', () => {
     });
     const payload = await response.json();
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const calls = fetchMock.mock.calls as unknown as Array<[string | URL | Request, RequestInit]>;
+    expect(String(calls[0]?.[0])).toBe('http://127.0.0.1:3000/v1/health');
     expect(response.status).toBe(503);
     expect(payload).toMatchObject({
       error: {
         code: 'INTERNAL_ERROR',
-        message: 'The service is temporarily unavailable. Please contact support.',
+        message: 'The service is temporarily unavailable. Please try again shortly.',
       },
     });
   });

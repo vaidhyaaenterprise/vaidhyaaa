@@ -34,7 +34,7 @@ function errorResponse(message: string, requestId: string, status = 503): Respon
   });
 }
 
-function getUpstreamBaseUrl(): string | null {
+function getUpstreamBaseUrl(): string {
   const configured =
     process.env.API_BASE_URL?.trim() || process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
@@ -42,20 +42,14 @@ function getUpstreamBaseUrl(): string | null {
     return configured.replace(/\/+$/, '');
   }
 
-  return process.env.NODE_ENV === 'production' ? null : LOCAL_API_BASE_URL;
+  // The repository runs the web and API processes on the same host by default.
+  // This remains valid for `next start`, where NODE_ENV is always production.
+  return LOCAL_API_BASE_URL;
 }
 
 async function proxyRequest(request: NextRequest, context: RouteContext): Promise<Response> {
   const requestId = request.headers.get(REQUEST_ID_HEADER) || createRequestId();
   const upstreamBaseUrl = getUpstreamBaseUrl();
-
-  if (!upstreamBaseUrl) {
-    console.error('API proxy is unavailable because API_BASE_URL is not configured.');
-    return errorResponse(
-      'The service is temporarily unavailable. Please contact support.',
-      requestId,
-    );
-  }
 
   const { path } = await context.params;
   const encodedPath = path.map((segment) => encodeURIComponent(segment)).join('/');

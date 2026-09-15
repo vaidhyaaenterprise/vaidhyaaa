@@ -15,31 +15,10 @@ import { DEV_SEED } from '../dev-auth/constants';
 import type { ApiClientError } from './types';
 
 export function getApiBaseUrl(): string {
-  // Prefer the same-origin server proxy. Unlike a NEXT_PUBLIC value, the upstream
-  // API URL can then be changed at runtime without rebuilding the browser bundle.
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || '/api/backend';
-
-  const normalizedBase = base.replace(/\/$/, '');
-  if (typeof window === 'undefined') {
-    return normalizedBase;
-  }
-
-  try {
-    const configured = new URL(normalizedBase);
-    const currentHost = window.location.hostname;
-    const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1']);
-    const configuredIsLoopback = loopbackHosts.has(configured.hostname);
-    const currentIsLoopback = loopbackHosts.has(currentHost);
-
-    if (configuredIsLoopback && !currentIsLoopback) {
-      configured.hostname = currentHost;
-      return configured.toString().replace(/\/$/, '');
-    }
-  } catch {
-    return normalizedBase;
-  }
-
-  return normalizedBase;
+  // Browser requests must stay on the web application's origin. The server-side
+  // proxy resolves the actual API host, so localhost never refers to the user's
+  // browser and changing the upstream does not require rebuilding this bundle.
+  return '/api/backend';
 }
 
 function buildAuthHeaders(): Record<string, string> {

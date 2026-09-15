@@ -16,13 +16,13 @@ describe('api client', () => {
     window.sessionStorage.clear();
   });
 
-  it('uses the same-origin API proxy when no public API URL is configured', () => {
+  it('always uses the same-origin API proxy', () => {
     vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', '');
 
     expect(getApiBaseUrl()).toBe('/api/backend');
   });
 
-  it('uses NEXT_PUBLIC_API_BASE_URL and dev auth headers', async () => {
+  it('uses the API proxy and dev auth headers', async () => {
     window.localStorage.setItem(
       DEV_AUTH_STORAGE_KEY,
       JSON.stringify(DEV_AUTH_PRESETS.clinic_admin.profile),
@@ -144,7 +144,7 @@ describe('api client', () => {
     });
   });
 
-  it('rewrites a loopback API base to the current browser host', () => {
+  it('does not expose a configured upstream API URL to the browser', () => {
     const originalLocation = window.location;
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -154,7 +154,7 @@ describe('api client', () => {
       },
     });
 
-    expect(getApiBaseUrl()).toBe('http://172.31.19.151:3000');
+    expect(getApiBaseUrl()).toBe('/api/backend');
 
     Object.defineProperty(window, 'location', {
       configurable: true,
