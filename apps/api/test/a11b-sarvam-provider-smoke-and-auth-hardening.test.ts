@@ -23,7 +23,7 @@ const baseInput = {
 };
 
 const sarvamEnv = parseApiEnv({
-  NODE_ENV: 'development',
+  NODE_ENV: 'test',
   APP_ENV: 'local',
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vaidya_local',
   JWT_SECRET: 'dev_only_change_me',
@@ -178,10 +178,11 @@ describe('A11B Sarvam provider smoke and auth hardening', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
+      text: async () => '',
     });
     const autoEnv = parseApiEnv({
       ...{
-        NODE_ENV: 'development',
+        NODE_ENV: 'test',
         APP_ENV: 'local',
         DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/vaidya_local',
         JWT_SECRET: 'dev_only_change_me',

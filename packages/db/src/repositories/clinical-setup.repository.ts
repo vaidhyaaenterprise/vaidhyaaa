@@ -101,10 +101,7 @@ export class ClinicalSetupRepository {
       .from(patientVisits)
       .innerJoin(
         doctors,
-        and(
-          eq(doctors.clinicId, patientVisits.clinicId),
-          eq(doctors.id, patientVisits.doctorId),
-        ),
+        and(eq(doctors.clinicId, patientVisits.clinicId), eq(doctors.id, patientVisits.doctorId)),
       )
       .innerJoin(
         clinicServices,
@@ -114,10 +111,7 @@ export class ClinicalSetupRepository {
         ),
       )
       .where(
-        and(
-          eq(patientVisits.clinicId, clinicId),
-          inArray(patientVisits.patientId, patientIds),
-        ),
+        and(eq(patientVisits.clinicId, clinicId), inArray(patientVisits.patientId, patientIds)),
       )
       .orderBy(desc(patientVisits.visitedAt));
   }
@@ -181,27 +175,29 @@ export class ClinicalSetupRepository {
       active: boolean;
     }>,
   ) {
-    await this.db
-      .update(clinicHours)
-      .set({ active: false, updatedAt: new Date() })
-      .where(eq(clinicHours.clinicId, clinicId));
+    return this.db.transaction(async (transaction) => {
+      await transaction
+        .update(clinicHours)
+        .set({ active: false, updatedAt: new Date() })
+        .where(eq(clinicHours.clinicId, clinicId));
 
-    if (windows.length === 0) {
-      return [];
-    }
+      if (windows.length === 0) {
+        return [];
+      }
 
-    return this.db
-      .insert(clinicHours)
-      .values(
-        windows.map((window) => ({
-          clinicId,
-          dayOfWeek: window.dayOfWeek,
-          startTime: window.startTime,
-          endTime: window.endTime,
-          active: window.active,
-        })),
-      )
-      .returning();
+      return transaction
+        .insert(clinicHours)
+        .values(
+          windows.map((window) => ({
+            clinicId,
+            dayOfWeek: window.dayOfWeek,
+            startTime: window.startTime,
+            endTime: window.endTime,
+            active: window.active,
+          })),
+        )
+        .returning();
+    });
   }
 
   listHolidays(clinicId: string) {
@@ -222,7 +218,10 @@ export class ClinicalSetupRepository {
 
   listHolidayDoctorMappings(clinicId: string) {
     return this.db
-      .select({ holidayId: clinicHolidayDoctors.holidayId, doctorId: clinicHolidayDoctors.doctorId })
+      .select({
+        holidayId: clinicHolidayDoctors.holidayId,
+        doctorId: clinicHolidayDoctors.doctorId,
+      })
       .from(clinicHolidayDoctors)
       .where(eq(clinicHolidayDoctors.clinicId, clinicId));
   }
@@ -256,29 +255,31 @@ export class ClinicalSetupRepository {
   }
 
   async replaceHolidayDoctors(clinicId: string, holidayId: string, doctorIds: string[]) {
-    await this.db
-      .delete(clinicHolidayDoctors)
-      .where(
-        and(
-          eq(clinicHolidayDoctors.clinicId, clinicId),
-          eq(clinicHolidayDoctors.holidayId, holidayId),
-        ),
-      );
+    return this.db.transaction(async (transaction) => {
+      await transaction
+        .delete(clinicHolidayDoctors)
+        .where(
+          and(
+            eq(clinicHolidayDoctors.clinicId, clinicId),
+            eq(clinicHolidayDoctors.holidayId, holidayId),
+          ),
+        );
 
-    if (doctorIds.length === 0) {
-      return [];
-    }
+      if (doctorIds.length === 0) {
+        return [];
+      }
 
-    return this.db
-      .insert(clinicHolidayDoctors)
-      .values(
-        doctorIds.map((doctorId) => ({
-          clinicId,
-          holidayId,
-          doctorId,
-        })),
-      )
-      .returning();
+      return transaction
+        .insert(clinicHolidayDoctors)
+        .values(
+          doctorIds.map((doctorId) => ({
+            clinicId,
+            holidayId,
+            doctorId,
+          })),
+        )
+        .returning();
+    });
   }
 
   listDoctorSchedules(clinicId: string, doctorId?: string) {
@@ -306,38 +307,37 @@ export class ClinicalSetupRepository {
       active: boolean;
     }>,
   ) {
-    await this.db
-      .update(doctorSchedules)
-      .set({ active: false, updatedAt: new Date() })
-      .where(and(eq(doctorSchedules.clinicId, clinicId), eq(doctorSchedules.doctorId, doctorId)));
+    return this.db.transaction(async (transaction) => {
+      await transaction
+        .update(doctorSchedules)
+        .set({ active: false, updatedAt: new Date() })
+        .where(and(eq(doctorSchedules.clinicId, clinicId), eq(doctorSchedules.doctorId, doctorId)));
 
-    if (windows.length === 0) {
-      return [];
-    }
+      if (windows.length === 0) {
+        return [];
+      }
 
-    return this.db
-      .insert(doctorSchedules)
-      .values(
-        windows.map((window) => ({
-          clinicId,
-          doctorId,
-          doctorServiceId: window.doctorServiceId ?? null,
-          dayOfWeek: window.dayOfWeek,
-          startTime: window.startTime,
-          endTime: window.endTime,
-          effectiveFrom: window.effectiveFrom ?? null,
-          effectiveTo: window.effectiveTo ?? null,
-          active: window.active,
-        })),
-      )
-      .returning();
+      return transaction
+        .insert(doctorSchedules)
+        .values(
+          windows.map((window) => ({
+            clinicId,
+            doctorId,
+            doctorServiceId: window.doctorServiceId ?? null,
+            dayOfWeek: window.dayOfWeek,
+            startTime: window.startTime,
+            endTime: window.endTime,
+            effectiveFrom: window.effectiveFrom ?? null,
+            effectiveTo: window.effectiveTo ?? null,
+            active: window.active,
+          })),
+        )
+        .returning();
+    });
   }
 
   listDoctorServiceMappings(clinicId: string) {
-    return this.db
-      .select()
-      .from(doctorServices)
-      .where(eq(doctorServices.clinicId, clinicId));
+    return this.db.select().from(doctorServices).where(eq(doctorServices.clinicId, clinicId));
   }
 
   findDoctorServiceMappingByDoctorAndService(
@@ -548,7 +548,9 @@ export class ClinicalSetupRepository {
   deleteDoctorServiceMappingsForService(clinicId: string, serviceId: string) {
     return this.db
       .delete(doctorServices)
-      .where(and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.clinicServiceId, serviceId)))
+      .where(
+        and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.clinicServiceId, serviceId)),
+      )
       .returning();
   }
 
@@ -583,11 +585,7 @@ export class ClinicalSetupRepository {
       .returning();
   }
 
-  deleteBookingRulesForDoctorService(
-    clinicId: string,
-    doctorId: string,
-    clinicServiceId: string,
-  ) {
+  deleteBookingRulesForDoctorService(clinicId: string, doctorId: string, clinicServiceId: string) {
     return this.db
       .delete(doctorServiceBookingRules)
       .where(

@@ -15,13 +15,13 @@ import { KnowledgeAdminService } from './knowledge-admin.service';
 
 @Controller('knowledge')
 export class KnowledgeController {
-  constructor(@Inject(KnowledgeAdminService) private readonly knowledgeAdmin: KnowledgeAdminService) {}
+  constructor(
+    @Inject(KnowledgeAdminService) private readonly knowledgeAdmin: KnowledgeAdminService,
+  ) {}
 
   @Get('embedding-status')
   @Roles('clinic_admin')
-  async getEmbeddingStatus(
-    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
-  ) {
+  async getEmbeddingStatus(@Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext }) {
     const auth = getAuthContext(request);
     const clinicId = auth.clinicId;
     if (!clinicId) {
@@ -64,7 +64,9 @@ export class KnowledgeController {
 
   @Post('manual-template/import')
   @Roles('clinic_admin')
-  async importManualTemplate(@Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext }) {
+  async importManualTemplate(
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
     const auth = getAuthContext(request);
     if (!auth.clinicId) {
       throw new AppError('FORBIDDEN', 'Clinic context is required.');
@@ -104,8 +106,12 @@ export class KnowledgeController {
     @Body() body: { clinic_id: string; only_status?: 'approved' | 'all' },
   ) {
     const auth = getAuthContext(request);
+    const clinicId = auth.clinicId;
+    if (!clinicId) {
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
+    }
     return this.knowledgeAdmin.regenerateEmbeddings({
-      clinicId: body.clinic_id,
+      clinicId,
       onlyStatus: body.only_status ?? 'approved',
       requestedByUserId: auth.userId,
     });
@@ -116,12 +122,11 @@ export class KnowledgeController {
   async retryEmbedding(
     @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
     @Param('knowledgeId') knowledgeId: string,
-    @Body() body: { clinic_id?: string },
   ) {
     const auth = getAuthContext(request);
-    const clinicId = body.clinic_id ?? auth.clinicId;
+    const clinicId = auth.clinicId;
     if (!clinicId) {
-      return { queued: false };
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
     }
     return this.knowledgeAdmin.retryEmbedding({
       clinicId,
@@ -143,16 +148,9 @@ export class KnowledgeController {
       throw new AppError('VALIDATION_ERROR', 'Invalid knowledge entry payload.');
     }
 
-    const clinicId =
-      typeof body === 'object' &&
-      body !== null &&
-      'clinic_id' in body &&
-      typeof (body as { clinic_id?: unknown }).clinic_id === 'string'
-        ? (body as { clinic_id: string }).clinic_id
-        : auth.clinicId;
-
+    const clinicId = auth.clinicId;
     if (!clinicId) {
-      return { knowledge: null };
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
     }
 
     const knowledge = await this.knowledgeAdmin.patchKnowledgeEntry({

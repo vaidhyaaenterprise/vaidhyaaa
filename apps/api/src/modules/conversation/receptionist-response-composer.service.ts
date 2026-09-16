@@ -5,7 +5,6 @@ import {
   attachActiveTask,
   markTaskCompleted,
   parseActiveTask,
-  resolveResumePromptTemplateKey,
   shouldOfferRepeatedPromptEscalation,
   type LanguageCode,
   type ReceptionistDialogPlan,
@@ -23,10 +22,12 @@ export class ReceptionistResponseComposer {
     languageCode: LanguageCode,
     clinicName: string,
     messageText?: string,
-  ): Promise<{ templateKey: string; templateVariables: Record<string, string>; messageText: string }> {
-    const isOkay = messageText
-      ? /^(okay|ok|seri|sari)\.?$/i.test(messageText.trim())
-      : false;
+  ): Promise<{
+    templateKey: string;
+    templateVariables: Record<string, string>;
+    messageText: string;
+  }> {
+    const isOkay = messageText ? /^(okay|ok|seri|sari)\.?$/i.test(messageText.trim()) : false;
     const templateKey = isOkay ? 'ack.okay_offer_help' : 'ack.thanks_offer_help';
     const rendered = await this.templateRenderer.render(templateKey, languageCode, {
       clinic_name: clinicName,
@@ -43,13 +44,20 @@ export class ReceptionistResponseComposer {
     languageCode: LanguageCode,
     clinicName: string,
     resumePrompt?: string | null,
-  ): Promise<{ templateKey: string; templateVariables: Record<string, string>; messageText: string }> {
+  ): Promise<{
+    templateKey: string;
+    templateVariables: Record<string, string>;
+    messageText: string;
+  }> {
     const templateKey = resumePrompt ? 'clarify.which_detail_resume' : 'clarify.which_detail';
     const rendered = await this.templateRenderer.render(templateKey, languageCode, {
       clinic_name: clinicName,
       ...(resumePrompt ? { resume_prompt: resumePrompt } : {}),
     });
-    if (shouldOfferRepeatedPromptEscalation({}) && plan.clarificationReason === 'unrecognized_utterance') {
+    if (
+      shouldOfferRepeatedPromptEscalation({}) &&
+      plan.clarificationReason === 'unrecognized_utterance'
+    ) {
       const escalation = await this.templateRenderer.render('llm.callback_fallback', languageCode, {
         clinic_name: clinicName,
       });
@@ -106,7 +114,10 @@ export class ReceptionistResponseComposer {
       return next;
     }
 
-    if (plan.turnType === 'ask_clarification_and_keep_task' || plan.taskPlan.shouldResumeActiveTask) {
+    if (
+      plan.turnType === 'ask_clarification_and_keep_task' ||
+      plan.taskPlan.shouldResumeActiveTask
+    ) {
       const activeTask = parseActiveTask(collected);
       if (activeTask) {
         next = attachActiveTask(next, activeTask);

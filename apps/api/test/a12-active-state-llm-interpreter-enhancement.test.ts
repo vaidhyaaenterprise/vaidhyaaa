@@ -2,7 +2,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NestFastifyApplication } from '@nestjs/platform-fastify';
 
-import { addDays, formatDateInTimezone } from '@vaidya/db';
+import { addDays } from '@vaidya/db';
 import { apiSuccessBodySchema, extractStateEntitiesMock } from '@vaidya/shared';
 
 import { prepareTestDatabase } from './db-setup';
@@ -21,8 +21,18 @@ const extractorBase = {
 };
 
 const offeredSlots = [
-  { slotId: '00000000-0000-0000-0000-000000000101', startTime: '2026-05-16T12:00:00Z', endTime: '2026-05-16T12:30:00Z', displayTime: '6:00 PM' },
-  { slotId: '00000000-0000-0000-0000-000000000102', startTime: '2026-05-16T12:30:00Z', endTime: '2026-05-16T13:00:00Z', displayTime: '6:30 PM' },
+  {
+    slotId: '00000000-0000-0000-0000-000000000101',
+    startTime: '2026-05-16T12:00:00Z',
+    endTime: '2026-05-16T12:30:00Z',
+    displayTime: '6:00 PM',
+  },
+  {
+    slotId: '00000000-0000-0000-0000-000000000102',
+    startTime: '2026-05-16T12:30:00Z',
+    endTime: '2026-05-16T13:00:00Z',
+    displayTime: '6:30 PM',
+  },
 ];
 
 async function createConversation(app: NestFastifyApplication, phone: string) {
@@ -302,7 +312,9 @@ describe('A12 active-state LLM interpreter enhancement', () => {
       const sessionId = await createConversation(app, '+919222331203');
       await sendMessage(app, sessionId, 'Knee pain appointment venum', 'a12_book_3');
       const step2 = await sendMessage(app, sessionId, 'Fever-ku enna tablet?', 'a12_medical');
-      expect(step2.assistant_message.reply_template_key).toBe('safety.medical_advice_refusal_resume');
+      expect(step2.assistant_message.reply_template_key).toBe(
+        'safety.medical_advice_refusal_resume',
+      );
     });
   });
 });

@@ -104,6 +104,12 @@ describe('parseApiEnv', () => {
     expect(env.RECEPTIONIST_AGENT_FASTPATH_MODEL).toBe('sarvam-30b');
     expect(env.RECEPTIONIST_AGENT_FALLBACK_MODEL).toBe('sarvam-105b');
   });
+
+  it('uses a platform-provided HTTP port when present', () => {
+    const env = parseApiEnv({ ...validApiEnv, PORT: '8080' });
+
+    expect(env.PORT).toBe(8080);
+  });
 });
 
 describe('parseWebEnv', () => {
@@ -111,8 +117,9 @@ describe('parseWebEnv', () => {
     const env = parseWebEnv({
       NODE_ENV: 'development',
       WEB_PORT: '3001',
-      NEXT_PUBLIC_API_BASE_URL: 'http://localhost:3000',
+      API_BASE_URL: 'http://localhost:3000',
     });
     expect(env.WEB_PORT).toBe(3001);
+    expect(env.API_BASE_URL).toBe('http://localhost:3000');
   });
 });

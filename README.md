@@ -34,7 +34,18 @@ All application instances must use the same Supabase PostgreSQL connection strin
 4. Run `pnpm install` and `pnpm db:migrate` against the Supabase database.
 5. Start the API and web applications. Every clone configured with the same `DATABASE_URL` will read and write the same Supabase data.
 
-The web application also needs `apps/web/.env.local` with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for browser Realtime subscriptions. These are not database credentials. The current Realtime subscription refreshes the knowledge-base page when `clinic_knowledge_base` changes.
+The web application also needs `apps/web/.env.local` with `API_BASE_URL` pointing to the running backend. In hosted environments, configure `API_BASE_URL` as a server-side environment variable (for example, `https://api.example.com`) and do not expose backend secrets to the browser. The web app sends browser requests through its same-origin `/api/backend` proxy, avoiding cross-origin and mixed-content failures. `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are only used for browser Realtime subscriptions; they are not database credentials. The current Realtime subscription refreshes the knowledge-base page when `clinic_knowledge_base` changes.
+
+### Vercel web deployment
+
+The root Vercel project deploys the Next.js web application only. The Nest API must run at a publicly reachable HTTPS origin; `localhost` on Vercel is the isolated Vercel runtime, not the computer or server running the API.
+
+1. Deploy `apps/api` as a long-running Node service and expose its `/v1/health` endpoint over HTTPS. Build from the repository root with `pnpm exec turbo run build --filter=@vaidya/api`, then run `pnpm --filter @vaidya/api start`; hosting platforms may inject `PORT` automatically.
+2. In the Vercel web project, set the server-only `API_BASE_URL` to that API origin, without `/v1` (for example, `https://api.example.com`). Do not set `NEXT_PUBLIC_API_BASE_URL`.
+3. Ensure Vercel's Production Branch contains the current same-origin proxy, then redeploy after changing the environment variable. Vercel environment changes do not affect old deployments.
+4. Verify the API directly, then verify `https://<web-domain>/api/backend/v1/health` before testing sign-in.
+
+For production background jobs, use `QUEUE_MODE=bullmq`, provide `REDIS_URL`, and run `pnpm --filter @vaidya/api worker` as a separate persistent worker service. Run `pnpm db:migrate` as a release step rather than on every application startup.
 
 Tests are the only supported local-database workflow. Set `NODE_ENV=test`/`APP_ENV=local` and use `TEST_DATABASE_URL` for the test Postgres container.
 

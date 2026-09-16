@@ -17,7 +17,11 @@ import {
   type KnowledgeEntryApiRow,
 } from '@/lib/api/knowledge';
 import { subscribeToClinicKnowledge } from '@/lib/supabase-realtime';
-import type { KnowledgeEntry, KnowledgeFile, Category } from '@/components/pages/knowledge-base/types';
+import type {
+  KnowledgeEntry,
+  KnowledgeFile,
+  Category,
+} from '@/components/pages/knowledge-base/types';
 
 const categories: Category[] = [
   { id: 'facility_info', name: 'Parking', description: 'Parking information' },
@@ -78,36 +82,65 @@ export function KnowledgeBasePageContent() {
   const [approvedEntries, setApprovedEntries] = useState<KnowledgeEntry[]>([]);
   const [embeddingStatus, setEmbeddingStatus] = useState<string | null>(null);
 
-  const loadEntries = useCallback(async () => {
-    if (!isAdmin) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [entries, status] = await Promise.all([
-        fetchKnowledgeEntries(),
-        fetchKnowledgeEmbeddingStatus(),
-      ]);
-      const mapped = entries.map(mapEntry);
-      setPendingEntries(
-        mapped.filter((entry) => entry.status === 'pending_review' || entry.status === 'needs_update'),
-      );
-      setApprovedEntries(mapped.filter((entry) => entry.status === 'approved'));
-      if (status) {
-        setEmbeddingStatus(
-          `${status.generated_count}/${status.approved_total} embeddings generated`,
-        );
+  const loadEntries = useCallback(
+    async (showLoading = true) => {
+      if (!isAdmin) {
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      setError(
-        err instanceof ApiRequestError ? err.apiError.message : 'Failed to load knowledge base.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [isAdmin]);
+      if (showLoading) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const [entries, status] = await Promise.all([
+          fetchKnowledgeEntries(),
+          fetchKnowledgeEmbeddingStatus(),
+        ]);
+        const mapped = entries.map(mapEntry);
+        setPendingEntries(
+          mapped.filter(
+            (entry) => entry.status === 'pending_review' || entry.status === 'needs_update',
+          ),
+        );
+        setApprovedEntries(mapped.filter((entry) => entry.status === 'approved'));
+        if (status) {
+          setEmbeddingStatus(
+            `${status.generated_count}/${status.approved_total} embeddings generated`,
+          );
+        }
+      } catch (err) {
+        if (showLoading) {
+          setError(
+            err instanceof ApiRequestError
+              ? err.apiError.message
+              : 'Failed to load knowledge base.',
+          );
+        }
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [isAdmin],
+  );
+
+  const applyKnowledgeRows = useCallback((rows: KnowledgeEntryApiRow[]) => {
+    const changedIds = new Set(rows.map((row) => row.id));
+    const changedEntries = rows.map(mapEntry);
+
+    setPendingEntries((current) => [
+      ...current.filter((entry) => !changedIds.has(entry.id)),
+      ...changedEntries.filter(
+        (entry) => entry.status === 'pending_review' || entry.status === 'needs_update',
+      ),
+    ]);
+    setApprovedEntries((current) => [
+      ...current.filter((entry) => !changedIds.has(entry.id)),
+      ...changedEntries.filter((entry) => entry.status === 'approved'),
+    ]);
+  }, []);
 
   useEffect(() => {
     void loadEntries();
@@ -118,9 +151,11 @@ export function KnowledgeBasePageContent() {
       return;
     }
 
-    return subscribeToClinicKnowledge(clinicId, () => {
-      void loadEntries();
-    }) ?? undefined;
+    return (
+      subscribeToClinicKnowledge(clinicId, () => {
+        void loadEntries(false);
+      }) ?? undefined
+    );
   }, [clinicId, isAdmin, loadEntries]);
 
   if (!isAdmin) {
@@ -140,7 +175,10 @@ export function KnowledgeBasePageContent() {
   if (loading) {
     return (
       <>
-        <PageHeader title="Knowledge base" description="Approved Q&A from the clinic knowledge API." />
+        <PageHeader
+          title="Knowledge base"
+          description="Approved Q&A from the clinic knowledge API."
+        />
         <LoadingState title="Loading knowledge base" description="Fetching entries from the API." />
       </>
     );
@@ -149,7 +187,10 @@ export function KnowledgeBasePageContent() {
   if (error) {
     return (
       <>
-        <PageHeader title="Knowledge base" description="Approved Q&A from the clinic knowledge API." />
+        <PageHeader
+          title="Knowledge base"
+          description="Approved Q&A from the clinic knowledge API."
+        />
         <ErrorState title="Could not load knowledge base" description={error}>
           <button
             type="button"
@@ -167,33 +208,47 @@ export function KnowledgeBasePageContent() {
     if (!clinicId) {
       return;
     }
-    await patchKnowledgeEntry(id, { status: 'approved', qa_approved: true, applicable: true }, clinicId);
-    await loadEntries();
+    const updated = await patchKnowledgeEntry(
+      id,
+      { status: 'approved', qa_approved: true, applicable: true },
+      clinicId,
+    );
+    applyKnowledgeRows([updated]);
   };
 
   const handleBulkApprove = async (ids: string[]) => {
     if (!clinicId) {
       return;
     }
-    for (const id of ids) {
-      await patchKnowledgeEntry(id, { status: 'approved', qa_approved: true, applicable: true }, clinicId);
-    }
-    await loadEntries();
+    const updated = await Promise.all(
+      ids.map((id) =>
+        patchKnowledgeEntry(
+          id,
+          { status: 'approved', qa_approved: true, applicable: true },
+          clinicId,
+        ),
+      ),
+    );
+    applyKnowledgeRows(updated);
   };
 
   const handleDisable = async (id: string) => {
     if (!clinicId) {
       return;
     }
-    await patchKnowledgeEntry(id, { status: 'disabled', applicable: false }, clinicId);
-    await loadEntries();
+    const updated = await patchKnowledgeEntry(
+      id,
+      { status: 'disabled', applicable: false },
+      clinicId,
+    );
+    applyKnowledgeRows([updated]);
   };
 
   const handleEdit = async (id: string, updatedData: Partial<KnowledgeEntry>) => {
     if (!clinicId) {
       return;
     }
-    await patchKnowledgeEntry(
+    const updated = await patchKnowledgeEntry(
       id,
       {
         ...(updatedData.question !== undefined ? { question: updatedData.question } : {}),
@@ -205,7 +260,7 @@ export function KnowledgeBasePageContent() {
       },
       clinicId,
     );
-    await loadEntries();
+    applyKnowledgeRows([updated]);
   };
 
   const handleUpload = (file: File) => {
@@ -259,7 +314,9 @@ export function KnowledgeBasePageContent() {
         isOpen={isManualFormOpen}
         onClose={() => setIsManualFormOpen(false)}
         categories={categories}
-        onSaved={() => loadEntries()}
+        onSaved={() => {
+          void loadEntries(false);
+        }}
       />
     </>
   );

@@ -102,26 +102,16 @@ export class AppointmentsService {
       ...(input.status?.length ? { statuses: input.status } : {}),
     });
 
-    const doctorMap = new Map(
-      (await this.repos.clinical.listDoctors(input.clinicId)).map((doctor) => [
-        doctor.id,
-        doctor.name,
-      ]),
-    );
-    const serviceMap = new Map(
-      (await this.repos.clinical.listServices(input.clinicId)).map((service) => [
-        service.id,
-        service.serviceName,
-      ]),
-    );
-
     const visitedAppointmentIds = rows
       .filter((row) => row.status === 'visited')
       .map((row) => row.id);
-    const visits = await this.repos.patients.listVisitsByAppointmentIds(
-      input.clinicId,
-      visitedAppointmentIds,
-    );
+    const [doctors, services, visits] = await Promise.all([
+      this.repos.clinical.listDoctors(input.clinicId),
+      this.repos.clinical.listServices(input.clinicId),
+      this.repos.patients.listVisitsByAppointmentIds(input.clinicId, visitedAppointmentIds),
+    ]);
+    const doctorMap = new Map(doctors.map((doctor) => [doctor.id, doctor.name]));
+    const serviceMap = new Map(services.map((service) => [service.id, service.serviceName]));
     const visitByAppointmentId = new Map<string, (typeof visits)[number]>();
     for (const visit of visits) {
       const appointmentRequestId = visit.appointmentRequestId;
@@ -151,7 +141,9 @@ export class AppointmentsService {
         status: row.status,
         has_history: false,
         ...(visit ? { visit_reason: visit.reasonForVisit } : {}),
-        ...(visit?.examinationNotes !== undefined ? { examination_notes: visit.examinationNotes } : {}),
+        ...(visit?.examinationNotes !== undefined
+          ? { examination_notes: visit.examinationNotes }
+          : {}),
         ...(visit?.diagnosis !== undefined ? { diagnosis: visit.diagnosis } : {}),
         ...(visit?.advice !== undefined ? { advice: visit.advice } : {}),
       };
@@ -160,22 +152,21 @@ export class AppointmentsService {
 
   async listActionRequests(clinicId: string): Promise<AppointmentActionRequestItem[]> {
     const actionRows = await this.repos.appointmentLifecycle.listPendingActionRequests(clinicId);
-    const doctorMap = new Map(
-      (await this.repos.clinical.listDoctors(clinicId)).map((doctor) => [doctor.id, doctor.name]),
-    );
-    const serviceMap = new Map(
-      (await this.repos.clinical.listServices(clinicId)).map((service) => [
-        service.id,
-        service.serviceName,
-      ]),
+    const appointmentIds = [...new Set(actionRows.map((action) => action.appointmentId))];
+    const [doctors, services, appointments] = await Promise.all([
+      this.repos.clinical.listDoctors(clinicId),
+      this.repos.clinical.listServices(clinicId),
+      this.repos.appointmentLifecycle.findAppointmentsByIds(clinicId, appointmentIds),
+    ]);
+    const doctorMap = new Map(doctors.map((doctor) => [doctor.id, doctor.name]));
+    const serviceMap = new Map(services.map((service) => [service.id, service.serviceName]));
+    const appointmentById = new Map(
+      appointments.map((appointment) => [appointment.id, appointment]),
     );
 
     const results: AppointmentActionRequestItem[] = [];
     for (const action of actionRows) {
-      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
-        clinicId,
-        action.appointmentId,
-      );
+      const appointment = appointmentById.get(action.appointmentId);
       if (!appointment) {
         continue;
       }

@@ -42,12 +42,25 @@ export class AppointmentLifecycleRepository {
       .select()
       .from(appointmentRequests)
       .where(
-        and(
-          eq(appointmentRequests.clinicId, clinicId),
-          eq(appointmentRequests.id, appointmentId),
-        ),
+        and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)),
       )
       .limit(1);
+  }
+
+  findAppointmentsByIds(clinicId: string, appointmentIds: string[]) {
+    if (appointmentIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.db
+      .select()
+      .from(appointmentRequests)
+      .where(
+        and(
+          eq(appointmentRequests.clinicId, clinicId),
+          inArray(appointmentRequests.id, appointmentIds),
+        ),
+      );
   }
 
   findPendingActionRequest(input: {
@@ -127,11 +140,7 @@ export class AppointmentLifecycleRepository {
       .limit(1);
   }
 
-  listAppointmentsForClinic(input: {
-    clinicId: string;
-    doctorId?: string;
-    statuses?: string[];
-  }) {
+  listAppointmentsForClinic(input: { clinicId: string; doctorId?: string; statuses?: string[] }) {
     const filters = [eq(appointmentRequests.clinicId, input.clinicId)];
     if (input.doctorId) {
       filters.push(eq(appointmentRequests.doctorId, input.doctorId));

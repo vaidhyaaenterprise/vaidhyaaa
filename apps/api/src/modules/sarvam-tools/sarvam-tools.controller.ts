@@ -12,7 +12,6 @@ import {
 import {
   ADAPTER_TOKENS,
   extractActivePreferredDate,
-  normalizeAppointmentRoutingSource,
   type ServiceRouterAdapter,
   type TimePreference,
 } from '@vaidya/shared';
@@ -20,7 +19,10 @@ import type { DatabaseConnection } from '@vaidya/db';
 import { API_ENV } from '../../config/api-config.module';
 import { DATABASE_CONNECTION } from '../database/database.module';
 import { BookingAppointmentService } from '../booking/booking-appointment.service';
-import { filterSlotsByDateAndPreference, slotDisplayTime } from '../booking/booking-field-extractor';
+import {
+  filterSlotsByDateAndPreference,
+  slotDisplayTime,
+} from '../booking/booking-field-extractor';
 import { KnowledgeSearchService } from '../knowledge/knowledge-search.service';
 import { AppointmentLookupService } from '../patient-action/appointment-lookup.service';
 import { StaffNotificationService } from '../patient-action/staff-notification.service';
@@ -36,19 +38,34 @@ import { Public } from '../../common/decorators/public.decorator';
 import { SkipApiEnvelope } from '../../common/decorators/skip-api-envelope.decorator';
 
 const CLINIC_INFO_TOPICS = [
-  'fee', 'timing', 'location', 'parking', 'insurance', 'documents', 'doctor_availability',
+  'fee',
+  'timing',
+  'location',
+  'parking',
+  'insurance',
+  'documents',
+  'doctor_availability',
 ] as const;
 
 type ClinicInfoTopic = (typeof CLINIC_INFO_TOPICS)[number];
 
-function parseBody(body: unknown): Record<string, unknown> {  if (typeof body === 'string') {
-    try { return JSON.parse(body); } catch { return {}; }
+function parseBody(body: unknown): Record<string, unknown> {
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
   }
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     const obj = body as Record<string, unknown>;
     if ('(raw)' in obj) {
       const raw = obj['(raw)'];
-      return typeof raw === 'string' ? parseBody(raw) : typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
+      return typeof raw === 'string'
+        ? parseBody(raw)
+        : typeof raw === 'object' && raw !== null
+          ? (raw as Record<string, unknown>)
+          : {};
     }
     return obj;
   }
@@ -110,8 +127,29 @@ function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
-const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 function formatDateDisplay(date: string): string {
   const [year, month, day] = date.split('-').map(Number);
@@ -120,7 +158,9 @@ function formatDateDisplay(date: string): string {
   return `${WEEKDAY_NAMES[jsDate.getUTCDay()]}, ${MONTH_NAMES[month - 1]} ${day}`;
 }
 
-function parseClinicStartTime(startTime: string): { date: string; hour: number; minute: number } | null {
+function parseClinicStartTime(
+  startTime: string,
+): { date: string; hour: number; minute: number } | null {
   const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/.exec(startTime);
   if (!match) return null;
   return { date: match[1]!, hour: Number(match[2]), minute: Number(match[3]) };
@@ -152,7 +192,9 @@ function findSlotByDateAndTime(
     const minute = String(parsed.minute).padStart(2, '0');
     const display12 = `${hour12}:${String(minute).padStart(2, '0')}`;
     const display24 = `${String(parsed.hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-    return input === display12.replace(/^0+(?=\d)/, '') || input === display24.replace(/^0+(?=\d)/, '');
+    return (
+      input === display12.replace(/^0+(?=\d)/, '') || input === display24.replace(/^0+(?=\d)/, '')
+    );
   });
 }
 
@@ -176,7 +218,8 @@ function dedupeTimeRanges(ranges: string[]): string[] {
   return [...new Set(ranges)];
 }
 
-function normaliseScheduleTiming(range: string): string {  const [start, end] = range.split('-');
+function normaliseScheduleTiming(range: string): string {
+  const [start, end] = range.split('-');
   if (!start || !end) return range;
   const to12h = (t: string): string => {
     const [hour, minute] = t.split(':').map(Number);
@@ -197,7 +240,8 @@ export class SarvamToolsController {
     @Inject(DATABASE_CONNECTION) connection: DatabaseConnection,
     @Inject(SlotService) private readonly slotService: SlotService,
     @Inject(SlotHoldService) private readonly slotHoldService: SlotHoldService,
-    @Inject(BookingAppointmentService) private readonly bookingAppointmentService: BookingAppointmentService,
+    @Inject(BookingAppointmentService)
+    private readonly bookingAppointmentService: BookingAppointmentService,
     @Inject(KnowledgeSearchService) private readonly knowledgeSearchService: KnowledgeSearchService,
     @Inject(AppointmentLookupService) private readonly appointmentLookup: AppointmentLookupService,
     @Inject(StaffNotificationService) private readonly staffNotification: StaffNotificationService,
@@ -222,8 +266,12 @@ export class SarvamToolsController {
 
     const sessionId = await this.createSarvamSession(clinic.id);
 
-    const addressParts = [clinic.addressLine1, clinic.addressLine2, clinic.city, clinic.state]
-      .filter((part): part is string => Boolean(part));
+    const addressParts = [
+      clinic.addressLine1,
+      clinic.addressLine2,
+      clinic.city,
+      clinic.state,
+    ].filter((part): part is string => Boolean(part));
 
     return {
       found: true,
@@ -260,10 +308,15 @@ export class SarvamToolsController {
     const timezone = clinic?.timezone ?? 'Asia/Kolkata';
 
     if (topic === 'location') {
-      const addressParts = [clinic?.addressLine1, clinic?.addressLine2, clinic?.city, clinic?.state]
-        .filter((part): part is string => Boolean(part));
+      const addressParts = [
+        clinic?.addressLine1,
+        clinic?.addressLine2,
+        clinic?.city,
+        clinic?.state,
+      ].filter((part): part is string => Boolean(part));
       return {
-        topic, found: addressParts.length > 0,
+        topic,
+        found: addressParts.length > 0,
         address: addressParts.join(', ') || null,
         city: clinic?.city ?? null,
         state: clinic?.state ?? null,
@@ -273,7 +326,12 @@ export class SarvamToolsController {
     if (topic === 'timing') {
       const hours = await this.repos.slots.listClinicHours(clinicId);
       if (!day) {
-        return { topic, found: hours.length > 0, hoursSummary: formatClinicHoursText(hours), timezone };
+        return {
+          topic,
+          found: hours.length > 0,
+          hoursSummary: formatClinicHoursText(hours),
+          timezone,
+        };
       }
       const referenceDate = formatDateInTimezone(new Date(), timezone);
       const resolvedDate =
@@ -288,7 +346,8 @@ export class SarvamToolsController {
       const dayHours = hours.filter((row) => row.dayOfWeek === dayOfWeek);
       const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return {
-        topic, found: dayHours.length > 0,
+        topic,
+        found: dayHours.length > 0,
         day: dayNames[dayOfWeek - 1] ?? day,
         hours: dayHours.length > 0 ? formatDayHoursText(dayHours) : 'closed',
         timezone,
@@ -301,7 +360,10 @@ export class SarvamToolsController {
       const [doctor] = await this.repos.doctors.findDoctorById(clinicId, doctorId);
       if (!feeInfo || !doctor) return { topic, found: false, doctorId };
       return {
-        topic, found: true, doctorId: doctor.id, doctorName: doctor.name,
+        topic,
+        found: true,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
         consultationFee: formatFeeAmount(feeInfo.consultationFeeAmount),
         followupFee: formatFeeAmount(feeInfo.followupFeeAmount),
         currency: 'INR',
@@ -326,26 +388,47 @@ export class SarvamToolsController {
       const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       if (timings.length === 0) {
         return {
-          topic, found: false, doctorId: doctor.id, doctorName: doctor.name, date: targetDate,
-          availabilityDay: dayNames[dayOfWeek - 1] ?? null, available: false, timings: [],
+          topic,
+          found: false,
+          doctorId: doctor.id,
+          doctorName: doctor.name,
+          date: targetDate,
+          availabilityDay: dayNames[dayOfWeek - 1] ?? null,
+          available: false,
+          timings: [],
         };
       }
       return {
-        topic, found: true, doctorId: doctor.id, doctorName: doctor.name, date: targetDate,
-        availabilityDay: dayNames[dayOfWeek - 1] ?? null, available: true,
+        topic,
+        found: true,
+        doctorId: doctor.id,
+        doctorName: doctor.name,
+        date: targetDate,
+        availabilityDay: dayNames[dayOfWeek - 1] ?? null,
+        available: true,
         timings: timings.map((range) => normaliseScheduleTiming(range)),
       };
     }
 
     const knowledgeQuery =
-      topic === 'parking' ? 'parking'
-        : topic === 'insurance' ? 'insurance accepted'
-          : topic === 'documents' ? 'documents required for visit'
+      topic === 'parking'
+        ? 'parking'
+        : topic === 'insurance'
+          ? 'insurance accepted'
+          : topic === 'documents'
+            ? 'documents required for visit'
             : topic;
-    const knowledge = await this.knowledgeSearchService.searchApprovedKnowledge(clinicId, knowledgeQuery, topic);
+    const knowledge = await this.knowledgeSearchService.searchApprovedKnowledge(
+      clinicId,
+      knowledgeQuery,
+      topic,
+    );
     return {
-      topic, found: Boolean(knowledge?.meetsThreshold),
-      answer: knowledge?.answer ?? null, score: knowledge?.score ?? null, category: knowledge?.category ?? null,
+      topic,
+      found: Boolean(knowledge?.meetsThreshold),
+      answer: knowledge?.answer ?? null,
+      score: knowledge?.score ?? null,
+      category: knowledge?.category ?? null,
     };
   }
 
@@ -374,7 +457,10 @@ export class SarvamToolsController {
 
     const servicesWithDoctors = [];
     for (const service of active) {
-      const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(clinicId, service.id);
+      const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
+        clinicId,
+        service.id,
+      );
       servicesWithDoctors.push({
         clinicServiceId: service.id,
         name: service.serviceName,
@@ -405,9 +491,13 @@ export class SarvamToolsController {
     const activeClinicServices = services
       .filter((s) => s.active)
       .map((s) => ({
-        id: s.id, serviceKey: s.serviceKey, serviceName: s.serviceName,
-        handlesJson: s.handlesJson, doesNotHandleJson: s.doesNotHandleJson,
-        redFlagsJson: s.redFlagsJson, routingExamplesJson: s.routingExamplesJson,
+        id: s.id,
+        serviceKey: s.serviceKey,
+        serviceName: s.serviceName,
+        handlesJson: s.handlesJson,
+        doesNotHandleJson: s.doesNotHandleJson,
+        redFlagsJson: s.redFlagsJson,
+        routingExamplesJson: s.routingExamplesJson,
       }));
 
     let resolvedServiceId: string | null = null;
@@ -417,7 +507,11 @@ export class SarvamToolsController {
       if (byKey) resolvedServiceId = byKey.id;
     } else {
       if (!reasonForVisit) return { matched: false, error: 'reason_for_visit_required' };
-      const routed = await this.serviceRouter.route({ clinicId, reasonForVisit, activeClinicServices });
+      const routed = await this.serviceRouter.route({
+        clinicId,
+        reasonForVisit,
+        activeClinicServices,
+      });
       if (routed.matched && routed.clinicServiceId) resolvedServiceId = routed.clinicServiceId;
     }
 
@@ -426,7 +520,10 @@ export class SarvamToolsController {
     }
 
     const targetService = activeClinicServices.find((s) => s.id === resolvedServiceId);
-    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(clinicId, resolvedServiceId);
+    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
+      clinicId,
+      resolvedServiceId,
+    );
 
     return {
       matched: true,
@@ -457,23 +554,41 @@ export class SarvamToolsController {
     const clinicServiceId = readParam(b, req, 'clinic_service_id');
     const reasonForVisit = readParam(b, req, 'reason_for_visit');
     const dateInput = readParam(b, req, 'date');
-    const timePreference = parseTimePreference(b.time_preference ?? req.headers.time_preference ?? req.headers['time-preference']);
+    const timePreference = parseTimePreference(
+      b.time_preference ?? req.headers.time_preference ?? req.headers['time-preference'],
+    );
     const afterTimeRaw = readParam(b, req, 'after_time');
     const afterTime = afterTimeRaw ? normalizeTimeTo24h(afterTimeRaw) : null;
 
     const preferredDate = dateInput
-      ? extractActivePreferredDate(dateInput, referenceDate) ??
-        (/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : null)
+      ? (extractActivePreferredDate(dateInput, referenceDate) ??
+        (/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : null))
       : null;
 
     if (!preferredDate) return { success: false, error: 'date_required' };
 
-    const target = await this.resolveDoctorAndService(clinicId, doctorId, clinicServiceId, reasonForVisit);
+    const target = await this.resolveDoctorAndService(
+      clinicId,
+      doctorId,
+      clinicServiceId,
+      reasonForVisit,
+    );
     if ('error' in target) return { success: false, ...target };
 
-    const slots = await this.slotService.findAvailableSlots(clinicId, target.doctorId, target.clinicServiceId, preferredDate);
+    const slots = await this.slotService.findAvailableSlots(
+      clinicId,
+      target.doctorId,
+      target.clinicServiceId,
+      preferredDate,
+    );
     const afterTimeNormalized = afterTime ? `${afterTime}:00` : undefined;
-    const filtered = filterSlotsByDateAndPreference(slots, preferredDate, timePreference ?? undefined, afterTimeNormalized ? preferredDate : undefined, afterTimeNormalized);
+    const filtered = filterSlotsByDateAndPreference(
+      slots,
+      preferredDate,
+      timePreference ?? undefined,
+      afterTimeNormalized ? preferredDate : undefined,
+      afterTimeNormalized,
+    );
 
     const times = filtered.slice(0, 4).map((slot) => slotDisplayTime(slot.start_time));
 
@@ -514,13 +629,23 @@ export class SarvamToolsController {
     if (!slotId && !timeInput) missing.push('slot_id_or_time');
     if (missing.length > 0) return { error: 'missing_fields', missing };
 
-    const target = await this.resolveDoctorAndService(clinicId, doctorId, clinicServiceId, reasonForVisit);
+    const target = await this.resolveDoctorAndService(
+      clinicId,
+      doctorId,
+      clinicServiceId,
+      reasonForVisit,
+    );
     if ('error' in target) return { error: target.error };
 
     let resolvedSlotId = slotId;
 
     if (!resolvedSlotId && timeInput) {
-      const available = await this.slotService.findAvailableSlots(clinicId, target.doctorId, target.clinicServiceId, date ?? undefined);
+      const available = await this.slotService.findAvailableSlots(
+        clinicId,
+        target.doctorId,
+        target.clinicServiceId,
+        date ?? undefined,
+      );
       const timeMatch = findSlotByDateAndTime(available, date, timeInput);
       if (!timeMatch) return { error: 'invalid_slot_time', time: timeInput, date };
       resolvedSlotId = timeMatch.slot_id;
@@ -540,8 +665,11 @@ export class SarvamToolsController {
     try {
       const { appointment, hold } =
         await this.bookingAppointmentService.createAppointmentFromFreshHold({
-          clinicId, sessionId, slotId: resolvedSlotId!,
-          patientName: patientName!, patientPhone: phone,
+          clinicId,
+          sessionId,
+          slotId: resolvedSlotId!,
+          patientName: patientName!,
+          patientPhone: phone,
           reasonForVisit: reasonForVisit!,
           routingSource: 'service_router',
           patientId: patient?.id ?? null,
@@ -549,8 +677,13 @@ export class SarvamToolsController {
         });
       return {
         status: appointment.status === 'confirmed' ? 'confirmed' : 'pending',
-        appointmentId: appointment.id, patientId: patient?.id ?? null, holdId: hold.id,
-        doctorId: target.doctorId, doctorName: target.doctorName, date, slotId: resolvedSlotId,
+        appointmentId: appointment.id,
+        patientId: patient?.id ?? null,
+        holdId: hold.id,
+        doctorId: target.doctorId,
+        doctorName: target.doctorName,
+        date,
+        slotId: resolvedSlotId,
       };
     } catch (error) {
       const err = error as { code?: string };
@@ -595,7 +728,11 @@ export class SarvamToolsController {
       const normalizedTime = normalizeTimeTo24h(timeInput);
       if (!normalizedTime) return { error: 'invalid_slot_time', time: timeInput, date };
       const [timeSlot] = await this.repos.slots.findSlotByExactTime(
-        clinicId, doctorId!, clinicServiceId!, date!, normalizedTime,
+        clinicId,
+        doctorId!,
+        clinicServiceId!,
+        date!,
+        normalizedTime,
       );
       if (!timeSlot) return { error: 'invalid_slot_time', time: timeInput, date };
       resolvedSlotId = timeSlot.id;
@@ -615,8 +752,11 @@ export class SarvamToolsController {
     try {
       const { appointment, hold } =
         await this.bookingAppointmentService.createAppointmentFromFreshHold({
-          clinicId, sessionId, slotId: resolvedSlotId!,
-          patientName: patientName!, patientPhone: phone,
+          clinicId,
+          sessionId,
+          slotId: resolvedSlotId!,
+          patientName: patientName!,
+          patientPhone: phone,
           reasonForVisit: reasonForVisit!,
           routingSource: 'service_router',
           patientId: patient?.id ?? null,
@@ -624,8 +764,13 @@ export class SarvamToolsController {
         });
       return {
         status: appointment.status === 'confirmed' ? 'confirmed' : 'pending',
-        appointmentId: appointment.id, patientId: patient?.id ?? null, holdId: hold.id,
-        doctorId, doctorName: doctorName ?? 'Doctor', date, slotId: resolvedSlotId,
+        appointmentId: appointment.id,
+        patientId: patient?.id ?? null,
+        holdId: hold.id,
+        doctorId,
+        doctorName: doctorName ?? 'Doctor',
+        date,
+        slotId: resolvedSlotId,
       };
     } catch (error) {
       const err = error as { code?: string };
@@ -649,16 +794,33 @@ export class SarvamToolsController {
 
     const appointment = await this.resolveAppointmentRef(clinicId, phone, appointmentRef);
     if (!appointment) return { error: 'appointment_not_found' };
-    if (!ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')) {
-      return { error: 'appointment_not_active', appointmentId: appointment.id, status: appointment.status };
+    if (
+      !ACTIVE_APPOINTMENT_STATUSES.includes(
+        appointment.status as 'pending_confirmation' | 'confirmed',
+      )
+    ) {
+      return {
+        error: 'appointment_not_active',
+        appointmentId: appointment.id,
+        status: appointment.status,
+      };
     }
 
     await this.slotHoldService.cancelAppointment(clinicId, appointment.id);
-    await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(clinicId, appointment.id);
+    await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
+      clinicId,
+      appointment.id,
+    );
     await this.staffNotification.notifyStaffActionRequest({
-      clinicId, eventType: 'appointment.cancelled', templateKey: 'cancel.completed',
+      clinicId,
+      eventType: 'appointment.cancelled',
+      templateKey: 'cancel.completed',
       deduplicationKey: `sarvam-cancel:${appointment.id}`,
-      payload: { appointment_id: appointment.id, cancelled_by: 'patient_call', patient_phone: phone },
+      payload: {
+        appointment_id: appointment.id,
+        cancelled_by: 'patient_call',
+        patient_phone: phone,
+      },
     });
 
     return { cancelled: true, appointmentId: appointment.id };
@@ -680,48 +842,66 @@ export class SarvamToolsController {
 
     const appointment = await this.resolveAppointmentRef(clinicId, phone, appointmentRef);
     if (!appointment) return { error: 'appointment_not_found' };
-    if (!ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')) {
+    if (
+      !ACTIVE_APPOINTMENT_STATUSES.includes(
+        appointment.status as 'pending_confirmation' | 'confirmed',
+      )
+    ) {
       return { error: 'appointment_not_active', appointmentId: appointment.id };
     }
 
     const available = await this.slotService.findAvailableSlots(
-      clinicId, appointment.doctorId, appointment.clinicServiceId,
+      clinicId,
+      appointment.doctorId,
+      appointment.clinicServiceId,
       newDate ?? undefined,
     );
     const timeMatch = findSlotByDateAndTime(available, newDate, newTime);
     if (!timeMatch) return { error: 'invalid_slot_time', time: newTime, date: newDate };
     const newSlotId = timeMatch.slot_id;
 
-    const sessionId = await this.resolveSessionId(
-      clinicId, readParam(b, req, 'session_id'), phone,
-    );
+    const sessionId = await this.resolveSessionId(clinicId, readParam(b, req, 'session_id'), phone);
 
     const hold = await this.slotHoldService.holdSlot({
-      clinicId, slotId: newSlotId, sessionId,
+      clinicId,
+      slotId: newSlotId,
+      sessionId,
       ...(phone ? { patientPhone: phone } : {}),
     });
 
     const [actionRequest] = await this.repos.appointmentLifecycle.insertActionRequest({
-      clinicId, appointmentId: appointment.id, requestType: 'reschedule',
-      requestedBy: 'patient_call', status: 'pending',
-      requestedNewSlotId: newSlotId, requestedNewDate: newDate,
+      clinicId,
+      appointmentId: appointment.id,
+      requestType: 'reschedule',
+      requestedBy: 'patient_call',
+      status: 'pending',
+      requestedNewSlotId: newSlotId,
+      requestedNewDate: newDate,
       sourceSessionId: sessionId,
     });
 
     if (actionRequest) {
       await this.staffNotification.notifyStaffActionRequest({
-        clinicId, eventType: 'staff.action_request', templateKey: 'reschedule.request_submitted',
+        clinicId,
+        eventType: 'staff.action_request',
+        templateKey: 'reschedule.request_submitted',
         deduplicationKey: `sarvam-reschedule:${appointment.id}`,
         payload: {
-          action_request_id: actionRequest.id, appointment_id: appointment.id,
-          request_type: 'reschedule', requested_new_slot_id: newSlotId,
+          action_request_id: actionRequest.id,
+          appointment_id: appointment.id,
+          request_type: 'reschedule',
+          requested_new_slot_id: newSlotId,
         },
       });
     }
 
     return {
-      submitted: true, appointmentId: appointment.id,
-      actionRequestId: actionRequest?.id ?? null, newTime, newDate: newDate ?? null, holdId: hold.id,
+      submitted: true,
+      appointmentId: appointment.id,
+      actionRequestId: actionRequest?.id ?? null,
+      newTime,
+      newDate: newDate ?? null,
+      holdId: hold.id,
     };
   }
 
@@ -737,21 +917,28 @@ export class SarvamToolsController {
     const phone = readParam(b, req, 'phone');
     if (!phone) return { error: 'phone_required' };
 
-    const sessionId = await this.resolveSessionId(
-      clinicId, readParam(b, req, 'session_id'), phone,
-    );
+    const sessionId = await this.resolveSessionId(clinicId, readParam(b, req, 'session_id'), phone);
 
     const [callback] = await this.repos.appointmentLifecycle.insertCallbackRequest({
-      clinicId, patientName: name, patientPhone: phone, reason,
-      status: 'pending', sourceSessionId: sessionId,
+      clinicId,
+      patientName: name,
+      patientPhone: phone,
+      reason,
+      status: 'pending',
+      sourceSessionId: sessionId,
     });
 
     if (callback) {
       await this.staffNotification.notifyStaffActionRequest({
-        clinicId, eventType: 'staff.callback_request', templateKey: 'handoff.created',
+        clinicId,
+        eventType: 'staff.callback_request',
+        templateKey: 'handoff.created',
         deduplicationKey: `sarvam-callback:${callback.id}`,
         payload: {
-          callback_request_id: callback.id, reason, patient_name: name, patient_phone: phone,
+          callback_request_id: callback.id,
+          reason,
+          patient_name: name,
+          patient_phone: phone,
         },
       });
     }
@@ -797,7 +984,7 @@ export class SarvamToolsController {
       ...(durationSeconds !== undefined ? { durationSeconds } : {}),
     };
 
-    let [existing] = callId
+    const [existing] = callId
       ? await this.repos.voice.findCallById(clinicId, callId)
       : provider && providerCallId
         ? await this.repos.voice.findCallByProviderCallId(clinicId, provider, providerCallId)
@@ -844,7 +1031,8 @@ export class SarvamToolsController {
     if (candidates.length === 0) return { found: false };
 
     const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
-      clinicId, candidates[0]!.appointment_id,
+      clinicId,
+      candidates[0]!.appointment_id,
     );
     if (!appointment) return { found: false };
 
@@ -856,9 +1044,7 @@ export class SarvamToolsController {
       appointmentId: appointment.id,
       status: appointment.status,
       statusDisplay:
-        appointment.status === 'confirmed'
-          ? 'confirmed'
-          : 'pending confirmation from the clinic',
+        appointment.status === 'confirmed' ? 'confirmed' : 'pending confirmation from the clinic',
       doctorId: appointment.doctorId,
       doctorName: doctor?.name ?? 'Doctor',
       patientName: appointment.patientName,
@@ -866,13 +1052,18 @@ export class SarvamToolsController {
       reasonForVisit: appointment.reasonForVisit,
       startTime: appointment.appointmentStart,
       date: parsedTime?.date ?? appointment.appointmentStart.slice(0, 10),
-      dateDisplay: parsedTime ? formatDateDisplay(parsedTime.date) : appointment.appointmentStart.slice(0, 10),
+      dateDisplay: parsedTime
+        ? formatDateDisplay(parsedTime.date)
+        : appointment.appointmentStart.slice(0, 10),
       time: appointment.appointmentStart.slice(11, 16),
       timeText: formatTimeText(appointment.appointmentStart),
     };
   }
 
-  private async createSarvamSession(clinicId: string, patientPhone?: string | null): Promise<string> {
+  private async createSarvamSession(
+    clinicId: string,
+    patientPhone?: string | null,
+  ): Promise<string> {
     const sessionId = randomUUID();
     const [session] = await this.repos.conversationSessions.create({
       id: sessionId,
@@ -903,7 +1094,10 @@ export class SarvamToolsController {
     let resolvedDoctorName = 'Doctor';
 
     if (doctorId) {
-      const doctorMappings = await this.repos.clinical.listActiveDoctorServicesForDoctor(clinicId, doctorId);
+      const doctorMappings = await this.repos.clinical.listActiveDoctorServicesForDoctor(
+        clinicId,
+        doctorId,
+      );
 
       if (doctorMappings.length === 0) return { error: 'no_service_for_doctor' };
       resolvedDoctorName = doctorMappings[0]!.doctorName;
@@ -922,17 +1116,28 @@ export class SarvamToolsController {
       const activeClinicServices = services
         .filter((s) => s.active)
         .map((s) => ({
-          id: s.id, serviceKey: s.serviceKey, serviceName: s.serviceName,
-          handlesJson: s.handlesJson, doesNotHandleJson: s.doesNotHandleJson,
-          redFlagsJson: s.redFlagsJson, routingExamplesJson: s.routingExamplesJson,
+          id: s.id,
+          serviceKey: s.serviceKey,
+          serviceName: s.serviceName,
+          handlesJson: s.handlesJson,
+          doesNotHandleJson: s.doesNotHandleJson,
+          redFlagsJson: s.redFlagsJson,
+          routingExamplesJson: s.routingExamplesJson,
         }));
-      const routed = await this.serviceRouter.route({ clinicId, reasonForVisit, activeClinicServices });
+      const routed = await this.serviceRouter.route({
+        clinicId,
+        reasonForVisit,
+        activeClinicServices,
+      });
       if (routed.matched && routed.clinicServiceId) clinicServiceId = routed.clinicServiceId;
     }
 
     if (!clinicServiceId) return { error: 'doctor_required' };
 
-    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(clinicId, clinicServiceId);
+    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
+      clinicId,
+      clinicServiceId,
+    );
     if (mappings.length === 0) return { error: 'no_service_for_doctor' };
     doctorId = mappings[0]!.doctorId;
     resolvedDoctorName = mappings[0]!.doctorName;
@@ -941,10 +1146,15 @@ export class SarvamToolsController {
   }
 
   private async resolveAppointmentRef(
-    clinicId: string, phone: string | null, appointmentRef: string | null,
+    clinicId: string,
+    phone: string | null,
+    appointmentRef: string | null,
   ) {
     if (appointmentRef && appointmentRef.includes('-')) {
-      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(clinicId, appointmentRef);
+      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
+        clinicId,
+        appointmentRef,
+      );
       return appointment ?? null;
     }
 
@@ -952,15 +1162,33 @@ export class SarvamToolsController {
     if (candidates.length === 0) return null;
 
     if (!appointmentRef) {
-      return (await this.repos.appointmentLifecycle.findAppointmentById(clinicId, candidates[0]!.appointment_id))?.[0] ?? null;
+      return (
+        (
+          await this.repos.appointmentLifecycle.findAppointmentById(
+            clinicId,
+            candidates[0]!.appointment_id,
+          )
+        )?.[0] ?? null
+      );
     }
     const index = Number(appointmentRef);
     if (Number.isFinite(index) && index >= 1 && index <= candidates.length) {
       const candidate = candidates[index - 1]!;
-      return (await this.repos.appointmentLifecycle.findAppointmentById(clinicId, candidate.appointment_id))?.[0] ?? null;
+      return (
+        (
+          await this.repos.appointmentLifecycle.findAppointmentById(
+            clinicId,
+            candidate.appointment_id,
+          )
+        )?.[0] ?? null
+      );
     }
     const byLabel = candidates.find((c) => c.display_label.includes(appointmentRef));
     if (!byLabel) return null;
-    return (await this.repos.appointmentLifecycle.findAppointmentById(clinicId, byLabel.appointment_id))?.[0] ?? null;
+    return (
+      (
+        await this.repos.appointmentLifecycle.findAppointmentById(clinicId, byLabel.appointment_id)
+      )?.[0] ?? null
+    );
   }
 }

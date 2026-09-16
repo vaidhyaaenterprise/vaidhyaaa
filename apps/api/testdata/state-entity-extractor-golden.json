@@ -186,7 +186,7 @@
     "messageText": "vendam",
     "referenceDate": "2026-05-16",
     "expected": {
-      "recognizedAs": "no_rejection"
+      "recognizedAs": "flow_cancel"
     }
   },
   {
@@ -243,7 +243,7 @@
     "messageText": "Need billing help",
     "referenceDate": "2026-05-16",
     "expected": {
-      "recognizedAs": "unknown"
+      "recognizedAs": "handoff_reason"
     }
   },
   {

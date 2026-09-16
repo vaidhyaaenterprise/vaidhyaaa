@@ -6,7 +6,7 @@ import type { LanguageSettings as LanguageSettingsType, Language } from './types
 
 interface LanguageSettingsProps {
   settings: LanguageSettingsType;
-  onUpdateSettings: (settings: Partial<LanguageSettingsType>) => void;
+  onUpdateSettings: (settings: Partial<LanguageSettingsType>) => Promise<void>;
 }
 
 function getLanguageLabel(language: Language): string {
@@ -31,7 +31,15 @@ function getLanguageDescription(language: Language): string {
   }
 }
 
-function LanguageBadge({ language, removable, onRemove }: { language: Language; removable?: boolean; onRemove?: () => void }) {
+function LanguageBadge({
+  language,
+  removable,
+  onRemove,
+}: {
+  language: Language;
+  removable?: boolean;
+  onRemove?: () => void;
+}) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-teal-300 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700">
       {getLanguageLabel(language)}
@@ -53,20 +61,32 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
 
   const [isEditing, setIsEditing] = useState(false);
   const [tempSettings, setTempSettings] = useState<LanguageSettingsType>(settings);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const handleEdit = () => {
     setTempSettings(settings);
+    setSaveError(null);
     setIsEditing(true);
   };
 
   const handleCancel = () => {
     setIsEditing(false);
     setTempSettings(settings);
+    setSaveError(null);
   };
 
-  const handleSave = () => {
-    onUpdateSettings(tempSettings);
-    setIsEditing(false);
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onUpdateSettings(tempSettings);
+      setIsEditing(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save language settings.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleToggleLanguage = (language: Language) => {
@@ -109,7 +129,9 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3.5">
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Default language</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Default language
+                </p>
                 <p className="mt-0.5 text-sm text-slate-400">
                   Primary language used by Vaidya when speaking with patients
                 </p>
@@ -120,7 +142,9 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Enabled languages</p>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                Enabled languages
+              </p>
               <div className="flex flex-wrap gap-2">
                 {settings.clinicLanguages.map((lang) => (
                   <LanguageBadge key={lang} language={lang} />
@@ -134,10 +158,12 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
             {settings.missingTemplates.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3.5">
                 <p className="text-xs font-bold text-amber-800">
-                  Missing templates for: {settings.missingTemplates.map(getLanguageLabel).join(', ')}
+                  Missing templates for:{' '}
+                  {settings.missingTemplates.map(getLanguageLabel).join(', ')}
                 </p>
                 <p className="mt-1 text-xs text-amber-700">
-                  These languages are enabled but lack required templates. Add templates in the knowledge base.
+                  These languages are enabled but lack required templates. Add templates in the
+                  knowledge base.
                 </p>
               </div>
             )}
@@ -150,7 +176,9 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
               </label>
               <select
                 value={tempSettings.defaultLanguage}
-                onChange={(e) => setTempSettings({ ...tempSettings, defaultLanguage: e.target.value as Language })}
+                onChange={(e) =>
+                  setTempSettings({ ...tempSettings, defaultLanguage: e.target.value as Language })
+                }
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
               >
                 <option value="ta_tanglish">Tanglish</option>
@@ -162,7 +190,9 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Enable languages</p>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                Enable languages
+              </p>
               <div className="space-y-2">
                 {settings.supportedLanguages.map((language) => {
                   const isAlwaysEnabled = language === 'english';
@@ -171,9 +201,7 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
                     <label
                       key={language}
                       className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition-colors ${
-                        enabled
-                          ? 'border-teal-200 bg-teal-50/50'
-                          : 'border-slate-200 bg-slate-50'
+                        enabled ? 'border-teal-200 bg-teal-50/50' : 'border-slate-200 bg-slate-50'
                       }`}
                     >
                       <input
@@ -201,14 +229,19 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
             </div>
 
             <div className="flex gap-2 pt-2">
+              {saveError && (
+                <p className="self-center text-xs font-semibold text-red-600">{saveError}</p>
+              )}
               <button
-                onClick={handleSave}
+                onClick={() => void handleSave()}
+                disabled={saving}
                 className="rounded-xl bg-teal-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-800"
               >
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </button>
               <button
                 onClick={handleCancel}
+                disabled={saving}
                 className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-100"
               >
                 Cancel

@@ -2,7 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { DatabaseService } from '@vaidya/db';
 import type { ConversationSessionRow } from '@vaidya/db';
-import { BOOKING_FLOW, staffConfirmTemplateKey, type IntentClassifierResult, type MessageTemplateKey } from '@vaidya/shared';
+import {
+  staffConfirmTemplateKey,
+  type IntentClassifierResult,
+  type MessageTemplateKey,
+} from '@vaidya/shared';
 
 import { TemplateRenderer } from '../conversation/template-renderer.service';
 import { appendBookingResumeText } from '../structured-info/booking-resume.helper';
@@ -126,9 +130,7 @@ export class KnowledgeRuntimeHandler {
       templateVariables: { answer_text: answerText },
       flowAfter: preserveBooking ? session.currentFlow : 'none',
       stateAfter: preserveBooking ? stateBefore : 'IDLE',
-      collectedJson: preserveBooking
-        ? (session.collectedJson as Record<string, unknown>)
-        : {},
+      collectedJson: preserveBooking ? (session.collectedJson as Record<string, unknown>) : {},
     };
   }
 
@@ -162,9 +164,7 @@ export class KnowledgeRuntimeHandler {
       templateVariables: { answer_text: answerText },
       flowAfter,
       stateAfter: preserveBooking ? stateBefore : 'IDLE',
-      collectedJson: preserveBooking
-        ? (session.collectedJson as Record<string, unknown>)
-        : {},
+      collectedJson: preserveBooking ? (session.collectedJson as Record<string, unknown>) : {},
     };
   }
 }

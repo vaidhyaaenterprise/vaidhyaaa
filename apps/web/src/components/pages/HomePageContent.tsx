@@ -7,11 +7,7 @@ import { LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import type { Appointment } from '@/components/pages/appointments/types';
 import { mapAppointmentRow } from '@/lib/api/appointment-mappers';
-import {
-  cancelAppointment,
-  confirmAppointment,
-  fetchAppointments,
-} from '@/lib/api/appointments';
+import { cancelAppointment, confirmAppointment, fetchAppointments } from '@/lib/api/appointments';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { ApiRequestError } from '@/lib/api/client';
 
@@ -53,48 +49,53 @@ export function HomePageContent() {
   const callbacks = 0;
   const emergencyAlerts = 0;
 
-  const loadDashboard = useCallback(async () => {
-    if (!clinicId) {
-      setLoading(false);
-      return;
-    }
+  const loadDashboard = useCallback(
+    async (includeSettings = true) => {
+      if (!clinicId) {
+        setLoading(false);
+        return;
+      }
 
-    setActionError(null);
-    try {
-      const [appointments, settings] = await Promise.all([
-        fetchAppointments(clinicId),
-        fetchClinicSettings(clinicId).catch(() => null),
-      ]);
+      setActionError(null);
+      try {
+        const [appointments, settings] = await Promise.all([
+          fetchAppointments(clinicId),
+          includeSettings ? fetchClinicSettings(clinicId).catch(() => null) : Promise.resolve(null),
+        ]);
 
-      const mapped = appointments.map(mapAppointmentRow);
-      const pending = mapped.filter((apt) => apt.status === 'pending_confirmation');
-      setPendingAppointments(pending);
-      setAgentStatus(settings?.agent_enabled ? 'active' : 'inactive');
+        const mapped = appointments.map(mapAppointmentRow);
+        const pending = mapped.filter((apt) => apt.status === 'pending_confirmation');
+        setPendingAppointments(pending);
+        if (settings) {
+          setAgentStatus(settings.agent_enabled ? 'active' : 'inactive');
+        }
 
-      const confirmed = mapped
-        .filter((apt) => apt.status === 'confirmed' || apt.status === 'pending_confirmation')
-        .sort((a, b) =>
-          `${a.appointmentDate}T${a.appointmentTime}`.localeCompare(
-            `${b.appointmentDate}T${b.appointmentTime}`,
-          ),
-        )
-        .slice(0, 3);
+        const confirmed = mapped
+          .filter((apt) => apt.status === 'confirmed' || apt.status === 'pending_confirmation')
+          .sort((a, b) =>
+            `${a.appointmentDate}T${a.appointmentTime}`.localeCompare(
+              `${b.appointmentDate}T${b.appointmentTime}`,
+            ),
+          )
+          .slice(0, 3);
 
-      setNextAppointments(
-        confirmed.map((apt) => ({
-          patient: apt.patientName,
-          time: formatTime(apt.appointmentTime),
-          doctor: apt.doctorName,
-        })),
-      );
-    } catch (err) {
-      setActionError(
-        err instanceof ApiRequestError ? err.apiError.message : 'Failed to load dashboard data.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [clinicId]);
+        setNextAppointments(
+          confirmed.map((apt) => ({
+            patient: apt.patientName,
+            time: formatTime(apt.appointmentTime),
+            doctor: apt.doctorName,
+          })),
+        );
+      } catch (err) {
+        setActionError(
+          err instanceof ApiRequestError ? err.apiError.message : 'Failed to load dashboard data.',
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clinicId],
+  );
 
   useEffect(() => {
     void loadDashboard();
@@ -117,7 +118,7 @@ export function HomePageContent() {
       );
       return;
     }
-    await loadDashboard();
+    await loadDashboard(false);
   };
 
   const handleCancel = async (id: string) => {
@@ -133,7 +134,7 @@ export function HomePageContent() {
       );
       return;
     }
-    await loadDashboard();
+    await loadDashboard(false);
   };
 
   const pendingConfirmations = pendingAppointments.length;
@@ -158,7 +159,10 @@ export function HomePageContent() {
       />
 
       {loading ? (
-        <LoadingState title="Loading dashboard" description="Fetching appointments and clinic settings." />
+        <LoadingState
+          title="Loading dashboard"
+          description="Fetching appointments and clinic settings."
+        />
       ) : (
         <>
           <div className="mb-6 rounded-[22px] bg-gradient-to-br from-brand-700 to-slate-900 p-6 text-white shadow-card">
@@ -181,7 +185,9 @@ export function HomePageContent() {
                 </div>
               </div>
               <div className="text-center lg:text-left">
-                <p className="text-4xl font-black">{pendingConfirmations + callbacks + emergencyAlerts}</p>
+                <p className="text-4xl font-black">
+                  {pendingConfirmations + callbacks + emergencyAlerts}
+                </p>
                 <p className="text-sm text-teal-100">pending staff actions</p>
               </div>
             </div>
@@ -195,10 +201,7 @@ export function HomePageContent() {
               ) : null}
               <div className="space-y-3">
                 {visiblePending.map((apt) => (
-                  <div
-                    key={apt.id}
-                    className="rounded-xl border border-amber-200 bg-amber-50 p-3"
-                  >
+                  <div key={apt.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-bold text-slate-900">{apt.patientName}</p>
@@ -253,7 +256,9 @@ export function HomePageContent() {
                   <span className="text-lg font-bold text-slate-900">{todayCalls}</span>
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <span className="text-sm font-semibold text-slate-700">Pending confirmations</span>
+                  <span className="text-sm font-semibold text-slate-700">
+                    Pending confirmations
+                  </span>
                   <span className="text-lg font-bold text-amber-600">{pendingConfirmations}</span>
                 </div>
               </div>
@@ -287,11 +292,15 @@ export function HomePageContent() {
         <h3 className="mb-4 text-lg font-bold text-slate-900">Session</h3>
         <dl className="grid gap-3 text-sm sm:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">Signed in as</dt>
+            <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Signed in as
+            </dt>
             <dd className="mt-1 font-semibold text-slate-900">{me?.user.name ?? '—'}</dd>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">Effective role</dt>
+            <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Effective role
+            </dt>
             <dd className="mt-1 font-semibold text-slate-900">{effectiveRole}</dd>
           </div>
           {clinicRole ? (

@@ -12,8 +12,7 @@ import {
   patchHoliday,
   type HolidayApiRow,
 } from '@/lib/api/clinic-clinical';
-import { previewHoliday } from '@/lib/api/clinic-subscription';
-import { conflictsFromApiError, formatScheduleConflicts } from '@/lib/api/conflict-helpers';
+import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 
 type Holiday = {
   id: string;
@@ -86,6 +85,7 @@ export function HolidaySetup() {
   const [tempHolidays, setTempHolidays] = useState<Holiday[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const doctorNameById = useMemo(
     () => new Map(doctors.map((doctor) => [doctor.id, doctor.name])),
@@ -151,23 +151,6 @@ export function HolidaySetup() {
     return null;
   };
 
-  const previewHolidayChange = async (holiday: Holiday) => {
-    if (!clinicId || !holiday.active) {
-      return;
-    }
-
-    const payload = holidayPayload(holiday);
-    const previewPayload: { holiday_date: string; doctor_ids?: string[] } = {
-      holiday_date: payload.holiday_date,
-      ...(payload.doctor_ids !== undefined ? { doctor_ids: payload.doctor_ids } : {}),
-    };
-    const preview = await previewHoliday(clinicId, previewPayload);
-    if (preview.blocked) {
-      setConflicts(formatScheduleConflicts(preview.conflicts));
-      throw new Error('conflicts_detected');
-    }
-  };
-
   const handleSave = async () => {
     if (!clinicId) {
       return;
@@ -176,6 +159,7 @@ export function HolidaySetup() {
     setError(null);
     setConflicts([]);
 
+    setSaving(true);
     try {
       for (const holiday of tempHolidays) {
         const validationError = validateHoliday(holiday);
@@ -188,38 +172,35 @@ export function HolidaySetup() {
       const existingById = new Map(holidays.map((holiday) => [holiday.id, holiday]));
       const tempIds = new Set(tempHolidays.map((holiday) => holiday.id));
 
-      for (const holiday of holidays) {
-        if (!tempIds.has(holiday.id)) {
-          await patchHoliday(clinicId, holiday.id, { active: false });
-        }
-      }
+      await Promise.all(
+        holidays
+          .filter((holiday) => !tempIds.has(holiday.id))
+          .map((holiday) => patchHoliday(clinicId, holiday.id, { active: false })),
+      );
 
+      const savedHolidays: Holiday[] = [];
       for (const holiday of tempHolidays) {
         const original = existingById.get(holiday.id);
         const payload = holidayPayload(holiday);
 
         if (!original) {
-          await previewHolidayChange(holiday);
-          await createHoliday(clinicId, payload);
-          continue;
+          savedHolidays.push(mapHolidayRow(await createHoliday(clinicId, payload)));
+        } else if (sameHoliday(original, holiday)) {
+          savedHolidays.push(original);
+        } else {
+          savedHolidays.push(mapHolidayRow(await patchHoliday(clinicId, holiday.id, payload)));
         }
-
-        if (sameHoliday(original, holiday)) {
-          continue;
-        }
-
-        await previewHolidayChange(holiday);
-        await patchHoliday(clinicId, holiday.id, payload);
       }
+
+      const saved = savedHolidays
+        .filter((holiday) => holiday.active)
+        .sort((left, right) => left.date.localeCompare(right.date));
+      setHolidays(saved);
+      setTempHolidays(saved);
 
       setIsEditing(false);
       setConflicts([]);
-      await loadHolidays();
     } catch (err) {
-      if (err instanceof Error && err.message === 'conflicts_detected') {
-        return;
-      }
-
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -227,6 +208,8 @@ export function HolidaySetup() {
       }
 
       setError(err instanceof ApiRequestError ? err.apiError.message : 'Failed to save holidays.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -247,7 +230,9 @@ export function HolidaySetup() {
   };
 
   const updateHoliday = (id: string, patch: Partial<Holiday>) => {
-    setTempHolidays((prev) => prev.map((holiday) => (holiday.id === id ? { ...holiday, ...patch } : holiday)));
+    setTempHolidays((prev) =>
+      prev.map((holiday) => (holiday.id === id ? { ...holiday, ...patch } : holiday)),
+    );
   };
 
   const toggleDoctorSelection = (holidayId: string, doctorId: string) => {
@@ -374,7 +359,11 @@ export function HolidaySetup() {
         </div>
       ) : (
         <div className="space-y-4">
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p>}
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+              {error}
+            </p>
+          )}
 
           {conflicts.length > 0 && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4">
@@ -437,7 +426,10 @@ export function HolidaySetup() {
                     ) : (
                       <div className="grid gap-2 sm:grid-cols-2">
                         {doctors.map((doctor) => (
-                          <label key={doctor.id} className="flex items-center gap-2 text-sm text-slate-700">
+                          <label
+                            key={doctor.id}
+                            className="flex items-center gap-2 text-sm text-slate-700"
+                          >
                             <input
                               type="checkbox"
                               checked={holiday.doctorIds.includes(doctor.id)}
@@ -464,13 +456,14 @@ export function HolidaySetup() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleSave()}
-              disabled={conflicts.length > 0}
+              disabled={conflicts.length > 0 || saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Save
+              {saving ? 'Saving…' : 'Save'}
             </button>
             <button
               onClick={handleCancel}
+              disabled={saving}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
             >
               Cancel

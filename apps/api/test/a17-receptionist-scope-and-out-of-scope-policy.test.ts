@@ -102,7 +102,10 @@ async function sendMessage(
   };
 }
 
-async function pickEveningSlotTime(app: NestFastifyApplication, bookingDate: string): Promise<string> {
+async function pickEveningSlotTime(
+  app: NestFastifyApplication,
+  bookingDate: string,
+): Promise<string> {
   const slotService = app.get(SlotService);
   const slots = await slotService.findAvailableSlots(
     SEED.CLINIC_ID,
@@ -119,27 +122,18 @@ async function pickEveningSlotTime(app: NestFastifyApplication, bookingDate: str
   return timePart.slice(0, 5);
 }
 
-const bookedSlotTimes = new Map<string, string>();
-
 async function bookAppointmentForPhone(
   app: NestFastifyApplication,
   phone: string,
   bookingDate: string,
 ): Promise<void> {
   const slotTime = await pickEveningSlotTime(app, bookingDate);
-  bookedSlotTimes.set(phone, slotTime);
   const sessionId = await createConversation(app, phone);
   await sendMessage(app, sessionId, `${bookingDate} evening appointment venum`, `${phone}_book_1`);
   await sendMessage(app, sessionId, 'Knee pain', `${phone}_book_2`);
   await sendMessage(app, sessionId, slotTime, `${phone}_book_3`);
   await sendMessage(app, sessionId, 'Kumar', `${phone}_book_4`);
   await sendMessage(app, sessionId, 'Seri', `${phone}_book_5`);
-}
-
-function bookedSlotTimeForPhone(phone: string): string {
-  const slotTime = bookedSlotTimes.get(phone);
-  expect(slotTime).toBeTruthy();
-  return slotTime!;
 }
 
 describe('A17 receptionist scope and out-of-scope policy', () => {
@@ -150,8 +144,7 @@ describe('A17 receptionist scope and out-of-scope policy', () => {
 
   beforeAll(async () => {
     process.env.DATABASE_URL =
-      process.env.TEST_DATABASE_URL ??
-      'postgresql://postgres:postgres@localhost:5433/vaidya_test';
+      process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test';
     process.env.QUEUE_MODE = 'inline';
     process.env.NODE_ENV = 'test';
     process.env.ACTIVE_STATE_INTERPRETER_PROVIDER = 'composite';
@@ -208,7 +201,9 @@ describe('A17 receptionist scope and out-of-scope policy', () => {
     expect(step.session.current_state).toBe('ASK_TIME');
     expect(step.assistant_message.reply_template_key).toBe('knowledge.answer');
     expect(step.assistant_message.message_text.toLowerCase()).toContain('parking');
-    expect(step.assistant_message.message_text.toLowerCase()).toMatch(/morning|afternoon|evening|time/);
+    expect(step.assistant_message.message_text.toLowerCase()).toMatch(
+      /morning|afternoon|evening|time/,
+    );
   });
 
   it('3. PROPOSE_SLOTS + Weather redirects scope and repeats slots', async () => {
@@ -221,7 +216,9 @@ describe('A17 receptionist scope and out-of-scope policy', () => {
     expect(step.session.current_flow).toBe('booking');
     expect(step.session.current_state).toBe('PROPOSE_SLOTS');
     expect(step.assistant_message.reply_template_key).toBe('knowledge.answer');
-    expect(step.assistant_message.message_text.toLowerCase()).toMatch(/clinic|appointment|fees|timing/);
+    expect(step.assistant_message.message_text.toLowerCase()).toMatch(
+      /clinic|appointment|fees|timing/,
+    );
     expect(step.assistant_message.message_text.toLowerCase()).toMatch(/slot|choose|select|pm|am/);
   });
 
@@ -237,7 +234,9 @@ describe('A17 receptionist scope and out-of-scope policy', () => {
     expect(step.session.current_flow).toBe('booking');
     expect(step.session.current_state).toBe('ASK_PATIENT_NAME');
     expect(step.assistant_message.reply_template_key).toBe('knowledge.answer');
-    expect(step.assistant_message.message_text.toLowerCase()).toMatch(/medical advice|doctor|consult/);
+    expect(step.assistant_message.message_text.toLowerCase()).toMatch(
+      /medical advice|doctor|consult/,
+    );
     expect(step.assistant_message.message_text.toLowerCase()).toMatch(/name|ungal|patient/);
   });
 
@@ -326,7 +325,12 @@ describe('A17 receptionist scope and out-of-scope policy', () => {
     await bookAppointmentForPhone(app, phone, bookingDate);
 
     const sessionId = await createConversation(app, phone);
-    const step1 = await sendMessage(app, sessionId, 'Appointment time change panna venum', 'a17_9a');
+    const step1 = await sendMessage(
+      app,
+      sessionId,
+      'Appointment time change panna venum',
+      'a17_9a',
+    );
     expect(step1.session.current_flow).toBe('reschedule');
     expect(step1.assistant_message.reply_template_key).toBe('reschedule.ask_new_date');
 
@@ -345,7 +349,9 @@ describe('A17 receptionist scope and out-of-scope policy', () => {
     expect(step.session.current_flow).toBe('reschedule');
     expect(step.session.current_state).toBe('PROPOSE_NEW_SLOTS');
     expect(step.assistant_message.reply_template_key).toBe('knowledge.answer');
-    expect(step.assistant_message.message_text.toLowerCase()).toMatch(/timing|open|hour|monday|sunday/);
+    expect(step.assistant_message.message_text.toLowerCase()).toMatch(
+      /timing|open|hour|monday|sunday/,
+    );
     expect(step.assistant_message.message_text.toLowerCase()).toMatch(/slot|choose|select|pm|am/);
   });
 

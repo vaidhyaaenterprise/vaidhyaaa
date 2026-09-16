@@ -255,10 +255,14 @@ export class ReceptionistDialogExecutor {
     debug: Record<string, unknown>,
   ): Promise<OrchestratorResult> {
     const resume = input.plan.taskPlan.shouldResumeActiveTask;
-    const templateKey = resume ? 'safety.medical_advice_refusal_resume' : 'safety.medical_advice_refusal';
+    const templateKey = resume
+      ? 'safety.medical_advice_refusal_resume'
+      : 'safety.medical_advice_refusal';
 
     if (resume) {
-      const activeTask = parseActiveTask((input.session.collectedJson ?? {}) as Record<string, unknown>);
+      const activeTask = parseActiveTask(
+        (input.session.collectedJson ?? {}) as Record<string, unknown>,
+      );
       const answerText = await this.composer.composeAnswerWithResume({
         answerText: (
           await this.templateRenderer.render('safety.medical_advice_refusal', input.languageCode, {
@@ -281,9 +285,16 @@ export class ReceptionistDialogExecutor {
         flowAfter: input.flowBefore,
         stateAfter: input.stateBefore,
         languageCode: input.languageCode,
-        collectedJson: parseBookingCollected(input.session.collectedJson) as Record<string, unknown>,
+        collectedJson: parseBookingCollected(input.session.collectedJson) as Record<
+          string,
+          unknown
+        >,
         ...(input.languageSource ? { languageSource: input.languageSource } : {}),
-        debug: { ...debug, final_handler: 'a21_medical_advice_handler', knowledge_search_called: false },
+        debug: {
+          ...debug,
+          final_handler: 'a21_medical_advice_handler',
+          knowledge_search_called: false,
+        },
       };
     }
 
@@ -298,7 +309,11 @@ export class ReceptionistDialogExecutor {
       languageCode: input.languageCode,
       collectedJson: parseBookingCollected(input.session.collectedJson) as Record<string, unknown>,
       ...(input.languageSource ? { languageSource: input.languageSource } : {}),
-      debug: { ...debug, final_handler: 'a21_medical_advice_handler', knowledge_search_called: false },
+      debug: {
+        ...debug,
+        final_handler: 'a21_medical_advice_handler',
+        knowledge_search_called: false,
+      },
     };
   }
 
@@ -341,7 +356,9 @@ export class ReceptionistDialogExecutor {
 
     let answerText = scopeText;
     if (resume) {
-      const activeTask = parseActiveTask((input.session.collectedJson ?? {}) as Record<string, unknown>);
+      const activeTask = parseActiveTask(
+        (input.session.collectedJson ?? {}) as Record<string, unknown>,
+      );
       answerText = await this.composer.composeAnswerWithResume({
         answerText: (
           await this.templateRenderer.render('scope.out_of_scope', input.languageCode, {
@@ -408,9 +425,13 @@ export class ReceptionistDialogExecutor {
     if (input.plan.taskPlan.shouldReleaseActiveHold) {
       await this.slotHoldService.releaseSessionHolds(input.session.clinicId, input.session.id);
     }
-    const rendered = await this.templateRenderer.render('booking.flow_cancelled', input.languageCode, {
-      clinic_name: input.clinicName,
-    });
+    const rendered = await this.templateRenderer.render(
+      'booking.flow_cancelled',
+      input.languageCode,
+      {
+        clinic_name: input.clinicName,
+      },
+    );
     return {
       intent: 'cancel_booking',
       templateKey: 'booking.flow_cancelled',
@@ -423,7 +444,11 @@ export class ReceptionistDialogExecutor {
       collectedJson: {},
       sessionStatus: 'active',
       ...(input.languageSource ? { languageSource: input.languageSource } : {}),
-      debug: { ...debug, final_handler: 'a21_cancel_task_handler', message_text: rendered.message_text },
+      debug: {
+        ...debug,
+        final_handler: 'a21_cancel_task_handler',
+        message_text: rendered.message_text,
+      },
     };
   }
 
@@ -434,7 +459,7 @@ export class ReceptionistDialogExecutor {
     if (input.plan.taskPlan.shouldResumeActiveTask) {
       return null;
     }
-    const rendered = await this.templateRenderer.render('unknown.help_options', input.languageCode, {
+    await this.templateRenderer.render('unknown.help_options', input.languageCode, {
       clinic_name: input.clinicName,
     });
     return {
@@ -466,7 +491,9 @@ export class ReceptionistDialogExecutor {
         doctorName: plan.extractedEntities.doctorName ?? null,
         reasonForVisit: plan.extractedEntities.reasonForVisit ?? null,
         date: plan.extractedEntities.date ?? null,
-        timePreference: (plan.extractedEntities.timePreference as 'morning' | 'afternoon' | 'evening' | null) ?? null,
+        timePreference:
+          (plan.extractedEntities.timePreference as 'morning' | 'afternoon' | 'evening' | null) ??
+          null,
         visitType: null,
         dayName: null,
         feeCategory: null,

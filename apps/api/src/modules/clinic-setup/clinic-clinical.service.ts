@@ -43,19 +43,22 @@ function mapClinicHoursRow(row: {
   };
 }
 
-function mapHolidayRow(row: {
-  id: string;
-  clinicId: string;
-  holidayDate: string;
-  isFullDay: boolean;
-  startTime: string | null;
-  endTime: string | null;
-  reason: string | null;
-  active: boolean;
-  createdByUserId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}, doctorIds: string[] = []) {
+function mapHolidayRow(
+  row: {
+    id: string;
+    clinicId: string;
+    holidayDate: string;
+    isFullDay: boolean;
+    startTime: string | null;
+    endTime: string | null;
+    reason: string | null;
+    active: boolean;
+    createdByUserId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  doctorIds: string[] = [],
+) {
   const normalizedDoctorIds = [...doctorIds].sort();
 
   return {
@@ -261,18 +264,22 @@ export class ClinicClinicalService {
     );
 
     if (existing) {
-      const [updated] = await this.repos.clinicalSetup.patchDoctorServiceMapping(clinicId, existing.id, {
-        ...(input.consultation_fee_amount !== undefined
-          ? { consultationFeeAmount: String(input.consultation_fee_amount) }
-          : {}),
-        ...(input.followup_fee_amount !== undefined
-          ? { followupFeeAmount: String(input.followup_fee_amount) }
-          : {}),
-        ...(input.followup_valid_days !== undefined
-          ? { followupValidDays: input.followup_valid_days }
-          : {}),
-        active: input.active ?? true,
-      });
+      const [updated] = await this.repos.clinicalSetup.patchDoctorServiceMapping(
+        clinicId,
+        existing.id,
+        {
+          ...(input.consultation_fee_amount !== undefined
+            ? { consultationFeeAmount: String(input.consultation_fee_amount) }
+            : {}),
+          ...(input.followup_fee_amount !== undefined
+            ? { followupFeeAmount: String(input.followup_fee_amount) }
+            : {}),
+          ...(input.followup_valid_days !== undefined
+            ? { followupValidDays: input.followup_valid_days }
+            : {}),
+          active: input.active ?? true,
+        },
+      );
 
       if (!updated) {
         throw new AppError('INTERNAL_ERROR', 'Failed to update doctor-service mapping.');
@@ -343,14 +350,61 @@ export class ClinicClinicalService {
   }
 
   private async ensureBookingRulesForActiveMappings(clinicId: string) {
-    const mappings = await this.repos.clinicalSetup.listDoctorServiceMappings(clinicId);
+    const [mappings, existingRules] = await Promise.all([
+      this.repos.clinicalSetup.listDoctorServiceMappings(clinicId),
+      this.repos.clinicalSetup.listBookingRules(clinicId),
+    ]);
     const activeMappings = mappings.filter((mapping) => mapping.active);
+    const activeRuleKeys = new Set(
+      existingRules
+        .filter((rule) => rule.active)
+        .map((rule) => `${rule.doctorId}:${rule.clinicServiceId}`),
+    );
+    const missingMappings = activeMappings.filter(
+      (mapping) => !activeRuleKeys.has(`${mapping.doctorId}:${mapping.clinicServiceId}`),
+    );
+
+    if (missingMappings.length === 0) {
+      return { mappings, rules: existingRules };
+    }
+
+    const [timezoneRow] = await this.repos.slots.findClinicTimezone(clinicId);
+    const timezone = timezoneRow?.timezone ?? 'Asia/Kolkata';
+    const today = formatDateInTimezone(new Date(), timezone);
 
     await Promise.all(
-      activeMappings.map((mapping) =>
-        this.ensureBookingRuleForDoctorService(clinicId, mapping.doctorId, mapping.clinicServiceId),
-      ),
+      missingMappings.map((mapping) => {
+        const latestRule = existingRules
+          .filter(
+            (rule) =>
+              rule.doctorId === mapping.doctorId &&
+              rule.clinicServiceId === mapping.clinicServiceId,
+          )
+          .sort((left, right) => right.version - left.version)[0];
+
+        return this.repos.clinicalSetup.createBookingRule({
+          clinicId,
+          doctorId: mapping.doctorId,
+          clinicServiceId: mapping.clinicServiceId,
+          slotDurationMinutes: latestRule?.slotDurationMinutes ?? 15,
+          capacityPerSlot: latestRule?.capacityPerSlot ?? 3,
+          bookingHorizonDays: latestRule?.bookingHorizonDays ?? 45,
+          minBookingNoticeMinutes: latestRule?.minBookingNoticeMinutes ?? 0,
+          maxAdvanceBookingDays: latestRule?.maxAdvanceBookingDays ?? null,
+          manualEditCutoffBeforeStartMinutes: latestRule?.manualEditCutoffBeforeStartMinutes ?? 60,
+          manualEditMaxShiftMinutes: latestRule?.manualEditMaxShiftMinutes ?? 60,
+          effectiveFrom: today,
+          effectiveTo: null,
+          active: true,
+          version: (latestRule?.version ?? 0) + 1,
+        });
+      }),
     );
+
+    return {
+      mappings,
+      rules: await this.repos.clinicalSetup.listBookingRules(clinicId),
+    };
   }
 
   private async ensureBookingRuleForDoctorService(
@@ -434,7 +488,7 @@ export class ClinicClinicalService {
       throw new AppError('NOT_FOUND', 'Doctor-service mapping not found.');
     }
 
-    if (row.active) {
+    if (row.active && input.active === true) {
       await this.ensureBookingRuleForDoctorService(clinicId, row.doctorId, row.clinicServiceId);
       await this.regenerateSlotsForDoctorService(clinicId, row.doctorId, row.clinicServiceId);
     }
@@ -507,7 +561,10 @@ export class ClinicClinicalService {
         mapping.clinicServiceId,
       );
     }
-    const [deleted] = await this.repos.clinicalSetup.deleteDoctorServiceMapping(clinicId, mappingId);
+    const [deleted] = await this.repos.clinicalSetup.deleteDoctorServiceMapping(
+      clinicId,
+      mappingId,
+    );
     if (!deleted) {
       throw new AppError('NOT_FOUND', 'Doctor-service mapping not found.');
     }
@@ -515,12 +572,7 @@ export class ClinicClinicalService {
   }
 
   async listBookingRules(clinicId: string) {
-    await this.ensureBookingRulesForActiveMappings(clinicId);
-
-    const [rows, mappings] = await Promise.all([
-      this.repos.clinicalSetup.listBookingRules(clinicId),
-      this.repos.clinicalSetup.listDoctorServiceMappings(clinicId),
-    ]);
+    const { rules: rows, mappings } = await this.ensureBookingRulesForActiveMappings(clinicId);
 
     const activeMappingKeys = new Set(
       mappings
@@ -531,23 +583,23 @@ export class ClinicClinicalService {
     return rows
       .filter((row) => activeMappingKeys.has(`${row.doctorId}:${row.clinicServiceId}`))
       .map((row) => ({
-      id: row.id,
-      clinic_id: row.clinicId,
-      doctor_id: row.doctorId,
-      clinic_service_id: row.clinicServiceId,
-      slot_duration_minutes: row.slotDurationMinutes,
-      capacity_per_slot: row.capacityPerSlot,
-      booking_horizon_days: row.bookingHorizonDays,
-      min_booking_notice_minutes: row.minBookingNoticeMinutes,
-      max_advance_booking_days: row.maxAdvanceBookingDays,
-      manual_edit_cutoff_before_start_minutes: row.manualEditCutoffBeforeStartMinutes,
-      manual_edit_max_shift_minutes: row.manualEditMaxShiftMinutes,
-      effective_from: row.effectiveFrom,
-      effective_to: row.effectiveTo,
-      active: row.active,
-      version: row.version,
-      created_at: row.createdAt.toISOString(),
-      updated_at: row.updatedAt.toISOString(),
+        id: row.id,
+        clinic_id: row.clinicId,
+        doctor_id: row.doctorId,
+        clinic_service_id: row.clinicServiceId,
+        slot_duration_minutes: row.slotDurationMinutes,
+        capacity_per_slot: row.capacityPerSlot,
+        booking_horizon_days: row.bookingHorizonDays,
+        min_booking_notice_minutes: row.minBookingNoticeMinutes,
+        max_advance_booking_days: row.maxAdvanceBookingDays,
+        manual_edit_cutoff_before_start_minutes: row.manualEditCutoffBeforeStartMinutes,
+        manual_edit_max_shift_minutes: row.manualEditMaxShiftMinutes,
+        effective_from: row.effectiveFrom,
+        effective_to: row.effectiveTo,
+        active: row.active,
+        version: row.version,
+        created_at: row.createdAt.toISOString(),
+        updated_at: row.updatedAt.toISOString(),
       }));
   }
 
@@ -603,10 +655,14 @@ export class ClinicClinicalService {
       });
 
       if (preview.blocked && !bookingRuleInput.implement_from) {
-        throw new AppError('CONFLICTING_APPOINTMENTS', 'Booking rule change conflicts with active appointments.', {
-          conflicts: preview.conflicts,
-          next_safe_implement_from: preview.next_safe_implement_from,
-        });
+        throw new AppError(
+          'CONFLICTING_APPOINTMENTS',
+          'Booking rule change conflicts with active appointments.',
+          {
+            conflicts: preview.conflicts,
+            next_safe_implement_from: preview.next_safe_implement_from,
+          },
+        );
       }
 
       if (bookingRuleInput.capacity_per_slot !== undefined) {
@@ -687,9 +743,13 @@ export class ClinicClinicalService {
   async replaceClinicHours(clinicId: string, input: ReplaceClinicHoursInput) {
     const preview = await this.scheduleChangeImpact.previewClinicHoursReplace(clinicId, input);
     if (preview.blocked) {
-      throw new AppError('CONFLICTING_APPOINTMENTS', 'Clinic hours change conflicts with active appointments.', {
-        conflicts: preview.conflicts,
-      });
+      throw new AppError(
+        'CONFLICTING_APPOINTMENTS',
+        'Clinic hours change conflicts with active appointments.',
+        {
+          conflicts: preview.conflicts,
+        },
+      );
     }
 
     const rows = await this.repos.clinicalSetup.replaceClinicHours(
@@ -731,9 +791,13 @@ export class ClinicClinicalService {
         doctorIds,
       );
       if (preview.blocked) {
-        throw new AppError('CONFLICTING_APPOINTMENTS', 'Holiday conflicts with active appointments.', {
-          conflicts: preview.conflicts,
-        });
+        throw new AppError(
+          'CONFLICTING_APPOINTMENTS',
+          'Holiday conflicts with active appointments.',
+          {
+            conflicts: preview.conflicts,
+          },
+        );
       }
     }
 
@@ -761,7 +825,10 @@ export class ClinicClinicalService {
       throw new AppError('NOT_FOUND', 'Holiday not found.');
     }
 
-    const existingDoctorRows = await this.repos.clinicalSetup.listHolidayDoctors(clinicId, holidayId);
+    const existingDoctorRows = await this.repos.clinicalSetup.listHolidayDoctors(
+      clinicId,
+      holidayId,
+    );
     const existingDoctorIds = existingDoctorRows.map((row) => row.doctorId);
 
     const nextDoctorIds =
@@ -784,9 +851,13 @@ export class ClinicClinicalService {
         nextDoctorIds,
       );
       if (preview.blocked) {
-        throw new AppError('CONFLICTING_APPOINTMENTS', 'Holiday conflicts with active appointments.', {
-          conflicts: preview.conflicts,
-        });
+        throw new AppError(
+          'CONFLICTING_APPOINTMENTS',
+          'Holiday conflicts with active appointments.',
+          {
+            conflicts: preview.conflicts,
+          },
+        );
       }
     }
 

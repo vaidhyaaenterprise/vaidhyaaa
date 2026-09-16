@@ -4,13 +4,8 @@ import { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-import {
-  apiSuccessBodySchema,
-  sanitizeAuditMessagePreview,
-} from '@vaidya/shared';
+import { apiSuccessBodySchema, sanitizeAuditMessagePreview } from '@vaidya/shared';
 
-import { AgentCapabilityEvaluationRunner } from '../src/agent/evaluation/agent-capability-evaluation-runner';
-import { LlmEvaluationRunner } from '../src/agent/evaluation/llm-evaluation-runner';
 import { runQaActivationCheck } from '../src/agent/qa-activation';
 
 import { prepareTestDatabase } from './db-setup';

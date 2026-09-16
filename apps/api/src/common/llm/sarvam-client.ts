@@ -9,12 +9,10 @@ import {
   extractSarvamAssistantContent,
   extractSarvamAssistantToolCalls,
   LlmJsonParser,
-  LOW_INTENT_CONFIDENCE,
   parseLlmToolCalls,
   redactSarvamLogPayload,
   resolveSarvamAuthModeAttempts,
   serializeChatCompletionMessages,
-  type LlmChatMessage,
   type LlmChatRequest,
   type LlmChatResponse,
   type LlmClient,
@@ -126,7 +124,11 @@ export class SarvamLlmClient implements LlmClient {
     return new SarvamLlmClient(deps);
   }
 
-  shouldUseFallback(confidence: number, threshold?: number, runtime?: LlmRequestRuntimeOptions): boolean {
+  shouldUseFallback(
+    confidence: number,
+    threshold?: number,
+    runtime?: LlmRequestRuntimeOptions,
+  ): boolean {
     const effectiveThreshold = threshold ?? this.confidenceThreshold;
     const enableFallback = runtime?.enableFallback ?? this.deps.options.enableFallback;
     return enableFallback && confidence < effectiveThreshold;
@@ -139,7 +141,10 @@ export class SarvamLlmClient implements LlmClient {
     return this.requestModel(this.deps.options.fallbackModel, request, 0, runtime);
   }
 
-  async chat(request: LlmChatRequest, runtime?: LlmRequestRuntimeOptions): Promise<LlmChatResponse> {
+  async chat(
+    request: LlmChatRequest,
+    runtime?: LlmRequestRuntimeOptions,
+  ): Promise<LlmChatResponse> {
     return this.requestModel(request.model || this.deps.options.primaryModel, request, 0, runtime);
   }
 
@@ -165,9 +170,7 @@ export class SarvamLlmClient implements LlmClient {
     const confidence = options?.confidence;
 
     const shouldFallback =
-      this.deps.options.enableFallback &&
-      confidence !== undefined &&
-      confidence < threshold;
+      this.deps.options.enableFallback && confidence !== undefined && confidence < threshold;
 
     if (!shouldFallback) {
       return { ...primary, usedFallback: false };
@@ -247,7 +250,8 @@ export class SarvamLlmClient implements LlmClient {
   ): Promise<LlmChatResponse> {
     const options = this.resolveOptions(runtime);
     const requestOptions = this.resolveRequestOptions(request, runtime, minimalPayload);
-    const authMode = this.authModeAttempts[authModeIndex] ?? this.authModeAttempts[0] ?? 'subscription';
+    const authMode =
+      this.authModeAttempts[authModeIndex] ?? this.authModeAttempts[0] ?? 'subscription';
     assertValidChatCompletionToolRequest(request.tools, request.toolChoice);
     const toolsPayload = buildChatCompletionToolsPayload(request.tools, request.toolChoice);
     const toolsCount = Array.isArray(toolsPayload.tools) ? toolsPayload.tools.length : 0;
@@ -274,7 +278,9 @@ export class SarvamLlmClient implements LlmClient {
           model,
           messages: serializeChatCompletionMessages(request.messages),
           temperature: request.temperature ?? 0,
-          ...(requestOptions.maxTokens !== undefined ? { max_tokens: requestOptions.maxTokens } : {}),
+          ...(requestOptions.maxTokens !== undefined
+            ? { max_tokens: requestOptions.maxTokens }
+            : {}),
           ...(requestOptions.reasoningEffort !== undefined
             ? { reasoning_effort: requestOptions.reasoningEffort }
             : {}),
@@ -318,14 +324,31 @@ export class SarvamLlmClient implements LlmClient {
           (response.status === 401 || response.status === 403) &&
           authModeIndex + 1 < this.authModeAttempts.length
         ) {
-          return this.requestModel(model, request, attempt, runtime, authModeIndex + 1, minimalPayload);
+          return this.requestModel(
+            model,
+            request,
+            attempt,
+            runtime,
+            authModeIndex + 1,
+            minimalPayload,
+          );
         }
 
         if (response.status >= 500 && attempt < 1) {
-          return this.requestModel(model, request, attempt + 1, runtime, authModeIndex, minimalPayload);
+          return this.requestModel(
+            model,
+            request,
+            attempt + 1,
+            runtime,
+            authModeIndex,
+            minimalPayload,
+          );
         }
 
-        throw new AppError('INTERNAL_ERROR', `Sarvam request failed with status ${response.status}.`);
+        throw new AppError(
+          'INTERNAL_ERROR',
+          `Sarvam request failed with status ${response.status}.`,
+        );
       }
 
       const payload = (await response.json()) as {
@@ -387,12 +410,26 @@ export class SarvamLlmClient implements LlmClient {
           attempt,
         });
         if (attempt < 1 && !options.disableTimeoutRetry) {
-          return this.requestModel(model, request, attempt + 1, runtime, authModeIndex, minimalPayload);
+          return this.requestModel(
+            model,
+            request,
+            attempt + 1,
+            runtime,
+            authModeIndex,
+            minimalPayload,
+          );
         }
         throw new AppError('INTERNAL_ERROR', 'Sarvam request timed out.');
       }
       if (attempt < 1 && error instanceof TypeError) {
-        return this.requestModel(model, request, attempt + 1, runtime, authModeIndex, minimalPayload);
+        return this.requestModel(
+          model,
+          request,
+          attempt + 1,
+          runtime,
+          authModeIndex,
+          minimalPayload,
+        );
       }
       if (error instanceof AppError) {
         throw error;
@@ -412,7 +449,8 @@ export class SarvamLlmClient implements LlmClient {
   ): Promise<LlmChatResponse> {
     const options = this.resolveOptions(runtime);
     const requestOptions = this.resolveRequestOptions(request, runtime, false);
-    const authMode = this.authModeAttempts[authModeIndex] ?? this.authModeAttempts[0] ?? 'subscription';
+    const authMode =
+      this.authModeAttempts[authModeIndex] ?? this.authModeAttempts[0] ?? 'subscription';
     assertValidChatCompletionToolRequest(request.tools, request.toolChoice);
     const toolsPayload = buildChatCompletionToolsPayload(request.tools, request.toolChoice);
     const controller = new AbortController();
@@ -428,7 +466,9 @@ export class SarvamLlmClient implements LlmClient {
           messages: serializeChatCompletionMessages(request.messages),
           temperature: request.temperature ?? 0,
           stream: true,
-          ...(requestOptions.maxTokens !== undefined ? { max_tokens: requestOptions.maxTokens } : {}),
+          ...(requestOptions.maxTokens !== undefined
+            ? { max_tokens: requestOptions.maxTokens }
+            : {}),
           ...(requestOptions.reasoningEffort !== undefined
             ? { reasoning_effort: requestOptions.reasoningEffort }
             : {}),
@@ -461,7 +501,10 @@ export class SarvamLlmClient implements LlmClient {
         if (response.status === 401 && authModeIndex + 1 < this.authModeAttempts.length) {
           return this.requestModelStream(model, request, runtime, handlers, authModeIndex + 1);
         }
-        throw new AppError('INTERNAL_ERROR', `Sarvam stream request failed with status ${response.status}.`);
+        throw new AppError(
+          'INTERNAL_ERROR',
+          `Sarvam stream request failed with status ${response.status}.`,
+        );
       }
 
       const streamed = await consumeOpenAiCompatibleSse(response.body, handlers, startedAt);

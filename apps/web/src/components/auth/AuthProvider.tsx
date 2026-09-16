@@ -15,10 +15,7 @@ import { ApiRequestError, apiGet } from '@/lib/api/client';
 import type { MeResponse } from '@/lib/api/types';
 import { DEV_SEED, type DevAuthProfile } from '@/lib/dev-auth/constants';
 import { clearDevAuthProfile, readDevAuthProfile } from '@/lib/dev-auth/storage';
-import {
-  resolveEffectiveRole,
-  type EffectiveRole,
-} from '@/lib/navigation';
+import { resolveEffectiveRole, type EffectiveRole } from '@/lib/navigation';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'inactive' | 'error';
 
@@ -144,7 +141,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (profile && err.apiError.code === 'INTERNAL_ERROR') {
+        if (
+          profile &&
+          process.env.NODE_ENV !== 'production' &&
+          err.apiError.code === 'INTERNAL_ERROR'
+        ) {
           setMe(buildDevMockMe(profile));
           setError(null);
           setErrorCode(null);
@@ -152,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
       } else {
-        if (profile) {
+        if (profile && process.env.NODE_ENV !== 'production') {
           setMe(buildDevMockMe(profile));
           setError(null);
           setErrorCode(null);
@@ -160,9 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         setError(
-          err instanceof Error
+          err instanceof Error && process.env.NODE_ENV !== 'production'
             ? err.message
-            : 'Unable to reach the API. Check NEXT_PUBLIC_API_BASE_URL and server status.',
+            : 'Unable to reach the API. Please check your connection and try again.',
         );
         setErrorCode('INTERNAL_ERROR');
       }

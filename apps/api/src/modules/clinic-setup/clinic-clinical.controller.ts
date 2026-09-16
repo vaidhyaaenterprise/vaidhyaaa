@@ -1,4 +1,16 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import {
@@ -50,7 +62,7 @@ export class ClinicClinicalController {
     return { services };
   }
 
-@Patch('services/:serviceId')
+  @Patch('services/:serviceId')
   @ClinicAdmin()
   async patchService(
     @Param('clinicId') clinicId: string,
@@ -279,6 +291,13 @@ export class ClinicClinicalController {
       throw new AppError('FORBIDDEN', 'Doctors may only view their own schedule.');
     }
     const schedules = await this.clinicalService.listDoctorSchedules(clinicId, doctorId);
+    return { schedules };
+  }
+
+  @Get('doctor-schedules')
+  @ClinicAdmin()
+  async listAllDoctorSchedules(@Param('clinicId') clinicId: string) {
+    const schedules = await this.clinicalService.listDoctorSchedules(clinicId);
     return { schedules };
   }
 

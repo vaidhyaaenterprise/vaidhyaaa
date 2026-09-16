@@ -6,6 +6,7 @@ import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
 import {
+  fetchAllDoctorSchedules,
   fetchDoctorSchedules,
   fetchDoctors,
   replaceDoctorSchedules,
@@ -45,8 +46,10 @@ export function DoctorSchedule() {
   const [schedules, setSchedules] = useState<DoctorScheduleSlot[]>([]);
   const [tempSchedules, setTempSchedules] = useState<DoctorScheduleSlot[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
-  const currentDoctorId = isAdmin ? selectedDoctorId : me?.clinics[0]?.doctor_id || null;
+  const authenticatedDoctorId = me?.clinics[0]?.doctor_id ?? null;
+  const currentDoctorId = isAdmin ? selectedDoctorId : authenticatedDoctorId;
 
   const loadSchedules = useCallback(async () => {
     if (!clinicId) {
@@ -56,26 +59,28 @@ export function DoctorSchedule() {
     setLoading(true);
     setError(null);
     try {
-      const doctorRows = await fetchDoctors(clinicId);
+      const scheduleRequest = isAdmin
+        ? fetchAllDoctorSchedules(clinicId)
+        : authenticatedDoctorId
+          ? fetchDoctorSchedules(clinicId, authenticatedDoctorId)
+          : Promise.resolve([]);
+      const [doctorRows, scheduleRows] = await Promise.all([
+        fetchDoctors(clinicId),
+        scheduleRequest,
+      ]);
       const doctorOptions = doctorRows
         .filter((row) => row.active)
         .map((row) => ({ id: row.id, name: row.name }));
       setDoctors(doctorOptions);
 
-      const scheduleRows = await Promise.all(
-        doctorOptions.map(async (doctor) => {
-          const rows = await fetchDoctorSchedules(clinicId, doctor.id);
-          return rows.map((row) => ({
-            id: row.id,
-            doctorId: row.doctor_id,
-            day: dayLabel(row.day_of_week),
-            startTime: normalizeTime(row.start_time),
-            endTime: normalizeTime(row.end_time),
-            active: row.active,
-          }));
-        }),
-      );
-      const mapped = scheduleRows.flat();
+      const mapped = scheduleRows.map((row) => ({
+        id: row.id,
+        doctorId: row.doctor_id,
+        day: dayLabel(row.day_of_week),
+        startTime: normalizeTime(row.start_time),
+        endTime: normalizeTime(row.end_time),
+        active: row.active,
+      }));
       setSchedules(mapped);
       setTempSchedules(mapped);
     } catch (err) {
@@ -85,7 +90,7 @@ export function DoctorSchedule() {
     } finally {
       setLoading(false);
     }
-  }, [clinicId]);
+  }, [authenticatedDoctorId, clinicId, isAdmin]);
 
   useEffect(() => {
     void loadSchedules();
@@ -107,9 +112,7 @@ export function DoctorSchedule() {
       return;
     }
     const doctorId =
-      currentDoctorId && currentDoctorId !== 'all'
-        ? currentDoctorId
-        : doctors[0]?.id;
+      currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : doctors[0]?.id;
     if (!doctorId) {
       return;
     }
@@ -129,10 +132,30 @@ export function DoctorSchedule() {
         active: true,
       }));
 
-    await replaceDoctorSchedules(clinicId, doctorId, windows);
-    setIsEditing(false);
-    setConflicts([]);
-    await loadSchedules();
+    setSaving(true);
+    setError(null);
+    try {
+      const updatedRows = await replaceDoctorSchedules(clinicId, doctorId, windows);
+      const updated = updatedRows.map((row) => ({
+        id: row.id,
+        doctorId: row.doctor_id,
+        day: dayLabel(row.day_of_week),
+        startTime: normalizeTime(row.start_time),
+        endTime: normalizeTime(row.end_time),
+        active: row.active,
+      }));
+      const nextSchedules = [...schedules.filter((row) => row.doctorId !== doctorId), ...updated];
+      setSchedules(nextSchedules);
+      setTempSchedules(nextSchedules);
+      setIsEditing(false);
+      setConflicts([]);
+    } catch (err) {
+      setError(
+        err instanceof ApiRequestError ? err.apiError.message : 'Failed to save doctor schedules.',
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const detectConflicts = (): string[] => {
@@ -141,9 +164,7 @@ export function DoctorSchedule() {
 
   const addScheduleSlot = (day: string) => {
     const doctorId =
-      currentDoctorId && currentDoctorId !== 'all'
-        ? currentDoctorId
-        : doctors[0]?.id;
+      currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : doctors[0]?.id;
     if (!doctorId) {
       return;
     }
@@ -180,7 +201,7 @@ export function DoctorSchedule() {
   };
 
   const editingDoctorId =
-    currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : doctors[0]?.id ?? '';
+    currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : (doctors[0]?.id ?? '');
 
   if (loading) {
     return (
@@ -359,13 +380,14 @@ export function DoctorSchedule() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleSave()}
-              disabled={conflicts.length > 0}
+              disabled={conflicts.length > 0 || saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Save
+              {saving ? 'Saving…' : 'Save'}
             </button>
             <button
               onClick={handleCancel}
+              disabled={saving}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
             >
               Cancel

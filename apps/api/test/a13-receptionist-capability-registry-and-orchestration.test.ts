@@ -12,8 +12,6 @@ import { prepareTestDatabase } from './db-setup';
 import { createTestApp } from './test-app';
 import { SEED } from './test-constants';
 
-const TIMEZONE = 'Asia/Kolkata';
-
 async function createConversation(app: NestFastifyApplication, phone: string) {
   const response = await app.inject({
     method: 'POST',

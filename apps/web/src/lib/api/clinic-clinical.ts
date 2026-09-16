@@ -136,7 +136,10 @@ export async function createService(
   clinicId: string,
   payload: { service_name: string; service_key?: string; active?: boolean },
 ) {
-  const data = await apiPost<{ service: ServiceApiRow }>(clinicPath(clinicId, '/services'), payload);
+  const data = await apiPost<{ service: ServiceApiRow }>(
+    clinicPath(clinicId, '/services'),
+    payload,
+  );
   return data.service;
 }
 
@@ -266,6 +269,13 @@ export async function patchHoliday(
 export async function fetchDoctorSchedules(clinicId: string, doctorId: string) {
   const data = await apiGet<{ schedules: DoctorScheduleApiRow[] }>(
     clinicPath(clinicId, `/doctors/${doctorId}/schedules`),
+  );
+  return data.schedules.filter((row) => row.active);
+}
+
+export async function fetchAllDoctorSchedules(clinicId: string) {
+  const data = await apiGet<{ schedules: DoctorScheduleApiRow[] }>(
+    clinicPath(clinicId, '/doctor-schedules'),
   );
   return data.schedules.filter((row) => row.active);
 }

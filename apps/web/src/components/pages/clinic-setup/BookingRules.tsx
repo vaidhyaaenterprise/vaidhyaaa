@@ -96,9 +96,7 @@ function buildRulePatch(
   if (next.bookingHorizonDays !== current.bookingHorizonDays) {
     patch.booking_horizon_days = next.bookingHorizonDays;
   }
-  if (
-    next.manualEditCutoffBeforeStartMinutes !== current.manualEditCutoffBeforeStartMinutes
-  ) {
+  if (next.manualEditCutoffBeforeStartMinutes !== current.manualEditCutoffBeforeStartMinutes) {
     patch.manual_edit_cutoff_before_start_minutes = next.manualEditCutoffBeforeStartMinutes;
   }
   if (next.manualEditMaxShiftMinutes !== current.manualEditMaxShiftMinutes) {
@@ -135,6 +133,7 @@ export function BookingRules() {
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [conflictModal, setConflictModal] = useState<ConflictModalState | null>(null);
   const [applyingImplementFrom, setApplyingImplementFrom] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const myDoctorId = useMemo(
     () =>
@@ -288,16 +287,14 @@ export function BookingRules() {
     setTempRules(rules);
   };
 
-  const applyChanges = async (
-    patch: BookingRulePatchPayload,
-    implementFrom?: string,
-  ) => {
+  const applyChanges = async (patch: BookingRulePatchPayload, implementFrom?: string) => {
     if (!clinicId || !rules || !tempRules) {
       return;
     }
 
+    let updatedRules: BookingRuleApiRow[] = [];
     if (Object.keys(patch).length > 0) {
-      await Promise.all(
+      updatedRules = await Promise.all(
         rules.ruleIds.map((ruleId) =>
           patchBookingRule(clinicId, ruleId, {
             ...patch,
@@ -305,18 +302,25 @@ export function BookingRules() {
           }),
         ),
       );
+      const updatedById = new Map(updatedRules.map((row) => [row.id, row]));
+      setRuleRows((current) =>
+        current.map((row) => {
+          const updated = updatedById.get(row.id);
+          return updated ? { ...row, ...updated } : row;
+        }),
+      );
     }
 
     if (tempRules.allowDoctorServiceEdit !== rules.allowDoctorServiceEdit) {
       await patchClinicSettings(clinicId, {
         allow_doctor_service_edit: tempRules.allowDoctorServiceEdit,
       });
+      setAllowDoctorServiceEdit(tempRules.allowDoctorServiceEdit);
     }
 
     setIsEditing(false);
     setConflicts([]);
     setConflictModal(null);
-    await loadRules();
   };
 
   const handleSave = async () => {
@@ -328,6 +332,8 @@ export function BookingRules() {
     const capacityOrDurationChanged =
       patch.capacity_per_slot !== undefined || patch.slot_duration_minutes !== undefined;
 
+    setSaving(true);
+    setError(null);
     try {
       if (capacityOrDurationChanged) {
         const previews = await Promise.all(
@@ -376,6 +382,8 @@ export function BookingRules() {
       }
 
       setError(err instanceof Error ? err.message : 'Failed to save booking rules.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -487,15 +495,21 @@ export function BookingRules() {
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Slot duration</span>
-              <span className="text-sm font-bold text-slate-900">{rules.slotDurationMinutes} minutes</span>
+              <span className="text-sm font-bold text-slate-900">
+                {rules.slotDurationMinutes} minutes
+              </span>
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Capacity per slot</span>
-              <span className="text-sm font-bold text-slate-900">{rules.capacityPerSlot} patient(s)</span>
+              <span className="text-sm font-bold text-slate-900">
+                {rules.capacityPerSlot} patient(s)
+              </span>
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Booking horizon</span>
-              <span className="text-sm font-bold text-slate-900">{rules.bookingHorizonDays} days</span>
+              <span className="text-sm font-bold text-slate-900">
+                {rules.bookingHorizonDays} days
+              </span>
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Edit cutoff</span>
@@ -505,11 +519,15 @@ export function BookingRules() {
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Max edit shift</span>
-              <span className="text-sm font-bold text-slate-900">{rules.manualEditMaxShiftMinutes} minutes</span>
+              <span className="text-sm font-bold text-slate-900">
+                {rules.manualEditMaxShiftMinutes} minutes
+              </span>
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Effective from</span>
-              <span className="text-sm font-bold text-slate-900">{rules.effectiveFrom ?? 'Today'}</span>
+              <span className="text-sm font-bold text-slate-900">
+                {rules.effectiveFrom ?? 'Today'}
+              </span>
             </div>
             <div className="flex justify-between rounded-lg bg-slate-50 p-3">
               <span className="text-sm font-semibold text-slate-600">Doctor service edit</span>
@@ -649,7 +667,9 @@ export function BookingRules() {
                     }
                     className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
                   />
-                  <span className="text-sm font-semibold text-slate-900">Allow doctor service edit</span>
+                  <span className="text-sm font-semibold text-slate-900">
+                    Allow doctor service edit
+                  </span>
                 </label>
               </div>
             </div>
@@ -657,12 +677,14 @@ export function BookingRules() {
             <div className="flex gap-2">
               <button
                 onClick={() => void handleSave()}
-                className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800"
+                disabled={saving}
+                className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </button>
               <button
                 onClick={handleCancel}
+                disabled={saving}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
               >
                 Cancel
@@ -688,8 +710,8 @@ export function BookingRules() {
               Conflicts with existing appointments
             </h2>
             <p className="mb-3 text-sm text-slate-600">
-              The new booking rule conflicts with existing appointments. You can implement the
-              new rule from{' '}
+              The new booking rule conflicts with existing appointments. You can implement the new
+              rule from{' '}
               <span className="font-bold text-slate-900">
                 {formatImplementFromLabel(conflictModal.implementFrom)}
               </span>{' '}
