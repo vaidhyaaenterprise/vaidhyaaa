@@ -34,12 +34,42 @@ function errorResponse(message: string, requestId: string, status = 503): Respon
   });
 }
 
-function getUpstreamBaseUrl(): string {
-  const configured =
-    process.env.API_BASE_URL?.trim() || process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+function isVercelRuntime(): boolean {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL);
+}
+
+function isLoopbackUrl(value: string): boolean {
+  try {
+    const parsedHostname = new URL(value).hostname.toLowerCase();
+    const hostname = parsedHostname.endsWith('.') ? parsedHostname.slice(0, -1) : parsedHostname;
+    return (
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname.startsWith('127.') ||
+      hostname === '0.0.0.0' ||
+      hostname === '[::]' ||
+      hostname === '[::1]'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getUpstreamBaseUrl(): string | null {
+  const configured = process.env.API_BASE_URL?.trim();
 
   if (configured) {
+    if (isVercelRuntime() && isLoopbackUrl(configured)) {
+      return null;
+    }
     return configured.replace(/\/+$/, '');
+  }
+
+  // A Vercel function's loopback interface is not the API running on a
+  // developer's computer (or on another server). Failing before fetch keeps a
+  // missing deployment setting from turning into a slow connection timeout.
+  if (isVercelRuntime()) {
+    return null;
   }
 
   // The repository runs the web and API processes on the same host by default.
@@ -50,6 +80,14 @@ function getUpstreamBaseUrl(): string {
 async function proxyRequest(request: NextRequest, context: RouteContext): Promise<Response> {
   const requestId = request.headers.get(REQUEST_ID_HEADER) || createRequestId();
   const upstreamBaseUrl = getUpstreamBaseUrl();
+
+  if (!upstreamBaseUrl) {
+    console.error('API proxy has no usable server-only API_BASE_URL setting.');
+    return errorResponse(
+      'The service is temporarily unavailable. Please contact support.',
+      requestId,
+    );
+  }
 
   const { path } = await context.params;
   const encodedPath = path.map((segment) => encodeURIComponent(segment)).join('/');

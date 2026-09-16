@@ -65,6 +65,7 @@ export const apiEnvSchema = z
     NODE_ENV: nodeEnvSchema.default('development'),
     APP_ENV: appEnvSchema.default('local'),
     API_PORT: z.coerce.number().int().positive().default(3000),
+    PORT: z.coerce.number().int().positive().optional(),
     DATABASE_URL: z.string().url('DATABASE_URL must be a valid PostgreSQL URL'),
     REDIS_URL: z.string().optional(),
     QUEUE_MODE: queueModeSchema.default('inline'),
@@ -260,7 +261,6 @@ export const webEnvSchema = z.object({
   NODE_ENV: nodeEnvSchema.default('development'),
   WEB_PORT: z.coerce.number().int().positive().default(3001),
   API_BASE_URL: z.string().url().default('http://localhost:3000'),
-  NEXT_PUBLIC_API_BASE_URL: z.string().url().optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

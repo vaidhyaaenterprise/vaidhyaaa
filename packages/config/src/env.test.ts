@@ -104,6 +104,12 @@ describe('parseApiEnv', () => {
     expect(env.RECEPTIONIST_AGENT_FASTPATH_MODEL).toBe('sarvam-30b');
     expect(env.RECEPTIONIST_AGENT_FALLBACK_MODEL).toBe('sarvam-105b');
   });
+
+  it('uses a platform-provided HTTP port when present', () => {
+    const env = parseApiEnv({ ...validApiEnv, PORT: '8080' });
+
+    expect(env.PORT).toBe(8080);
+  });
 });
 
 describe('parseWebEnv', () => {

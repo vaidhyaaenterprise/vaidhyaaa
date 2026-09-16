@@ -38,10 +38,12 @@ describe('API proxy route', () => {
     await expect(response.json()).resolves.toMatchObject({ data: { ok: true } });
   });
 
-  it('uses the same-server API default in production and returns structured failures', async () => {
+  it('uses the same-server API default outside Vercel and returns structured failures', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('API_BASE_URL', '');
-    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', '');
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
+    vi.stubEnv('VERCEL_URL', '');
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('connection refused'));
     vi.stubGlobal('fetch', fetchMock);
@@ -62,5 +64,45 @@ describe('API proxy route', () => {
         message: 'The service is temporarily unavailable. Please try again shortly.',
       },
     });
+  });
+
+  it('fails fast on Vercel when the server-only API URL is missing', async () => {
+    vi.stubEnv('API_BASE_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://localhost:3000');
+    vi.stubEnv('VERCEL', '1');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const request = new NextRequest('https://web.example.test/api/backend/v1/health');
+
+    const response = await GET(request, {
+      params: Promise.resolve({ path: ['v1', 'health'] }),
+    });
+    const payload = await response.json();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(payload).toMatchObject({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'The service is temporarily unavailable. Please contact support.',
+      },
+    });
+  });
+
+  it('rejects a loopback API URL on Vercel', async () => {
+    vi.stubEnv('API_BASE_URL', 'http://localhost:3000');
+    vi.stubEnv('VERCEL', '1');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const request = new NextRequest('https://web.example.test/api/backend/v1/health');
+
+    const response = await GET(request, {
+      params: Promise.resolve({ path: ['v1', 'health'] }),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
   });
 });

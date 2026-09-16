@@ -26,6 +26,7 @@ async function bootstrap(): Promise<void> {
 
   const logger = app.get(AppLogger);
   app.useLogger(logger);
+  app.enableShutdownHooks();
 
   const fastify = app.getHttpAdapter().getInstance() as FastifyInstance;
   fastify.addHook('preHandler', async (request) => {
@@ -66,8 +67,9 @@ async function bootstrap(): Promise<void> {
     exclude: [{ path: 'internal/(.*)', method: RequestMethod.ALL }],
   });
 
-  await app.listen(env.API_PORT, '0.0.0.0');
-  logger.log(`Vaidya API listening on port ${env.API_PORT}`, 'Bootstrap');
+  const port = env.PORT ?? env.API_PORT;
+  await app.listen(port, '0.0.0.0');
+  logger.log(`Vaidya API listening on port ${port}`, 'Bootstrap');
 }
 
 bootstrap().catch((error: unknown) => {
