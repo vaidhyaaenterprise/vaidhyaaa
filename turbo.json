@@ -3,7 +3,25 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "passThroughEnv": [
+        "NODE_ENV",
+        "APP_ENV",
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "AUTH_MODE",
+        "API_BASE_URL",
+        "LOG_LEVEL",
+        "DEBUG_API",
+        "JOB_WORKER_ENABLED",
+        "QUEUE_MODE",
+        "PRIMARY_LLM_PROVIDER",
+        "PRIMARY_LLM_MODEL",
+        "FALLBACK_LLM_MODEL",
+        "SERVICE_ROUTER_PROVIDER",
+        "SARVAM_API_KEY",
+        "CORS_ORIGINS"
+      ]
     },
     "dev": {
       "cache": false,

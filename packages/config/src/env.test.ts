@@ -110,6 +110,27 @@ describe('parseApiEnv', () => {
 
     expect(env.PORT).toBe(8080);
   });
+
+  it('treats blank hosting variables as unset so defaults still apply', () => {
+    const env = parseApiEnv({
+      ...validApiEnv,
+      APP_ENV: '   ',
+      API_PORT: '',
+      API_BASE_URL: '',
+      PRIMARY_LLM_PROVIDER: '',
+      SMTP_PORT: '',
+    });
+
+    expect(env.APP_ENV).toBe('local');
+    expect(env.API_PORT).toBe(3000);
+    expect(env.API_BASE_URL).toBe('http://localhost:3000');
+    expect(env.PRIMARY_LLM_PROVIDER).toBe('mock');
+    expect(env.SMTP_PORT).toBe(465);
+  });
+
+  it('still rejects a blank required secret', () => {
+    expect(() => parseApiEnv({ ...validApiEnv, JWT_SECRET: '   ' })).toThrow(EnvValidationError);
+  });
 });
 
 describe('parseWebEnv', () => {
@@ -119,6 +140,17 @@ describe('parseWebEnv', () => {
       WEB_PORT: '3001',
       API_BASE_URL: 'http://localhost:3000',
     });
+    expect(env.WEB_PORT).toBe(3001);
+    expect(env.API_BASE_URL).toBe('http://localhost:3000');
+  });
+
+  it('uses web defaults for blank hosting variables', () => {
+    const env = parseWebEnv({
+      NODE_ENV: 'development',
+      WEB_PORT: '',
+      API_BASE_URL: ' ',
+    });
+
     expect(env.WEB_PORT).toBe(3001);
     expect(env.API_BASE_URL).toBe('http://localhost:3000');
   });

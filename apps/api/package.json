@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "nest build",
+    "validate:deployment-env": "node dist/validate-deployment-env.js",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "worker:dev": "tsx watch src/worker.ts",

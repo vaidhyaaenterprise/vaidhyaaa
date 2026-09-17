@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nestjs",
-  "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@vaidya/api",
+  "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@vaidya/api && pnpm --filter @vaidya/api validate:deployment-env",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile --prod=false",
   "outputDirectory": null
 }
