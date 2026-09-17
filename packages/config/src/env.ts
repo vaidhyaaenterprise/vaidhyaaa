@@ -280,10 +280,29 @@ function formatZodIssues(issues: z.ZodIssue[]): string {
   return issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
 }
 
+/**
+ * Hosting dashboards commonly persist an unconfigured variable as an empty
+ * string. Treat those values the same as a missing variable so Zod defaults
+ * and optional fields behave consistently with local `.env` loading.
+ *
+ * Non-empty values are deliberately left untouched. In particular, secrets
+ * must not be trimmed or otherwise changed during configuration parsing.
+ */
+function normalizeEmptyEnvValues(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(env).map(([key, value]) => [
+      key,
+      typeof value === 'string' && value.trim() === '' ? undefined : value,
+    ]),
+  );
+}
+
 function normalizeReceptionistAgentEnv(
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
-  const normalized = { ...env };
+  const normalized = normalizeEmptyEnvValues(env);
 
   if (!normalized.RECEPTIONIST_AGENT_PROVIDER) {
     const legacy = normalized.AGENT_PLANNER_PROVIDER;
@@ -326,7 +345,7 @@ export function parseApiEnv(env: Record<string, string | undefined> = process.en
 }
 
 export function parseWebEnv(env: Record<string, string | undefined> = process.env): WebEnv {
-  const result = webEnvSchema.safeParse(env);
+  const result = webEnvSchema.safeParse(normalizeEmptyEnvValues(env));
   if (!result.success) {
     throw new EnvValidationError(
       `Invalid Web environment: ${formatZodIssues(result.error.issues)}`,
