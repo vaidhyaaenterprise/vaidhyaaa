@@ -35,6 +35,7 @@ describe('API proxy route', () => {
     expect(String(url)).toBe('https://api.example.test/v1/auth/login');
     expect(init).toMatchObject({ method: 'POST', cache: 'no-store', redirect: 'manual' });
     expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store, private');
     await expect(response.json()).resolves.toMatchObject({ data: { ok: true } });
   });
 
@@ -58,6 +59,7 @@ describe('API proxy route', () => {
     const calls = fetchMock.mock.calls as unknown as Array<[string | URL | Request, RequestInit]>;
     expect(String(calls[0]?.[0])).toBe('http://127.0.0.1:3000/v1/health');
     expect(response.status).toBe(503);
+    expect(response.headers.get('retry-after')).toBe('1');
     expect(payload).toMatchObject({
       error: {
         code: 'INTERNAL_ERROR',
@@ -92,6 +94,22 @@ describe('API proxy route', () => {
 
   it('rejects a loopback API URL on Vercel', async () => {
     vi.stubEnv('API_BASE_URL', 'http://localhost:3000');
+    vi.stubEnv('VERCEL', '1');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const request = new NextRequest('https://web.example.test/api/backend/v1/health');
+
+    const response = await GET(request, {
+      params: Promise.resolve({ path: ['v1', 'health'] }),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+  });
+
+  it('rejects an upstream that points back to the web application', async () => {
+    vi.stubEnv('API_BASE_URL', 'https://web.example.test');
     vi.stubEnv('VERCEL', '1');
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const fetchMock = vi.fn();

@@ -11,9 +11,10 @@ describe('database client options', () => {
     expect(connection.client.options).toMatchObject({
       max: 1,
       prepare: false,
-      idle_timeout: 20,
-      connect_timeout: 10,
-      max_lifetime: 1_800,
+      idle_timeout: 5,
+      connect_timeout: 5,
+      max_lifetime: 300,
+      fetch_types: false,
       connection: {
         application_name: 'vaidya-api',
       },

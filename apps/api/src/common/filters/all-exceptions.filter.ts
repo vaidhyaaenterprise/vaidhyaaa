@@ -11,6 +11,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { AppError, type ApiErrorCode, REQUEST_ID_HEADER, toApiErrorBody } from '@vaidya/shared';
 
 import { REQUEST_ID_CONTEXT_KEY } from '../constants';
+import { isTransientDatabaseError } from '../database/transient-database-error';
 import { AppLogger } from '../logger/logger.service';
 
 const SAFE_INTERNAL_ERROR_MESSAGE =
@@ -44,6 +45,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<FastifyReply>();
 
     const requestId = getRequestId(request);
+    const transientDatabaseError = isTransientDatabaseError(exception);
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let code: ApiErrorCode = 'INTERNAL_ERROR';
@@ -84,6 +86,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
     }
 
+    if (transientDatabaseError) {
+      status = HttpStatus.SERVICE_UNAVAILABLE;
+      code = 'INTERNAL_ERROR';
+    }
+
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       const logMessage = getExceptionLogMessage(exception, message);
       const trace = exception instanceof Error ? exception.stack : undefined;
@@ -96,6 +103,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const body = toApiErrorBody(code, message, requestId, details);
 
-    void response.status(status).header(REQUEST_ID_HEADER, requestId).send(body);
+    const responseBuilder = response.status(status).header(REQUEST_ID_HEADER, requestId);
+    if (transientDatabaseError) {
+      responseBuilder.header('Retry-After', '1').header('Cache-Control', 'no-store');
+    }
+
+    void responseBuilder.send(body);
   }
 }

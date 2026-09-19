@@ -8,7 +8,15 @@ export type UsernamePasswordLoginResult = {
 };
 
 export async function loginWithUsernamePassword(username: string, password: string) {
-  return apiPost<UsernamePasswordLoginResult>('/v1/auth/login', { username, password });
+  // Login is safe to repeat: the endpoint only verifies credentials, updates
+  // the last-login timestamp and returns a stateless access token. A single
+  // bounded retry prevents a transient serverless cold start or connection
+  // pool hand-off from surfacing as a failed sign-in.
+  return apiPost<UsernamePasswordLoginResult>(
+    '/v1/auth/login',
+    { username, password },
+    { retryTransient: true },
+  );
 }
 
 export type RegisterClinicAdminPayload = {

@@ -1,5 +1,7 @@
 import type { EmbeddingInput, EmbeddingProvider, EmbeddingResult } from '@vaidya/shared';
 
+import { fetchWithRetry } from '../../common/http/fetch-with-retry';
+
 const DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com/v1/embeddings';
 
 type NvidiaEmbeddingResponse = {
@@ -13,27 +15,33 @@ export class NvidiaEmbeddingProvider implements EmbeddingProvider {
     private readonly model: string,
     private readonly dimensions: number,
     private readonly baseUrl: string = DEFAULT_BASE_URL,
+    private readonly timeoutMs = 10_000,
+    private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   async embed(input: EmbeddingInput): Promise<EmbeddingResult> {
-    const response = await fetch(this.baseUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
+    const response = await fetchWithRetry(
+      this.fetchImpl,
+      this.baseUrl,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.model,
+          input: input.text,
+          input_type: 'passage',
+          encoding_format: 'float',
+          truncate: 'NONE',
+        }),
       },
-      body: JSON.stringify({
-        model: this.model,
-        input: input.text,
-        input_type: 'passage',
-        encoding_format: 'float',
-        truncate: 'NONE',
-      }),
-    });
+      { timeoutMs: this.timeoutMs },
+    );
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`NVIDIA embedding API error ${response.status}: ${body}`);
+      throw new Error(`NVIDIA embedding API error ${response.status}.`);
     }
 
     const data = (await response.json()) as NvidiaEmbeddingResponse;

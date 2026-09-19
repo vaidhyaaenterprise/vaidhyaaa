@@ -4,11 +4,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import { type ApiEnv } from '@vaidya/config';
-import {
-  createRepositories,
-  DatabaseService,
-  type Repositories,
-} from '@vaidya/db';
+import { createRepositories, DatabaseService, type Repositories } from '@vaidya/db';
 import { AppError, type AuthContext, type ClinicRole, type PlatformRole } from '@vaidya/shared';
 
 import { hashPassword, verifyPassword } from '../../common/crypto/password';
@@ -292,12 +288,45 @@ export class AuthService {
 
     await this.repos.auth.touchUserLastLogin(user.id);
 
-    const auth = await this.resolveAuthContext({ userId: user.id });
-    const me = await this.getMe(auth);
+    const platformRole = user.platformRole as PlatformRole | null;
+    let clinics: MeResponse['clinics'] = [];
+
+    if (platformRole !== 'platform_admin' && platformRole !== 'support') {
+      // Login already loaded the user. Resolve and return memberships once
+      // instead of reloading the same user and memberships through
+      // resolveAuthContext() followed by getMe(). This cuts the normal login
+      // path from six sequential database round trips to three.
+      const memberships = await this.repos.auth.listActiveClinicMemberships(user.id);
+      const membership = memberships[0];
+      if (!membership) {
+        throw new AppError('FORBIDDEN', 'User has no active clinic membership.');
+      }
+
+      const clinicRole = membership.role as ClinicRole;
+      if (clinicRole === 'doctor' && !membership.doctorId) {
+        throw new AppError('DOCTOR_NOT_OWNER', 'Doctor profile is not linked to this account.');
+      }
+
+      clinics = memberships.map((row) => ({
+        clinic_id: row.clinicId,
+        role: row.role as ClinicRole,
+        doctor_id: row.doctorId,
+        active: row.active,
+      }));
+    }
+
     return {
       access_token: this.createAccessToken(user.id),
-      user: me.user,
-      clinics: me.clinics,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        platform_role:
+          platformRole === 'platform_admin' || platformRole === 'support' ? platformRole : null,
+        active: user.active,
+      },
+      clinics,
     };
   }
 
@@ -378,15 +407,8 @@ export class AuthService {
 
   private async assertResendCooldown(email: string, purpose: OtpPurpose): Promise<void> {
     const [latest] = await this.repos.otp.findLatestForEmail(email, purpose);
-    if (
-      latest &&
-      !latest.usedAt &&
-      Date.now() - latest.lastSentAt.getTime() < RESEND_COOLDOWN_MS
-    ) {
-      throw new AppError(
-        'RATE_LIMITED',
-        'Please wait a moment before requesting another code.',
-      );
+    if (latest && !latest.usedAt && Date.now() - latest.lastSentAt.getTime() < RESEND_COOLDOWN_MS) {
+      throw new AppError('RATE_LIMITED', 'Please wait a moment before requesting another code.');
     }
   }
 
@@ -418,15 +440,11 @@ export class AuthService {
     const lastSent = this.passwordResetCooldowns.get(email) ?? 0;
 
     const [latestToken] = await this.repos.otp.findLatestForEmail(email, 'PASSWORD_RESET');
-    const lastTokenSent =
-      latestToken && !latestToken.usedAt ? latestToken.lastSentAt.getTime() : 0;
+    const lastTokenSent = latestToken && !latestToken.usedAt ? latestToken.lastSentAt.getTime() : 0;
     const effectiveLastSent = Math.max(lastSent, lastTokenSent);
 
     if (now - effectiveLastSent < RESEND_COOLDOWN_MS) {
-      throw new AppError(
-        'RATE_LIMITED',
-        'Please wait a moment before requesting another code.',
-      );
+      throw new AppError('RATE_LIMITED', 'Please wait a moment before requesting another code.');
     }
     this.passwordResetCooldowns.set(email, now);
 
@@ -452,7 +470,8 @@ export class AuthService {
   }
 
   private async verifyOtpToken(
-    token: { id: string; otpHash: string; attempts: number; expiresAt: Date; usedAt: Date | null }
+    token:
+      | { id: string; otpHash: string; attempts: number; expiresAt: Date; usedAt: Date | null }
       | undefined,
     otp: string,
     options: { consumeOnSuccess: boolean },

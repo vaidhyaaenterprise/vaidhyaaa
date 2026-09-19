@@ -536,7 +536,7 @@ const BENEFITS: Array<{ icon: (p: IconProps) => ReactNode; title: string; body: 
 /* ------------------------------------------------------------------ */
 export default function LoginPage() {
   const router = useRouter();
-  const { status, refresh } = useAuth();
+  const { status, establishSession } = useAuth();
   const [mode, setMode] = useState<'signin' | 'register' | 'forgot'>('signin');
   const [selectedRole, setSelectedRole] = useState<LoginRole>('clinic_admin');
   const [showPassword, setShowPassword] = useState(false);
@@ -573,7 +573,10 @@ export default function LoginPage() {
       clinicId: membership.clinic_id,
       ...(membership.doctor_id ? { doctorId: membership.doctor_id } : {}),
     });
-    await refresh();
+    // The login response already contains the authoritative /me payload.
+    // Hydrating it directly avoids an immediate duplicate database request
+    // that could turn a successful login into a visible transient failure.
+    establishSession({ user: result.user, clinics: result.clinics });
     router.replace('/');
     router.refresh();
   }

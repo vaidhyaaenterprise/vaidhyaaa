@@ -185,6 +185,7 @@ export const apiEnvSchema = z
     EMBEDDING_PROVIDER: z.enum(['mock', 'sarvam', 'gemini', 'openai', 'nvidia']).default('mock'),
     EMBEDDING_MODEL: z.string().default('mock-embedding-v1'),
     EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),
+    EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     KNOWLEDGE_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.7),
     KNOWLEDGE_VECTOR_MAX_RESULTS: z.coerce.number().int().positive().default(5),
     KNOWLEDGE_VECTOR_USE_HYBRID_FALLBACK: z.preprocess(
@@ -198,6 +199,7 @@ export const apiEnvSchema = z
     CORS_ORIGINS: z.string().default('http://localhost:3001'),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
+    EMAIL_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(465),
     SMTP_USER: z.string().optional(),

@@ -39,6 +39,10 @@ export class DatabaseService {
     return this.db;
   }
 
+  async checkConnection(): Promise<void> {
+    await this.db.execute(drizzleSql`SELECT 1`);
+  }
+
   async withTransaction<T>(fn: (tx: Database) => Promise<T>): Promise<T> {
     return this.db.transaction(async (tx) => fn(tx));
   }
@@ -168,11 +172,7 @@ export class DatabaseService {
   }
 
   async findClinicById(clinicId: string) {
-    const [clinic] = await this.db
-      .select()
-      .from(clinics)
-      .where(eq(clinics.id, clinicId))
-      .limit(1);
+    const [clinic] = await this.db.select().from(clinics).where(eq(clinics.id, clinicId)).limit(1);
 
     if (!clinic) {
       throw new AppError('CLINIC_NOT_FOUND', 'Clinic not found.', { clinic_id: clinicId });

@@ -80,7 +80,12 @@ export function createEmbeddingProvider(env: ApiEnv): EmbeddingProvider {
     if (!env.GEMINI_API_KEY) {
       throw new Error('GEMINI_API_KEY is required when EMBEDDING_PROVIDER=gemini');
     }
-    return new GeminiEmbeddingProvider(env.GEMINI_API_KEY, env.EMBEDDING_MODEL, env.EMBEDDING_DIMENSIONS);
+    return new GeminiEmbeddingProvider(
+      env.GEMINI_API_KEY,
+      env.EMBEDDING_MODEL,
+      env.EMBEDDING_DIMENSIONS,
+      env.EMBEDDING_TIMEOUT_MS,
+    );
   }
 
   if (env.EMBEDDING_PROVIDER === 'nvidia') {
@@ -92,6 +97,7 @@ export function createEmbeddingProvider(env: ApiEnv): EmbeddingProvider {
       env.EMBEDDING_MODEL,
       env.EMBEDDING_DIMENSIONS,
       env.NVIDIA_API_BASE_URL,
+      env.EMBEDDING_TIMEOUT_MS,
     );
   }
 

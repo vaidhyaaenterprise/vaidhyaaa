@@ -19,6 +19,8 @@
         "PRIMARY_LLM_MODEL",
         "FALLBACK_LLM_MODEL",
         "SERVICE_ROUTER_PROVIDER",
+        "EMBEDDING_TIMEOUT_MS",
+        "EMAIL_PROVIDER_TIMEOUT_MS",
         "SARVAM_API_KEY",
         "CORS_ORIGINS"
       ]

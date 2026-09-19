@@ -63,7 +63,7 @@ function getSentBody(reply: ReplyMock): ApiErrorBody {
 }
 
 describe('AllExceptionsFilter', () => {
-  it('does not expose raw database connection errors and logs them with the request ID', () => {
+  it('maps Supavisor pool exhaustion to a retryable 503 without exposing details', () => {
     const { filter, logError } = createFilter();
     const { host, reply } = createHost('req_db_pool_exhausted');
     const sensitiveMessage =
@@ -71,8 +71,10 @@ describe('AllExceptionsFilter', () => {
 
     filter.catch(new Error(sensitiveMessage), host);
 
-    expect(reply.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
     expect(reply.header).toHaveBeenCalledWith(REQUEST_ID_HEADER, 'req_db_pool_exhausted');
+    expect(reply.header).toHaveBeenCalledWith('Retry-After', '1');
+    expect(reply.header).toHaveBeenCalledWith('Cache-Control', 'no-store');
     expect(getSentBody(reply)).toEqual({
       error: {
         code: 'INTERNAL_ERROR',
@@ -87,6 +89,44 @@ describe('AllExceptionsFilter', () => {
       expect.stringContaining(sensitiveMessage),
       'AllExceptionsFilter',
     );
+  });
+
+  it('maps PostgreSQL connection codes to a retryable 503', () => {
+    const { filter } = createFilter();
+    const { host, reply } = createHost('req_db_starting');
+    const postgresError = Object.assign(new Error('the database is temporarily unavailable'), {
+      code: '57P03',
+    });
+
+    filter.catch(postgresError, host);
+
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(reply.header).toHaveBeenCalledWith('Retry-After', '1');
+    expect(getSentBody(reply).error.message).toBe(SAFE_INTERNAL_ERROR_MESSAGE);
+  });
+
+  it('maps postgres.js socket errors only when SQL context is present', () => {
+    const { filter } = createFilter();
+    const { host, reply } = createHost('req_db_reset');
+    const postgresError = Object.assign(new Error('read ECONNRESET'), {
+      code: 'ECONNRESET',
+      query: 'select id from users where email = $1',
+    });
+
+    filter.catch(postgresError, host);
+
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(reply.header).toHaveBeenCalledWith('Retry-After', '1');
+  });
+
+  it('does not mark unrelated errors as retryable database failures', () => {
+    const { filter } = createFilter();
+    const { host, reply } = createHost('req_unrelated_reset');
+
+    filter.catch(Object.assign(new Error('upstream ECONNRESET'), { code: 'ECONNRESET' }), host);
+
+    expect(reply.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    expect(reply.header).not.toHaveBeenCalledWith('Retry-After', expect.anything());
   });
 
   it('sanitizes 5xx HttpException messages', () => {

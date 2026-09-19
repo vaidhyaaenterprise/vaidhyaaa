@@ -29,9 +29,15 @@ export function createDatabaseConnection(connectionString: string): DatabaseConn
     // Transaction poolers cannot safely retain prepared statements between
     // requests because a later transaction may use a different backend session.
     prepare: false,
-    idle_timeout: 20,
-    connect_timeout: 10,
-    max_lifetime: 1_800,
+    // Release idle serverless clients quickly. A warm Vercel instance does not
+    // need to pin a Supavisor client connection between bursts of traffic.
+    idle_timeout: 5,
+    connect_timeout: 5,
+    max_lifetime: 300,
+    // The application only uses built-in PostgreSQL types. Avoiding the type
+    // discovery query reduces cold-start work and is safer through transaction
+    // poolers, where consecutive queries can use different backend sessions.
+    fetch_types: false,
     connection: {
       application_name: 'vaidya-api',
     },

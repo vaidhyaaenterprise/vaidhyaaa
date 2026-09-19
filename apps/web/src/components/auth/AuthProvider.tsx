@@ -27,6 +27,7 @@ type AuthContextValue = {
   error: string | null;
   errorCode: string | null;
   refresh: () => Promise<void>;
+  establishSession: (session: MeResponse) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -171,6 +172,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const establishSession = useCallback((session: MeResponse) => {
+    setMe(session);
+    setError(null);
+    setErrorCode(null);
+    setStatus(session.user.active ? 'authenticated' : 'inactive');
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     void loadMe();
@@ -208,8 +216,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       error,
       errorCode,
       refresh: loadMe,
+      establishSession,
     }),
-    [status, me, effectiveRole, clinicRole, error, errorCode, loadMe],
+    [status, me, effectiveRole, clinicRole, error, errorCode, loadMe, establishSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
