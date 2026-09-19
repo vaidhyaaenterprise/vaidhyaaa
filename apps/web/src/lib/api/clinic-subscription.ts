@@ -1,18 +1,9 @@
 import { apiGet, apiPost, apiPut } from '@/lib/api/client';
+import type { ScheduleConflictItem } from '@vaidya/shared';
 
 function clinicPath(clinicId: string, suffix: string) {
   return `/v1/clinics/${clinicId}${suffix}`;
 }
-
-export type ScheduleConflictItem = {
-  appointment_id?: string;
-  slot_id?: string;
-  slot_start?: string;
-  slot_end?: string;
-  hold_id?: string;
-  holiday_date?: string;
-  reason: string;
-};
 
 export type ConflictPreview = {
   blocked: boolean;

@@ -2,8 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type Repositories } from '@vaidya/db';
 import {
+  type AppointmentStatus,
   type ReplaceClinicHoursInput,
   type ReplaceDoctorSchedulesInput,
+  type ScheduleConflictAppointment,
   type ScheduleConflictItem,
 } from '@vaidya/shared';
 
@@ -47,6 +49,26 @@ type ScheduleAppointment = {
   appointmentEnd: string;
 };
 
+type DetailedScheduleAppointment = ScheduleAppointment & {
+  patientName: string;
+  doctorName: string | null;
+  serviceName: string | null;
+  status: string;
+};
+
+function appointmentConflictDetails(
+  appointment: DetailedScheduleAppointment,
+): ScheduleConflictAppointment {
+  return {
+    patient_name: appointment.patientName,
+    appointment_start: normalizeClinicLocalTimestamp(appointment.appointmentStart),
+    appointment_end: normalizeClinicLocalTimestamp(appointment.appointmentEnd),
+    doctor_name: appointment.doctorName,
+    service_name: appointment.serviceName,
+    status: appointment.status as AppointmentStatus,
+  };
+}
+
 type ClinicLocalTimestampParts = {
   date: string;
   dayOfWeek: number;
@@ -54,9 +76,7 @@ type ClinicLocalTimestampParts = {
 };
 
 function parseClinicLocalTimestamp(value: string): ClinicLocalTimestampParts | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(
-    value.trim(),
-  );
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(value.trim());
   if (!match) {
     return null;
   }
@@ -151,9 +171,7 @@ function appointmentFitsWindows(
     }
   }
 
-  return mergedRanges.some(
-    (range) => start.time >= range.start && end.time <= range.end,
-  );
+  return mergedRanges.some((range) => start.time >= range.start && end.time <= range.end);
 }
 
 /**
@@ -188,11 +206,21 @@ export class ScheduleChangeImpactService {
     clinicId: string,
     ruleId: string,
     patch: { capacity_per_slot?: number; slot_duration_minutes?: number },
-  ): Promise<{ blocked: boolean; conflicts: ScheduleConflictItem[]; next_safe_implement_from?: string }> {
-    const tasks: Promise<{ blocked: boolean; conflicts: ScheduleConflictItem[]; next_safe_implement_from?: string }>[] = [];
+  ): Promise<{
+    blocked: boolean;
+    conflicts: ScheduleConflictItem[];
+    next_safe_implement_from?: string;
+  }> {
+    const tasks: Promise<{
+      blocked: boolean;
+      conflicts: ScheduleConflictItem[];
+      next_safe_implement_from?: string;
+    }>[] = [];
 
     if (patch.capacity_per_slot !== undefined) {
-      tasks.push(this.ruleImpactService.previewCapacityChange(clinicId, ruleId, patch.capacity_per_slot));
+      tasks.push(
+        this.ruleImpactService.previewCapacityChange(clinicId, ruleId, patch.capacity_per_slot),
+      );
     }
     if (patch.slot_duration_minutes !== undefined) {
       tasks.push(
@@ -274,6 +302,7 @@ export class ScheduleChangeImpactService {
       input.windows,
     ).map((appointment) => ({
       appointment_id: appointment.id,
+      appointment: appointmentConflictDetails(appointment),
       reason: 'outside_doctor_hours',
     }));
 
@@ -288,6 +317,7 @@ export class ScheduleChangeImpactService {
     );
     const conflicts: ScheduleConflictItem[] = rows.map((row) => ({
       appointment_id: row.id,
+      appointment: appointmentConflictDetails(row),
       holiday_date: holidayDate,
       reason: 'active_appointment_on_holiday',
     }));
@@ -309,13 +339,12 @@ export class ScheduleChangeImpactService {
       active: window.active,
     }));
 
-    return findNewlyExcludedScheduleAppointments(
-      appointments,
-      currentWindows,
-      windows,
-    ).map((appointment) => ({
-      appointment_id: appointment.id,
-      reason: 'outside_clinic_hours',
-    }));
+    return findNewlyExcludedScheduleAppointments(appointments, currentWindows, windows).map(
+      (appointment) => ({
+        appointment_id: appointment.id,
+        appointment: appointmentConflictDetails(appointment),
+        reason: 'outside_clinic_hours',
+      }),
+    );
   }
 }

@@ -25,10 +25,15 @@ function createService(input: {
     id: string;
     appointmentStart: string;
     appointmentEnd: string;
+    patientName: string;
+    doctorName: string | null;
+    serviceName: string | null;
+    status: string;
   }>;
 }) {
   const appointmentLifecycle = {
     listFutureActiveAppointments: vi.fn().mockResolvedValue(input.appointments ?? []),
+    listActiveAppointmentsOnDate: vi.fn().mockResolvedValue(input.appointments ?? []),
   };
   const clinicalSetup = {
     listClinicHours: vi.fn().mockResolvedValue(input.clinicHours ?? []),
@@ -46,6 +51,18 @@ describe('schedule change impact', () => {
     id: 'appointment-1',
     appointmentStart: '2026-09-21 09:30:00',
     appointmentEnd: '2026-09-21 10:00:00',
+    patientName: 'Asha Patient',
+    doctorName: 'Dr. Test',
+    serviceName: 'General consultation',
+    status: 'confirmed',
+  };
+  const mondayAppointmentDetails = {
+    patient_name: mondayAppointment.patientName,
+    appointment_start: mondayAppointment.appointmentStart,
+    appointment_end: mondayAppointment.appointmentEnd,
+    doctor_name: mondayAppointment.doctorName,
+    service_name: mondayAppointment.serviceName,
+    status: mondayAppointment.status,
   };
   const mondayHours = {
     dayOfWeek: 1,
@@ -79,6 +96,10 @@ describe('schedule change impact', () => {
           id: 'existing-outlier',
           appointmentStart: '2026-09-21T14:00:00',
           appointmentEnd: '2026-09-21T14:30:00',
+          patientName: 'Existing Outlier',
+          doctorName: 'Dr. Test',
+          serviceName: 'General consultation',
+          status: 'confirmed',
         },
       ],
     });
@@ -100,15 +121,17 @@ describe('schedule change impact', () => {
     });
 
     const result = await service.previewClinicHoursReplace('clinic-1', {
-      windows: [
-        { day_of_week: 1, start_time: '10:00', end_time: '13:00', active: true },
-      ],
+      windows: [{ day_of_week: 1, start_time: '10:00', end_time: '13:00', active: true }],
     });
 
     expect(result).toEqual({
       blocked: true,
       conflicts: [
-        { appointment_id: mondayAppointment.id, reason: 'outside_clinic_hours' },
+        {
+          appointment_id: mondayAppointment.id,
+          appointment: mondayAppointmentDetails,
+          reason: 'outside_clinic_hours',
+        },
       ],
     });
   });
@@ -118,6 +141,10 @@ describe('schedule change impact', () => {
       id: 'appointment-ending-after-close',
       appointmentStart: '2026-09-21 12:45:00',
       appointmentEnd: '2026-09-21 13:15:00',
+      patientName: 'Boundary Patient',
+      doctorName: 'Dr. Test',
+      serviceName: 'General consultation',
+      status: 'confirmed',
     };
     const { service } = createService({
       clinicHours: [
@@ -132,14 +159,25 @@ describe('schedule change impact', () => {
     });
 
     const result = await service.previewClinicHoursReplace('clinic-1', {
-      windows: [
-        { day_of_week: 1, start_time: '09:00', end_time: '13:00', active: true },
-      ],
+      windows: [{ day_of_week: 1, start_time: '09:00', end_time: '13:00', active: true }],
     });
 
     expect(result).toEqual({
       blocked: true,
-      conflicts: [{ appointment_id: appointment.id, reason: 'outside_clinic_hours' }],
+      conflicts: [
+        {
+          appointment_id: appointment.id,
+          appointment: {
+            patient_name: appointment.patientName,
+            appointment_start: appointment.appointmentStart,
+            appointment_end: appointment.appointmentEnd,
+            doctor_name: appointment.doctorName,
+            service_name: appointment.serviceName,
+            status: appointment.status,
+          },
+          reason: 'outside_clinic_hours',
+        },
+      ],
     });
   });
 
@@ -148,6 +186,10 @@ describe('schedule change impact', () => {
       id: 'appointment-across-adjacent-windows',
       appointmentStart: '2026-09-21 12:45:00',
       appointmentEnd: '2026-09-21 13:15:00',
+      patientName: 'Adjacent Patient',
+      doctorName: 'Dr. Test',
+      serviceName: 'General consultation',
+      status: 'confirmed',
     };
     const { service } = createService({
       clinicHours: [
@@ -176,6 +218,10 @@ describe('schedule change impact', () => {
       id: 'sunday-appointment',
       appointmentStart: '2026-09-20 09:30:00',
       appointmentEnd: '2026-09-20 10:00:00',
+      patientName: 'Sunday Patient',
+      doctorName: 'Dr. Sunday',
+      serviceName: 'Weekend consultation',
+      status: 'pending_confirmation',
     };
     const { service } = createService({
       clinicHours: [
@@ -192,7 +238,18 @@ describe('schedule change impact', () => {
     const result = await service.previewClinicHoursReplace('clinic-1', { windows: [] });
 
     expect(result.conflicts).toEqual([
-      { appointment_id: sundayAppointment.id, reason: 'outside_clinic_hours' },
+      {
+        appointment_id: sundayAppointment.id,
+        appointment: {
+          patient_name: sundayAppointment.patientName,
+          appointment_start: sundayAppointment.appointmentStart,
+          appointment_end: sundayAppointment.appointmentEnd,
+          doctor_name: sundayAppointment.doctorName,
+          service_name: sundayAppointment.serviceName,
+          status: sundayAppointment.status,
+        },
+        reason: 'outside_clinic_hours',
+      },
     ]);
   });
 
@@ -209,9 +266,7 @@ describe('schedule change impact', () => {
     });
 
     const result = await service.previewDoctorSchedulesReplace('clinic-1', 'doctor-1', {
-      windows: [
-        { day_of_week: 1, start_time: '10:00', end_time: '13:00', active: true },
-      ],
+      windows: [{ day_of_week: 1, start_time: '10:00', end_time: '13:00', active: true }],
     });
 
     expect(appointmentLifecycle.listFutureActiveAppointments).toHaveBeenCalledWith(
@@ -221,7 +276,11 @@ describe('schedule change impact', () => {
     expect(result).toEqual({
       blocked: true,
       conflicts: [
-        { appointment_id: mondayAppointment.id, reason: 'outside_doctor_hours' },
+        {
+          appointment_id: mondayAppointment.id,
+          appointment: mondayAppointmentDetails,
+          reason: 'outside_doctor_hours',
+        },
       ],
     });
   });
@@ -246,5 +305,23 @@ describe('schedule change impact', () => {
     });
 
     expect(result).toEqual({ blocked: false, conflicts: [] });
+  });
+
+  it('includes readable appointment details in holiday conflicts', async () => {
+    const { service } = createService({ appointments: [mondayAppointment] });
+
+    const result = await service.previewHolidayDate('clinic-1', '2026-09-21');
+
+    expect(result).toEqual({
+      blocked: true,
+      conflicts: [
+        {
+          appointment_id: mondayAppointment.id,
+          appointment: mondayAppointmentDetails,
+          holiday_date: '2026-09-21',
+          reason: 'active_appointment_on_holiday',
+        },
+      ],
+    });
   });
 });

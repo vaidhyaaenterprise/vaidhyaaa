@@ -15,6 +15,7 @@ import {
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 const DOCTOR_ID = '00000000-0000-0000-0000-000000000201';
+const APPOINTMENT_ID = '00000000-0000-0000-0000-000000000301';
 
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({
@@ -59,7 +60,15 @@ function conflictError(reason: 'outside_clinic_hours' | 'outside_doctor_hours') 
     details: {
       conflicts: [
         {
-          appointment_id: 'appointment-123',
+          appointment_id: APPOINTMENT_ID,
+          appointment: {
+            patient_name: 'Asha Patient',
+            appointment_start: '2026-09-21 09:30:00',
+            appointment_end: '2026-09-21 10:00:00',
+            doctor_name: 'Dr. Test',
+            service_name: 'General consultation',
+            status: 'confirmed',
+          },
           reason,
         },
       ],
@@ -181,8 +190,9 @@ describe('ClinicHours', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(
-      await screen.findByText(/Appointment appointment-123 falls outside new clinic hours/),
+      await screen.findByText(/Asha Patient.*falls outside the new clinic hours/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(APPOINTMENT_ID))).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 
     fireEvent.change(dayEditor('Monday').getByDisplayValue('09:00'), {
@@ -190,7 +200,7 @@ describe('ClinicHours', () => {
     });
 
     expect(
-      screen.queryByText(/Appointment appointment-123 falls outside new clinic hours/),
+      screen.queryByText(/Asha Patient.*falls outside the new clinic hours/),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
@@ -206,9 +216,7 @@ describe('DoctorSchedule', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(
-      await screen.findByText(
-        /Appointment appointment-123 falls outside the doctor's new working hours/,
-      ),
+      await screen.findByText(/Asha Patient.*falls outside the doctor's new working hours/),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
@@ -219,9 +227,7 @@ describe('DoctorSchedule', () => {
     });
 
     expect(
-      screen.queryByText(
-        /Appointment appointment-123 falls outside the doctor's new working hours/,
-      ),
+      screen.queryByText(/Asha Patient.*falls outside the doctor's new working hours/),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });

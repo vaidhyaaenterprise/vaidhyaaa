@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, inArray, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -6,6 +6,8 @@ import {
   appointmentEvents,
   appointmentRequests,
   callbackRequests,
+  clinicServices,
+  doctors,
   emergencyIncidents,
   notificationEvents,
 } from '../schema';
@@ -18,6 +20,12 @@ function clinicLocalNow(clinicId: string) {
     WHERE c.id = ${clinicId}
   )`;
 }
+
+const appointmentWithConflictDetails = {
+  ...getTableColumns(appointmentRequests),
+  doctorName: doctors.name,
+  serviceName: clinicServices.serviceName,
+};
 
 export class AppointmentLifecycleRepository {
   constructor(private readonly db: Database) {}
@@ -210,8 +218,22 @@ export class AppointmentLifecycleRepository {
     }
 
     return this.db
-      .select()
+      .select(appointmentWithConflictDetails)
       .from(appointmentRequests)
+      .leftJoin(
+        doctors,
+        and(
+          eq(doctors.id, appointmentRequests.doctorId),
+          eq(doctors.clinicId, appointmentRequests.clinicId),
+        ),
+      )
+      .leftJoin(
+        clinicServices,
+        and(
+          eq(clinicServices.id, appointmentRequests.clinicServiceId),
+          eq(clinicServices.clinicId, appointmentRequests.clinicId),
+        ),
+      )
       .where(and(...filters));
   }
 
@@ -227,8 +249,22 @@ export class AppointmentLifecycleRepository {
     }
 
     return this.db
-      .select()
+      .select(appointmentWithConflictDetails)
       .from(appointmentRequests)
+      .leftJoin(
+        doctors,
+        and(
+          eq(doctors.id, appointmentRequests.doctorId),
+          eq(doctors.clinicId, appointmentRequests.clinicId),
+        ),
+      )
+      .leftJoin(
+        clinicServices,
+        and(
+          eq(clinicServices.id, appointmentRequests.clinicServiceId),
+          eq(clinicServices.clinicId, appointmentRequests.clinicId),
+        ),
+      )
       .where(and(...filters));
   }
 
