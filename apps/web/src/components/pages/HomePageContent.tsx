@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { LoadingState } from '@/components/ui/StateViews';
@@ -8,8 +8,11 @@ import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import type { Appointment } from '@/components/pages/appointments/types';
 import { mapAppointmentRow } from '@/lib/api/appointment-mappers';
 import { cancelAppointment, confirmAppointment, fetchAppointments } from '@/lib/api/appointments';
-import { fetchClinicSettings } from '@/lib/api/clinic-settings';
+import { fetchClinicProfile, fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { ApiRequestError } from '@/lib/api/client';
+import { getClinicDate, groupHomeAppointments } from '@/lib/home-dashboard';
+
+const DEFAULT_CLINIC_TIMEZONE = 'Asia/Kolkata';
 
 function formatTime(isoTime: string): string {
   const [hours, minutes] = isoTime.split(':');
@@ -30,6 +33,75 @@ function formatDate(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
+type AppointmentActionCardProps = {
+  appointment: Appointment;
+  missed?: boolean;
+  isUpdating?: boolean;
+  onConfirm: (id: string) => Promise<void>;
+  onCancel: (id: string) => Promise<void>;
+};
+
+function AppointmentActionCard({
+  appointment,
+  missed = false,
+  isUpdating = false,
+  onConfirm,
+  onCancel,
+}: AppointmentActionCardProps) {
+  return (
+    <div
+      className={`rounded-xl border p-3 ${
+        missed ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'
+      }`}
+      aria-busy={isUpdating}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-bold text-slate-900">{appointment.patientName}</p>
+          <p className="mt-0.5 text-xs text-slate-600">
+            {appointment.doctorName} ·{' '}
+            <span className="font-semibold">{formatTime(appointment.appointmentTime)}</span>
+            {appointment.appointmentDate ? ` · ${formatDate(appointment.appointmentDate)}` : ''}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {appointment.serviceName}
+            {appointment.reasonForVisit ? ` — ${appointment.reasonForVisit}` : ''}
+          </p>
+        </div>
+        <span
+          className={`rounded-full border-2 px-2 py-0.5 text-xs font-bold ${
+            missed
+              ? 'border-rose-300 bg-rose-100 text-rose-700'
+              : 'border-amber-300 bg-amber-100 text-amber-700'
+          }`}
+        >
+          {missed ? 'Missed' : 'Pending'}
+        </span>
+      </div>
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          aria-label={`Confirm appointment for ${appointment.patientName}`}
+          disabled={isUpdating}
+          onClick={() => void onConfirm(appointment.id)}
+          className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 transition-colors hover:bg-green-100 disabled:cursor-wait disabled:opacity-60"
+        >
+          Confirm
+        </button>
+        <button
+          type="button"
+          aria-label={`Cancel appointment for ${appointment.patientName}`}
+          disabled={isUpdating}
+          onClick={() => void onCancel(appointment.id)}
+          className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-wait disabled:opacity-60"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function HomePageContent() {
   const { me, effectiveRole, clinicRole } = useAuth();
   const clinicId = useActiveClinicId();
@@ -37,107 +109,138 @@ export function HomePageContent() {
   const currentDoctorId = clinicRole?.doctor_id ?? null;
 
   const [loading, setLoading] = useState(true);
-  const [pendingAppointments, setPendingAppointments] = useState<Appointment[]>([]);
+  const [activeAppointments, setActiveAppointments] = useState<Appointment[]>([]);
   const [agentStatus, setAgentStatus] = useState('unknown');
-  const [nextAppointments, setNextAppointments] = useState<
-    Array<{ patient: string; time: string; doctor: string }>
-  >([]);
+  const [clinicTimezone, setClinicTimezone] = useState(DEFAULT_CLINIC_TIMEZONE);
+  const [now, setNow] = useState(() => new Date());
   const [actionError, setActionError] = useState<string | null>(null);
+  const [updatingAppointmentIds, setUpdatingAppointmentIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const updatingAppointmentIdsRef = useRef(new Set<string>());
+  const dashboardLoadSequenceRef = useRef(0);
+  const activeClinicIdRef = useRef(clinicId);
 
   // Call inbox / emergency stats require backend endpoints not yet implemented (P04/P08).
-  const todayCalls = 0;
   const callbacks = 0;
   const emergencyAlerts = 0;
 
   const loadDashboard = useCallback(
     async (includeSettings = true) => {
+      const loadSequence = ++dashboardLoadSequenceRef.current;
       if (!clinicId) {
+        setActiveAppointments([]);
         setLoading(false);
         return;
       }
 
+      if (includeSettings) {
+        setLoading(true);
+        setActiveAppointments([]);
+      }
       setActionError(null);
       try {
-        const [appointments, settings] = await Promise.all([
-          fetchAppointments(clinicId),
+        const [appointments, settings, profile] = await Promise.all([
+          fetchAppointments(clinicId, ['pending_confirmation', 'confirmed']),
           includeSettings ? fetchClinicSettings(clinicId).catch(() => null) : Promise.resolve(null),
+          includeSettings ? fetchClinicProfile(clinicId) : Promise.resolve(null),
         ]);
 
-        const mapped = appointments.map(mapAppointmentRow);
-        const pending = mapped.filter((apt) => apt.status === 'pending_confirmation');
-        setPendingAppointments(pending);
+        if (loadSequence !== dashboardLoadSequenceRef.current) {
+          return;
+        }
+        if (profile?.timezone) {
+          // Validate the IANA timezone before any appointment is classified by date.
+          getClinicDate(new Date(), profile.timezone);
+          setClinicTimezone(profile.timezone);
+        }
+        setActiveAppointments(appointments.map(mapAppointmentRow));
         if (settings) {
           setAgentStatus(settings.agent_enabled ? 'active' : 'inactive');
         }
-
-        const confirmed = mapped
-          .filter((apt) => apt.status === 'confirmed' || apt.status === 'pending_confirmation')
-          .sort((a, b) =>
-            `${a.appointmentDate}T${a.appointmentTime}`.localeCompare(
-              `${b.appointmentDate}T${b.appointmentTime}`,
-            ),
-          )
-          .slice(0, 3);
-
-        setNextAppointments(
-          confirmed.map((apt) => ({
-            patient: apt.patientName,
-            time: formatTime(apt.appointmentTime),
-            doctor: apt.doctorName,
-          })),
-        );
       } catch (err) {
-        setActionError(
-          err instanceof ApiRequestError ? err.apiError.message : 'Failed to load dashboard data.',
-        );
+        if (loadSequence === dashboardLoadSequenceRef.current) {
+          setActionError(
+            err instanceof ApiRequestError
+              ? err.apiError.message
+              : 'Failed to load dashboard data.',
+          );
+        }
       } finally {
-        setLoading(false);
+        if (loadSequence === dashboardLoadSequenceRef.current) {
+          setLoading(false);
+        }
       }
     },
     [clinicId],
   );
 
   useEffect(() => {
+    activeClinicIdRef.current = clinicId;
+  }, [clinicId]);
+
+  useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
 
-  const visiblePending = isAdmin
-    ? pendingAppointments
-    : pendingAppointments.filter((apt) => apt.doctorId === currentDoctorId);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
-  const handleConfirm = async (id: string) => {
-    if (!clinicId) {
+  const clinicDate = useMemo(() => getClinicDate(now, clinicTimezone), [clinicTimezone, now]);
+
+  const roleScopedAppointments = useMemo(
+    () =>
+      isAdmin
+        ? activeAppointments
+        : activeAppointments.filter((appointment) => appointment.doctorId === currentDoctorId),
+    [activeAppointments, currentDoctorId, isAdmin],
+  );
+  const groupedAppointments = useMemo(
+    () => groupHomeAppointments(roleScopedAppointments, clinicDate),
+    [clinicDate, roleScopedAppointments],
+  );
+
+  const visibleTodayPending = groupedAppointments.todayPending;
+  const visibleMissedPending = groupedAppointments.missedPending;
+  const visibleTodayAppointments = groupedAppointments.todayAppointments;
+
+  const runAppointmentAction = async (
+    id: string,
+    action: (targetClinicId: string, appointmentId: string) => Promise<unknown>,
+    failureMessage: string,
+  ) => {
+    if (!clinicId || updatingAppointmentIdsRef.current.has(id)) {
       return;
     }
+
+    const targetClinicId = clinicId;
+    updatingAppointmentIdsRef.current.add(id);
+    setUpdatingAppointmentIds(new Set(updatingAppointmentIdsRef.current));
     setActionError(null);
     try {
-      await confirmAppointment(clinicId, id);
+      await action(targetClinicId, id);
+      if (activeClinicIdRef.current === targetClinicId) {
+        await loadDashboard(false);
+      }
     } catch (err) {
-      setActionError(
-        err instanceof ApiRequestError ? err.apiError.message : 'Failed to confirm appointment.',
-      );
-      return;
+      setActionError(err instanceof ApiRequestError ? err.apiError.message : failureMessage);
+    } finally {
+      updatingAppointmentIdsRef.current.delete(id);
+      setUpdatingAppointmentIds(new Set(updatingAppointmentIdsRef.current));
     }
-    await loadDashboard(false);
   };
 
-  const handleCancel = async (id: string) => {
-    if (!clinicId) {
-      return;
-    }
-    setActionError(null);
-    try {
-      await cancelAppointment(clinicId, id);
-    } catch (err) {
-      setActionError(
-        err instanceof ApiRequestError ? err.apiError.message : 'Failed to cancel appointment.',
-      );
-      return;
-    }
-    await loadDashboard(false);
-  };
+  const handleConfirm = (id: string) =>
+    runAppointmentAction(id, confirmAppointment, 'Failed to confirm appointment.');
 
-  const pendingConfirmations = pendingAppointments.length;
+  const handleCancel = (id: string) =>
+    runAppointmentAction(id, cancelAppointment, 'Failed to cancel appointment.');
+
+  const pendingConfirmations = visibleTodayPending.length;
+  const missedActions = visibleMissedPending.length;
+  const pendingStaffActions = pendingConfirmations + missedActions + callbacks + emergencyAlerts;
 
   return (
     <>
@@ -176,7 +279,11 @@ export function HomePageContent() {
                 <p className="mt-2 text-sm text-teal-100">
                   {effectiveRole === 'doctor'
                     ? 'You see only your appointments and schedule tools in this milestone shell.'
-                    : `${pendingConfirmations} appointment requests need confirmation. Call stats will appear when the call inbox API is available.`}
+                    : `${pendingConfirmations} appointment requests need confirmation today.${
+                        missedActions > 0
+                          ? ` ${missedActions} missed requests still need review.`
+                          : ''
+                      } Call stats will appear when the call inbox API is available.`}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-extrabold">
@@ -185,105 +292,104 @@ export function HomePageContent() {
                 </div>
               </div>
               <div className="text-center lg:text-left">
-                <p className="text-4xl font-black">
-                  {pendingConfirmations + callbacks + emergencyAlerts}
-                </p>
+                <p className="text-4xl font-black">{pendingStaffActions}</p>
                 <p className="text-sm text-teal-100">pending staff actions</p>
               </div>
             </div>
           </div>
 
+          {actionError ? (
+            <p
+              role="alert"
+              className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
+            >
+              {actionError}
+            </p>
+          ) : null}
+
           <div className="grid gap-5 lg:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-lg font-bold text-slate-900">Needs your action</h3>
-              {actionError ? (
-                <p className="mb-2 text-xs font-semibold text-red-600">{actionError}</p>
-              ) : null}
+            <section
+              aria-labelledby="needs-action-heading"
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <h3 id="needs-action-heading" className="mb-1 text-lg font-bold text-slate-900">
+                Needs your action
+              </h3>
+              <p className="mb-4 text-xs text-slate-500">Pending requests for today</p>
               <div className="space-y-3">
-                {visiblePending.map((apt) => (
-                  <div key={apt.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-bold text-slate-900">{apt.patientName}</p>
-                        <p className="mt-0.5 text-xs text-slate-600">
-                          {apt.doctorName} ·{' '}
-                          <span className="font-semibold">{formatTime(apt.appointmentTime)}</span>
-                          {apt.appointmentDate ? ` · ${formatDate(apt.appointmentDate)}` : ''}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          {apt.serviceName}
-                          {apt.reasonForVisit ? ` — ${apt.reasonForVisit}` : ''}
-                        </p>
-                      </div>
-                      <span className="rounded-full border-2 border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
-                        Pending
-                      </span>
-                    </div>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void handleConfirm(apt.id)}
-                        className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 transition-colors hover:bg-green-100"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleCancel(apt.id)}
-                        className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-100"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
+                {visibleTodayPending.map((appointment) => (
+                  <AppointmentActionCard
+                    key={appointment.id}
+                    appointment={appointment}
+                    isUpdating={updatingAppointmentIds.has(appointment.id)}
+                    onConfirm={handleConfirm}
+                    onCancel={handleCancel}
+                  />
                 ))}
-                {visiblePending.length > 0 && pendingConfirmations > visiblePending.length ? (
-                  <p className="text-xs text-slate-500">
-                    +{pendingConfirmations - visiblePending.length} more for other doctors
-                  </p>
-                ) : null}
-                {visiblePending.length === 0 && callbacks === 0 && emergencyAlerts === 0 && (
-                  <p className="text-sm text-slate-500">No pending actions</p>
+                {visibleTodayPending.length === 0 && callbacks === 0 && emergencyAlerts === 0 && (
+                  <p className="text-sm text-slate-500">No pending actions for today</p>
                 )}
               </div>
-            </div>
+            </section>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-lg font-bold text-slate-900">Today&apos;s summary</h3>
+            <section
+              aria-labelledby="missed-actions-heading"
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <h3 id="missed-actions-heading" className="mb-1 text-lg font-bold text-slate-900">
+                Missed actions
+              </h3>
+              <p className="mb-4 text-xs text-slate-500">Unresolved requests from previous days</p>
               <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <span className="text-sm font-semibold text-slate-700">Total calls</span>
-                  <span className="text-lg font-bold text-slate-900">{todayCalls}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <span className="text-sm font-semibold text-slate-700">
-                    Pending confirmations
-                  </span>
-                  <span className="text-lg font-bold text-amber-600">{pendingConfirmations}</span>
-                </div>
+                {visibleMissedPending.map((appointment) => (
+                  <AppointmentActionCard
+                    key={appointment.id}
+                    appointment={appointment}
+                    missed
+                    isUpdating={updatingAppointmentIds.has(appointment.id)}
+                    onConfirm={handleConfirm}
+                    onCancel={handleCancel}
+                  />
+                ))}
+                {visibleMissedPending.length === 0 ? (
+                  <p className="text-sm text-slate-500">No missed actions</p>
+                ) : null}
               </div>
-            </div>
+            </section>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-4 text-lg font-bold text-slate-900">Next appointments</h3>
+            <section
+              aria-labelledby="next-appointments-heading"
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
+              <h3 id="next-appointments-heading" className="mb-1 text-lg font-bold text-slate-900">
+                Next appointments
+              </h3>
+              <p className="mb-4 text-xs text-slate-500">Today&apos;s active appointments</p>
               <div className="space-y-2">
-                {nextAppointments.length === 0 ? (
-                  <p className="text-sm text-slate-500">No upcoming appointments</p>
+                {visibleTodayAppointments.length === 0 ? (
+                  <p className="text-sm text-slate-500">No appointments for today</p>
                 ) : (
-                  nextAppointments.map((apt, index) => (
-                    <div key={index} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  visibleTodayAppointments.map((appointment) => (
+                    <div
+                      key={appointment.id}
+                      className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                    >
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">{apt.patient}</p>
-                          <p className="text-xs text-slate-500">{apt.doctor}</p>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {appointment.patientName}
+                          </p>
+                          <p className="text-xs text-slate-500">{appointment.doctorName}</p>
                         </div>
-                        <span className="text-sm font-bold text-slate-900">{apt.time}</span>
+                        <span className="text-sm font-bold text-slate-900">
+                          {formatTime(appointment.appointmentTime)}
+                        </span>
                       </div>
                     </div>
                   ))
                 )}
               </div>
-            </div>
+            </section>
           </div>
         </>
       )}

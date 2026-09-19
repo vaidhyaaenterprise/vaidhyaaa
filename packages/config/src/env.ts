@@ -60,6 +60,24 @@ export function assertSupabaseDatabaseUrl(databaseUrl: string): void {
   }
 }
 
+/**
+ * Vercel functions must use Supabase's transaction pooler. A session-pooler
+ * connection pins a database session to every warm function connection and can
+ * exhaust a small Supavisor pool after only a couple of instances are started.
+ */
+export function assertSupabaseTransactionPoolerUrl(databaseUrl: string): void {
+  assertSupabaseDatabaseUrl(databaseUrl);
+
+  const parsedUrl = new URL(databaseUrl);
+  const hostname = parsedUrl.hostname.toLowerCase();
+
+  if (!hostname.endsWith('.pooler.supabase.com') || parsedUrl.port !== '6543') {
+    throw new Error(
+      'DATABASE_URL must use the Supabase transaction pooler URL on port 6543 for Vercel deployments.',
+    );
+  }
+}
+
 export const apiEnvSchema = z
   .object({
     NODE_ENV: nodeEnvSchema.default('development'),
@@ -194,6 +212,18 @@ export const apiEnvSchema = z
           message,
         });
       }
+    }
+
+    if (
+      env.APP_ENV !== 'local' &&
+      (env.JWT_SECRET.length < 32 || /dev[_-]?only|change[_-]?me/i.test(env.JWT_SECRET))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message:
+          'JWT_SECRET must be a random secret of at least 32 characters outside the local environment.',
+      });
     }
 
     if (env.QUEUE_MODE === 'bullmq' && !env.REDIS_URL) {

@@ -5,6 +5,7 @@ export {
   parseWebEnv,
   EnvValidationError,
   assertSupabaseDatabaseUrl,
+  assertSupabaseTransactionPoolerUrl,
   type ApiEnv,
   type WebEnv,
 } from './env';

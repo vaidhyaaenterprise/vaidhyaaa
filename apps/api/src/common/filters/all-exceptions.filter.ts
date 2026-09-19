@@ -8,19 +8,29 @@ import {
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
 
-import {
-  AppError,
-  type ApiErrorCode,
-  REQUEST_ID_HEADER,
-  toApiErrorBody,
-} from '@vaidya/shared';
+import { AppError, type ApiErrorCode, REQUEST_ID_HEADER, toApiErrorBody } from '@vaidya/shared';
 
 import { REQUEST_ID_CONTEXT_KEY } from '../constants';
 import { AppLogger } from '../logger/logger.service';
 
+const SAFE_INTERNAL_ERROR_MESSAGE =
+  'The service is temporarily unavailable. Please try again shortly.';
+
 function getRequestId(request: FastifyRequest): string {
   const raw = request.raw as { [REQUEST_ID_CONTEXT_KEY]?: string };
   return raw[REQUEST_ID_CONTEXT_KEY] ?? 'req_unknown';
+}
+
+function getExceptionLogMessage(exception: unknown, resolvedMessage: string): string {
+  if (!(exception instanceof Error)) {
+    return resolvedMessage;
+  }
+
+  if (exception.message === resolvedMessage) {
+    return exception.message;
+  }
+
+  return `${exception.message}: ${resolvedMessage}`;
 }
 
 @Injectable()
@@ -72,7 +82,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(exception.message, exception.stack, 'AllExceptionsFilter');
+    }
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      const logMessage = getExceptionLogMessage(exception, message);
+      const trace = exception instanceof Error ? exception.stack : undefined;
+
+      this.logger.error(`[${requestId}] ${logMessage}`, trace, 'AllExceptionsFilter');
+
+      message = SAFE_INTERNAL_ERROR_MESSAGE;
+      details = {};
     }
 
     const body = toApiErrorBody(code, message, requestId, details);

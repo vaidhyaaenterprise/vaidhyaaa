@@ -38,6 +38,8 @@ function buildAuthHeaders(): Record<string, string> {
 const API_REQUEST_TIMEOUT_MS = 20_000;
 const GET_RETRY_DELAY_MS = 150;
 const TRANSIENT_HTTP_STATUSES = new Set([502, 503, 504]);
+const SERVICE_UNAVAILABLE_MESSAGE =
+  'The service is temporarily unavailable. Please try again shortly.';
 const pendingGetRequests = new Map<string, Promise<unknown>>();
 
 function delay(milliseconds: number): Promise<void> {
@@ -105,11 +107,49 @@ export class ApiRequestError extends Error {
   }
 }
 
+function readServerErrorMetadata(
+  payload: unknown,
+  response: Response,
+): Pick<ApiClientError, 'code' | 'requestId'> {
+  const error =
+    typeof payload === 'object' && payload !== null && 'error' in payload
+      ? (payload as { error?: unknown }).error
+      : undefined;
+  const errorRecord = typeof error === 'object' && error !== null ? error : undefined;
+  const code =
+    errorRecord && 'code' in errorRecord && typeof errorRecord.code === 'string'
+      ? errorRecord.code
+      : 'INTERNAL_ERROR';
+  const bodyRequestId =
+    errorRecord && 'request_id' in errorRecord && typeof errorRecord.request_id === 'string'
+      ? errorRecord.request_id
+      : undefined;
+  const headerRequestId = response.headers?.get?.(REQUEST_ID_HEADER) || undefined;
+  const requestId = bodyRequestId || headerRequestId;
+
+  return requestId ? { code, requestId } : { code };
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const payload: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
     const parsed = apiErrorBodySchema.safeParse(payload);
+    if (response.status >= 500) {
+      const metadata = parsed.success
+        ? {
+            code: parsed.data.error.code,
+            requestId: parsed.data.error.request_id,
+          }
+        : readServerErrorMetadata(payload, response);
+
+      throw new ApiRequestError({
+        ...metadata,
+        message: SERVICE_UNAVAILABLE_MESSAGE,
+        details: {},
+      });
+    }
+
     if (parsed.success) {
       throw new ApiRequestError({
         code: parsed.data.error.code,

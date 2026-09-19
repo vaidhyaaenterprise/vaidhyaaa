@@ -7,6 +7,14 @@ import { assertSupabaseDatabaseUrl } from '@vaidya/config';
 
 const MIGRATIONS_TABLE = 'vaidya_schema_migrations';
 
+function createMigrationClient(connectionString: string): postgres.Sql {
+  return postgres(connectionString, {
+    max: 1,
+    prepare: false,
+    connect_timeout: 10,
+  });
+}
+
 function assertRuntimeDatabaseTarget(connectionString: string): void {
   if (process.env.NODE_ENV !== 'test') {
     assertSupabaseDatabaseUrl(connectionString);
@@ -44,7 +52,7 @@ async function ensureMigrationsTable(sql: postgres.Sql): Promise<void> {
 
 export async function getAppliedMigrations(connectionString: string): Promise<MigrationRecord[]> {
   assertRuntimeDatabaseTarget(connectionString);
-  const sql = postgres(connectionString, { max: 1 });
+  const sql = createMigrationClient(connectionString);
   try {
     await ensureMigrationsTable(sql);
     const rows = await sql<{ name: string; applied_at: Date }[]>`
@@ -58,7 +66,7 @@ export async function getAppliedMigrations(connectionString: string): Promise<Mi
 
 export async function runMigrations(connectionString: string): Promise<string[]> {
   assertRuntimeDatabaseTarget(connectionString);
-  const sql = postgres(connectionString, { max: 1 });
+  const sql = createMigrationClient(connectionString);
   const applied: string[] = [];
 
   try {
@@ -88,7 +96,7 @@ export async function runMigrations(connectionString: string): Promise<string[]>
 
 export async function runSeed(connectionString: string): Promise<void> {
   assertRuntimeDatabaseTarget(connectionString);
-  const sql = postgres(connectionString, { max: 1 });
+  const sql = createMigrationClient(connectionString);
   try {
     const seedSql = readFileSync(getSeedFilePath(), 'utf8');
     await sql.unsafe(seedSql);
@@ -99,7 +107,7 @@ export async function runSeed(connectionString: string): Promise<void> {
 
 export async function resetDatabase(connectionString: string): Promise<void> {
   assertRuntimeDatabaseTarget(connectionString);
-  const sql = postgres(connectionString, { max: 1 });
+  const sql = createMigrationClient(connectionString);
   try {
     await sql.unsafe(`
       DROP SCHEMA public CASCADE;

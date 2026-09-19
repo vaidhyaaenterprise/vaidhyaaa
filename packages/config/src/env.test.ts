@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnvValidationError, parseApiEnv, parseWebEnv } from './env';
+import {
+  assertSupabaseTransactionPoolerUrl,
+  EnvValidationError,
+  parseApiEnv,
+  parseWebEnv,
+} from './env';
 
 const validApiEnv: Record<string, string> = {
   NODE_ENV: 'test',
@@ -24,6 +29,7 @@ describe('parseApiEnv', () => {
     const env = parseApiEnv({
       ...validApiEnv,
       APP_ENV: 'qa',
+      JWT_SECRET: 'qa-test-secret-with-at-least-32-characters',
       DATABASE_URL:
         'postgresql://postgres.project-ref:password@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require',
     });
@@ -45,6 +51,7 @@ describe('parseApiEnv', () => {
       parseApiEnv({
         ...validApiEnv,
         APP_ENV: 'qa',
+        JWT_SECRET: 'qa-test-secret-with-at-least-32-characters',
       }),
     ).toThrow('must use a Supabase PostgreSQL connection URL');
   });
@@ -54,6 +61,7 @@ describe('parseApiEnv', () => {
       parseApiEnv({
         ...validApiEnv,
         APP_ENV: 'qa',
+        JWT_SECRET: 'qa-test-secret-with-at-least-32-characters',
         DATABASE_URL:
           'postgresql://postgres.project-ref:password@aws-0-us-east-2.pooler.supabase.com:5432/postgres',
       }),
@@ -131,6 +139,18 @@ describe('parseApiEnv', () => {
   it('still rejects a blank required secret', () => {
     expect(() => parseApiEnv({ ...validApiEnv, JWT_SECRET: '   ' })).toThrow(EnvValidationError);
   });
+
+  it('rejects a development JWT secret in a hosted environment', () => {
+    expect(() =>
+      parseApiEnv({
+        ...validApiEnv,
+        APP_ENV: 'production',
+        DATABASE_URL:
+          'postgresql://postgres.project-ref:password@aws-0-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require',
+        JWT_SECRET: 'dev_only_change_me_use_a_long_secret',
+      }),
+    ).toThrow('JWT_SECRET must be a random secret');
+  });
 });
 
 describe('parseWebEnv', () => {
@@ -153,5 +173,23 @@ describe('parseWebEnv', () => {
 
     expect(env.WEB_PORT).toBe(3001);
     expect(env.API_BASE_URL).toBe('http://localhost:3000');
+  });
+});
+
+describe('assertSupabaseTransactionPoolerUrl', () => {
+  it('accepts a secure Supabase transaction pooler URL', () => {
+    expect(() =>
+      assertSupabaseTransactionPoolerUrl(
+        'postgresql://postgres.project-ref:password@aws-0-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require',
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects the Supabase session pooler used by the previous Vercel configuration', () => {
+    expect(() =>
+      assertSupabaseTransactionPoolerUrl(
+        'postgresql://postgres.project-ref:password@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require',
+      ),
+    ).toThrow('transaction pooler URL on port 6543');
   });
 });

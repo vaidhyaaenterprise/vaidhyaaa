@@ -144,6 +144,60 @@ describe('api client', () => {
     });
   });
 
+  it('does not expose a structured server error message or details', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      json: async () =>
+        apiErrorBodySchema.parse({
+          error: {
+            code: 'INTERNAL_ERROR',
+            message:
+              '(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15',
+            details: { database_host: 'private-database-host' },
+            request_id: 'req_database_pool',
+          },
+        }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiPost('/v1/auth/login', {})).rejects.toMatchObject({
+      apiError: {
+        code: 'INTERNAL_ERROR',
+        message: 'The service is temporarily unavailable. Please try again shortly.',
+        requestId: 'req_database_pool',
+        details: {},
+      },
+    });
+  });
+
+  it('sanitizes malformed server errors while retaining available diagnostics', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: '(EMAXCONNSESSION) max clients reached',
+      headers: new Headers({ 'x-request-id': 'req_response_header' }),
+      json: async () => ({
+        error: {
+          code: 'DATABASE_CONNECTION_EXHAUSTED',
+          message: '(EMAXCONNSESSION) max clients reached',
+          details: 'invalid-details-shape',
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiPost('/v1/auth/login', {})).rejects.toMatchObject({
+      apiError: {
+        code: 'DATABASE_CONNECTION_EXHAUSTED',
+        message: 'The service is temporarily unavailable. Please try again shortly.',
+        requestId: 'req_response_header',
+        details: {},
+      },
+    });
+  });
+
   it('does not expose a configured upstream API URL to the browser', () => {
     const originalLocation = window.location;
     Object.defineProperty(window, 'location', {

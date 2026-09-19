@@ -1,7 +1,12 @@
 import { parseApiEnv } from '@vaidya/config';
 
+import { assertVercelDeploymentEnv } from './config/deployment-env.validator';
+
 try {
-  parseApiEnv(process.env);
+  const env = parseApiEnv(process.env);
+  if (process.env.VERCEL) {
+    assertVercelDeploymentEnv(env);
+  }
   console.log('API deployment environment is valid.');
 } catch (error) {
   const message = error instanceof Error ? error.message : 'Unknown environment validation error';
