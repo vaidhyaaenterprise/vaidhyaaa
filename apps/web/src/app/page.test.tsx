@@ -155,16 +155,19 @@ describe('HomePage dashboard', () => {
     expect(within(needsAction).queryByText('Past Pending')).not.toBeInTheDocument();
 
     expect(within(missedActions).getByText('Past Pending')).toBeInTheDocument();
+    expect(within(missedActions).getByRole('list')).toBeInTheDocument();
+    expect(within(missedActions).getByText('General Consultation — Checkup')).toBeInTheDocument();
+    expect(within(missedActions).getByText('No action taken')).toBeInTheDocument();
     expect(
-      within(missedActions).getByRole('button', {
+      within(missedActions).queryByRole('button', {
         name: 'Confirm appointment for Past Pending',
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(
-      within(missedActions).getByRole('button', {
+      within(missedActions).queryByRole('button', {
         name: 'Cancel appointment for Past Pending',
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
 
     expect(within(nextAppointments).getByText('Today Pending')).toBeInTheDocument();
     expect(within(nextAppointments).getByText('Today Confirmed')).toBeInTheDocument();
@@ -209,25 +212,53 @@ describe('HomePage dashboard', () => {
     expect(screen.queryByText('Must Not Be Classified')).not.toBeInTheDocument();
   });
 
-  it('keeps missed requests actionable and refreshes the dashboard after confirmation', async () => {
+  it('shows missed requests as read-only history and excludes them from pending staff actions', async () => {
     const today = getClinicDate(new Date(), 'Asia/Kolkata');
-    const missed = appointmentRow(
-      'missed-pending',
-      'Missed Patient',
-      shiftDate(today, -1),
-      '09:00',
-      'pending_confirmation',
-    );
-    mockedFetchAppointments.mockResolvedValueOnce([missed]).mockResolvedValueOnce([]);
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow(
+        'missed-pending',
+        'Missed Patient',
+        shiftDate(today, -1),
+        '09:00',
+        'pending_confirmation',
+      ),
+    ]);
 
     render(<HomePageContent />);
 
     const missedActions = await screen.findByRole('region', { name: 'Missed actions' });
-    const confirmButton = within(missedActions).getByRole('button', {
-      name: 'Confirm appointment for Missed Patient',
+    expect(within(missedActions).getByText('Missed Patient')).toBeInTheDocument();
+    expect(within(missedActions).getByText('No action taken')).toBeInTheDocument();
+    expect(within(missedActions).queryAllByRole('button')).toHaveLength(0);
+
+    const pendingActionsCounter = screen.getByText('pending staff actions').parentElement;
+    expect(pendingActionsCounter).not.toBeNull();
+    expect(within(pendingActionsCounter as HTMLElement).getByText('0')).toBeInTheDocument();
+    expect(screen.getByText(/1 missed request is listed below\./)).toBeInTheDocument();
+    expect(mockedConfirmAppointment).not.toHaveBeenCalled();
+    expect(mockedCancelAppointment).not.toHaveBeenCalled();
+    expect(mockedFetchAppointments).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps current-day requests actionable and prevents duplicate confirmation', async () => {
+    const today = getClinicDate(new Date(), 'Asia/Kolkata');
+    const current = appointmentRow(
+      'today-pending',
+      'Today Patient',
+      today,
+      '09:00',
+      'pending_confirmation',
+    );
+    mockedFetchAppointments.mockResolvedValueOnce([current]).mockResolvedValueOnce([]);
+
+    render(<HomePageContent />);
+
+    const needsAction = await screen.findByRole('region', { name: 'Needs your action' });
+    const confirmButton = within(needsAction).getByRole('button', {
+      name: 'Confirm appointment for Today Patient',
     });
-    const cancelButton = within(missedActions).getByRole('button', {
-      name: 'Cancel appointment for Missed Patient',
+    const cancelButton = within(needsAction).getByRole('button', {
+      name: 'Cancel appointment for Today Patient',
     });
     fireEvent.click(confirmButton);
     fireEvent.click(confirmButton);
@@ -236,10 +267,10 @@ describe('HomePage dashboard', () => {
     expect(cancelButton).toBeDisabled();
 
     await waitFor(() => {
-      expect(mockedConfirmAppointment).toHaveBeenCalledWith(CLINIC_ID, 'missed-pending');
+      expect(mockedConfirmAppointment).toHaveBeenCalledWith(CLINIC_ID, 'today-pending');
     });
     await waitFor(() => {
-      expect(within(missedActions).queryByText('Missed Patient')).not.toBeInTheDocument();
+      expect(within(needsAction).queryByText('Today Patient')).not.toBeInTheDocument();
     });
     expect(mockedConfirmAppointment).toHaveBeenCalledTimes(1);
     expect(mockedCancelAppointment).not.toHaveBeenCalled();
@@ -249,20 +280,8 @@ describe('HomePage dashboard', () => {
   it('ignores an older dashboard reload that finishes after a newer action reload', async () => {
     const today = getClinicDate(new Date(), 'Asia/Kolkata');
     const rows = [
-      appointmentRow(
-        'missed-a',
-        'Missed Patient A',
-        shiftDate(today, -1),
-        '09:00',
-        'pending_confirmation',
-      ),
-      appointmentRow(
-        'missed-b',
-        'Missed Patient B',
-        shiftDate(today, -1),
-        '10:00',
-        'pending_confirmation',
-      ),
+      appointmentRow('today-a', 'Today Patient A', today, '09:00', 'pending_confirmation'),
+      appointmentRow('today-b', 'Today Patient B', today, '10:00', 'pending_confirmation'),
     ];
     let resolveOlderReload: (appointments: AppointmentApiRow[]) => void = () => {};
     const olderReload = new Promise<AppointmentApiRow[]>((resolve) => {
@@ -275,29 +294,29 @@ describe('HomePage dashboard', () => {
 
     render(<HomePageContent />);
 
-    const missedActions = await screen.findByRole('region', { name: 'Missed actions' });
+    const needsAction = await screen.findByRole('region', { name: 'Needs your action' });
     fireEvent.click(
-      within(missedActions).getByRole('button', {
-        name: 'Confirm appointment for Missed Patient A',
+      within(needsAction).getByRole('button', {
+        name: 'Confirm appointment for Today Patient A',
       }),
     );
     await waitFor(() => expect(mockedFetchAppointments).toHaveBeenCalledTimes(2));
 
     fireEvent.click(
-      within(missedActions).getByRole('button', {
-        name: 'Confirm appointment for Missed Patient B',
+      within(needsAction).getByRole('button', {
+        name: 'Confirm appointment for Today Patient B',
       }),
     );
     await waitFor(() => expect(mockedFetchAppointments).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(screen.queryByText('Missed Patient B')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Today Patient B')).not.toBeInTheDocument());
 
     await act(async () => {
       resolveOlderReload(rows);
       await olderReload;
     });
 
-    expect(screen.queryByText('Missed Patient A')).not.toBeInTheDocument();
-    expect(screen.queryByText('Missed Patient B')).not.toBeInTheDocument();
+    expect(screen.queryByText('Today Patient A')).not.toBeInTheDocument();
+    expect(screen.queryByText('Today Patient B')).not.toBeInTheDocument();
     expect(mockedConfirmAppointment).toHaveBeenCalledTimes(2);
   });
 });

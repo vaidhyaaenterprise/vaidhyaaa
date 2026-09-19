@@ -126,14 +126,20 @@ export function ClinicHours() {
       endTime: '13:00',
       active: true,
     };
+    setConflicts([]);
+    setError(null);
     setTempHours([...tempHours, newSlot]);
   };
 
   const removeTimeSlot = (id: string) => {
+    setConflicts([]);
+    setError(null);
     setTempHours(tempHours.filter((h) => h.id !== id));
   };
 
   const updateTimeSlot = (id: string, field: keyof TimeSlot, value: string) => {
+    setConflicts([]);
+    setError(null);
     setTempHours(tempHours.map((h) => (h.id === id ? { ...h, [field]: value } : h)));
   };
 

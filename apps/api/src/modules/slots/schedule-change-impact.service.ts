@@ -1,7 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type Repositories } from '@vaidya/db';
-import { type ReplaceClinicHoursInput, type ScheduleConflictItem } from '@vaidya/shared';
+import {
+  type ReplaceClinicHoursInput,
+  type ReplaceDoctorSchedulesInput,
+  type ScheduleConflictItem,
+} from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 import type { DatabaseConnection } from '@vaidya/db';
@@ -28,19 +32,144 @@ function maxClinicLocalTimestamp(values: string[]): string | null {
   return sorted[sorted.length - 1] ?? null;
 }
 
-function extractTime(value: string): string {
-  const timePart = value.includes('T') ? (value.split('T')[1] ?? value) : value;
-  return timePart.slice(0, 5);
+type ScheduleWindow = {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  active?: boolean;
+  effective_from?: string | null | undefined;
+  effective_to?: string | null | undefined;
+};
+
+type ScheduleAppointment = {
+  id: string;
+  appointmentStart: string;
+  appointmentEnd: string;
+};
+
+type ClinicLocalTimestampParts = {
+  date: string;
+  dayOfWeek: number;
+  time: string;
+};
+
+function parseClinicLocalTimestamp(value: string): ClinicLocalTimestampParts | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(
+    value.trim(),
+  );
+  if (!match) {
+    return null;
+  }
+
+  const [
+    ,
+    yearText = '',
+    monthText = '',
+    dayText = '',
+    hourText = '',
+    minuteText = '',
+    secondText = '00',
+  ] = match;
+  const year = Number.parseInt(yearText, 10);
+  const month = Number.parseInt(monthText, 10);
+  const day = Number.parseInt(dayText, 10);
+  const hour = Number.parseInt(hourText, 10);
+  const minute = Number.parseInt(minuteText, 10);
+  const second = Number.parseInt(secondText, 10);
+
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    return null;
+  }
+
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return {
+    date: `${yearText}-${monthText}-${dayText}`,
+    dayOfWeek: calendarDate.getUTCDay(),
+    time: `${hourText}:${minuteText}:${secondText}`,
+  };
 }
 
-function extractDayOfWeek(value: string): number {
-  const datePart = value.includes('T') ? (value.split('T')[0] ?? value) : value;
-  const date = new Date(`${datePart}T12:00:00`);
-  return date.getDay();
+function normalizeWindowTime(value: string): string {
+  const [hour = '00', minute = '00', second = '00'] = value.split(':');
+  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
 }
 
-function fitsWindow(time: string, start: string, end: string): boolean {
-  return time >= start.slice(0, 5) && time < end.slice(0, 5);
+function appointmentFitsWindows(
+  appointment: ScheduleAppointment,
+  windows: ScheduleWindow[],
+): boolean {
+  const start = parseClinicLocalTimestamp(appointment.appointmentStart);
+  const end = parseClinicLocalTimestamp(appointment.appointmentEnd);
+  if (!start || !end || start.date !== end.date) {
+    return false;
+  }
+
+  const applicableRanges = windows
+    .filter((window) => {
+      if (window.active === false || window.day_of_week !== start.dayOfWeek) {
+        return false;
+      }
+      if (window.effective_from && start.date < window.effective_from) {
+        return false;
+      }
+      return !window.effective_to || start.date <= window.effective_to;
+    })
+    .map((window) => ({
+      start: normalizeWindowTime(window.start_time),
+      end: normalizeWindowTime(window.end_time),
+    }))
+    .sort((left, right) => left.start.localeCompare(right.start));
+
+  const mergedRanges: Array<{ start: string; end: string }> = [];
+  for (const range of applicableRanges) {
+    const previous = mergedRanges[mergedRanges.length - 1];
+    if (previous && range.start <= previous.end) {
+      if (range.end > previous.end) {
+        previous.end = range.end;
+      }
+    } else {
+      mergedRanges.push({ ...range });
+    }
+  }
+
+  return mergedRanges.some(
+    (range) => start.time >= range.start && end.time <= range.end,
+  );
+}
+
+/**
+ * Schedule replacement is blocked only by appointments that the change newly
+ * excludes. Existing outliers must not prevent an unrelated schedule expansion.
+ */
+export function findNewlyExcludedScheduleAppointments<T extends ScheduleAppointment>(
+  appointments: T[],
+  currentWindows: ScheduleWindow[],
+  proposedWindows: ScheduleWindow[],
+): T[] {
+  return appointments.filter(
+    (appointment) =>
+      appointmentFitsWindows(appointment, currentWindows) &&
+      !appointmentFitsWindows(appointment, proposedWindows),
+  );
 }
 
 @Injectable()
@@ -122,6 +251,35 @@ export class ScheduleChangeImpactService {
     return { blocked: conflicts.length > 0, conflicts };
   }
 
+  async previewDoctorSchedulesReplace(
+    clinicId: string,
+    doctorId: string,
+    input: ReplaceDoctorSchedulesInput,
+  ): Promise<{ blocked: boolean; conflicts: ScheduleConflictItem[] }> {
+    const [currentRows, appointments] = await Promise.all([
+      this.repos.clinicalSetup.listDoctorSchedules(clinicId, doctorId),
+      this.repos.appointmentLifecycle.listFutureActiveAppointments(clinicId, doctorId),
+    ]);
+    const currentWindows: ScheduleWindow[] = currentRows.map((window) => ({
+      day_of_week: window.dayOfWeek,
+      start_time: window.startTime,
+      end_time: window.endTime,
+      active: window.active,
+      effective_from: window.effectiveFrom,
+      effective_to: window.effectiveTo,
+    }));
+    const conflicts = findNewlyExcludedScheduleAppointments(
+      appointments,
+      currentWindows,
+      input.windows,
+    ).map((appointment) => ({
+      appointment_id: appointment.id,
+      reason: 'outside_doctor_hours',
+    }));
+
+    return { blocked: conflicts.length > 0, conflicts };
+  }
+
   async previewHolidayDate(clinicId: string, holidayDate: string, doctorIds?: string[]) {
     const rows = await this.repos.appointmentLifecycle.listActiveAppointmentsOnDate(
       clinicId,
@@ -140,25 +298,24 @@ export class ScheduleChangeImpactService {
     clinicId: string,
     windows: ReplaceClinicHoursInput['windows'],
   ): Promise<ScheduleConflictItem[]> {
-    const activeWindows = windows.filter((window) => window.active !== false);
-    const appointments = await this.repos.appointmentLifecycle.listFutureActiveAppointments(clinicId);
-    const conflicts: ScheduleConflictItem[] = [];
+    const [currentRows, appointments] = await Promise.all([
+      this.repos.clinicalSetup.listClinicHours(clinicId),
+      this.repos.appointmentLifecycle.listFutureActiveAppointments(clinicId),
+    ]);
+    const currentWindows: ScheduleWindow[] = currentRows.map((window) => ({
+      day_of_week: window.dayOfWeek,
+      start_time: window.startTime,
+      end_time: window.endTime,
+      active: window.active,
+    }));
 
-    for (const appointment of appointments) {
-      const dayOfWeek = extractDayOfWeek(appointment.appointmentStart);
-      const time = extractTime(appointment.appointmentStart);
-      const dayWindows = activeWindows.filter((window) => window.day_of_week === dayOfWeek);
-      const fits = dayWindows.some((window) =>
-        fitsWindow(time, window.start_time, window.end_time),
-      );
-      if (!fits) {
-        conflicts.push({
-          appointment_id: appointment.id,
-          reason: 'outside_clinic_hours',
-        });
-      }
-    }
-
-    return conflicts;
+    return findNewlyExcludedScheduleAppointments(
+      appointments,
+      currentWindows,
+      windows,
+    ).map((appointment) => ({
+      appointment_id: appointment.id,
+      reason: 'outside_clinic_hours',
+    }));
   }
 }

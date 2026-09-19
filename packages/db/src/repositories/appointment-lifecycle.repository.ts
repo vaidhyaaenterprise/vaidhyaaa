@@ -198,17 +198,21 @@ export class AppointmentLifecycleRepository {
       .returning();
   }
 
-  listFutureActiveAppointments(clinicId: string) {
+  listFutureActiveAppointments(clinicId: string, doctorId?: string) {
+    const filters = [
+      eq(appointmentRequests.clinicId, clinicId),
+      inArray(appointmentRequests.status, [...ACTIVE_APPOINTMENT_STATUSES]),
+      gt(appointmentRequests.appointmentStart, clinicLocalNow(clinicId)),
+    ];
+
+    if (doctorId) {
+      filters.push(eq(appointmentRequests.doctorId, doctorId));
+    }
+
     return this.db
       .select()
       .from(appointmentRequests)
-      .where(
-        and(
-          eq(appointmentRequests.clinicId, clinicId),
-          inArray(appointmentRequests.status, [...ACTIVE_APPOINTMENT_STATUSES]),
-          gt(appointmentRequests.appointmentStart, clinicLocalNow(clinicId)),
-        ),
-      );
+      .where(and(...filters));
   }
 
   listActiveAppointmentsOnDate(clinicId: string, holidayDate: string, doctorIds?: string[]) {

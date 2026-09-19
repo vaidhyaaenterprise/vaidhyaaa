@@ -35,7 +35,6 @@ function formatDate(isoDate: string): string {
 
 type AppointmentActionCardProps = {
   appointment: Appointment;
-  missed?: boolean;
   isUpdating?: boolean;
   onConfirm: (id: string) => Promise<void>;
   onCancel: (id: string) => Promise<void>;
@@ -43,18 +42,12 @@ type AppointmentActionCardProps = {
 
 function AppointmentActionCard({
   appointment,
-  missed = false,
   isUpdating = false,
   onConfirm,
   onCancel,
 }: AppointmentActionCardProps) {
   return (
-    <div
-      className={`rounded-xl border p-3 ${
-        missed ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'
-      }`}
-      aria-busy={isUpdating}
-    >
+    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3" aria-busy={isUpdating}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-bold text-slate-900">{appointment.patientName}</p>
@@ -68,14 +61,8 @@ function AppointmentActionCard({
             {appointment.reasonForVisit ? ` — ${appointment.reasonForVisit}` : ''}
           </p>
         </div>
-        <span
-          className={`rounded-full border-2 px-2 py-0.5 text-xs font-bold ${
-            missed
-              ? 'border-rose-300 bg-rose-100 text-rose-700'
-              : 'border-amber-300 bg-amber-100 text-amber-700'
-          }`}
-        >
-          {missed ? 'Missed' : 'Pending'}
+        <span className="rounded-full border-2 border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+          Pending
         </span>
       </div>
       <div className="mt-2 flex gap-2">
@@ -99,6 +86,31 @@ function AppointmentActionCard({
         </button>
       </div>
     </div>
+  );
+}
+
+function MissedAppointmentListItem({ appointment }: { appointment: Appointment }) {
+  return (
+    <li className="flex flex-col gap-3 bg-rose-50/50 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <p className="text-sm font-bold text-slate-900">{appointment.patientName}</p>
+        <p className="mt-0.5 text-xs text-slate-600">
+          {appointment.doctorName} ·{' '}
+          <span className="font-semibold">{formatTime(appointment.appointmentTime)}</span>
+          {appointment.appointmentDate ? ` · ${formatDate(appointment.appointmentDate)}` : ''}
+        </p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          {appointment.serviceName}
+          {appointment.reasonForVisit ? ` — ${appointment.reasonForVisit}` : ''}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
+        <span className="rounded-full border-2 border-rose-300 bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
+          Missed
+        </span>
+        <span className="text-xs font-semibold text-slate-500">No action taken</span>
+      </div>
+    </li>
   );
 }
 
@@ -241,7 +253,7 @@ export function HomePageContent() {
 
   const pendingConfirmations = visibleTodayPending.length;
   const missedActions = visibleMissedPending.length;
-  const pendingStaffActions = pendingConfirmations + missedActions + callbacks + emergencyAlerts;
+  const pendingStaffActions = pendingConfirmations + callbacks + emergencyAlerts;
 
   return (
     <>
@@ -282,7 +294,9 @@ export function HomePageContent() {
                     ? 'You see only your appointments and schedule tools in this milestone shell.'
                     : `${pendingConfirmations} appointment requests need confirmation today.${
                         missedActions > 0
-                          ? ` ${missedActions} missed requests still need review.`
+                          ? ` ${missedActions} missed ${
+                              missedActions === 1 ? 'request is' : 'requests are'
+                            } listed below.`
                           : ''
                       } Call stats will appear when the call inbox API is available.`}
                 </p>
@@ -397,24 +411,18 @@ export function HomePageContent() {
             <h3 id="missed-actions-heading" className="mb-1 text-lg font-bold text-slate-900">
               Missed actions
             </h3>
-            <p className="mb-4 text-xs text-slate-500">Unresolved requests from previous days</p>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {visibleMissedPending.map((appointment) => (
-                <AppointmentActionCard
-                  key={appointment.id}
-                  appointment={appointment}
-                  missed
-                  isUpdating={updatingAppointmentIds.has(appointment.id)}
-                  onConfirm={handleConfirm}
-                  onCancel={handleCancel}
-                />
-              ))}
-              {visibleMissedPending.length === 0 ? (
-                <p className="text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-                  No missed actions
-                </p>
-              ) : null}
-            </div>
+            <p className="mb-4 text-xs text-slate-500">
+              Previous-day requests where no clinic-admin action was taken
+            </p>
+            {visibleMissedPending.length === 0 ? (
+              <p className="text-sm text-slate-500">No missed actions</p>
+            ) : (
+              <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
+                {visibleMissedPending.map((appointment) => (
+                  <MissedAppointmentListItem key={appointment.id} appointment={appointment} />
+                ))}
+              </ul>
+            )}
           </section>
         </>
       )}

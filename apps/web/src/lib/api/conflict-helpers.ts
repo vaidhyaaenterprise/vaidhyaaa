@@ -47,6 +47,9 @@ export function formatScheduleConflicts(conflicts: ScheduleConflictItem[]): stri
     if (conflict.reason === 'outside_clinic_hours') {
       return `Appointment ${conflict.appointment_id ?? 'unknown'} falls outside new clinic hours`;
     }
+    if (conflict.reason === 'outside_doctor_hours') {
+      return `Appointment ${conflict.appointment_id ?? 'unknown'} falls outside the doctor's new working hours`;
+    }
     if (conflict.reason === 'active_appointment_on_holiday') {
       return `Active appointment ${conflict.appointment_id ?? 'unknown'} on ${conflict.holiday_date ?? 'holiday'}`;
     }

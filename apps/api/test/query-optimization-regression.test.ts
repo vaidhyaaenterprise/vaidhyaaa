@@ -133,11 +133,16 @@ describe('query optimization regressions', () => {
   });
 
   it('generates a target with bulk reads and one bulk slot insert', async () => {
-    const workingWindows = Array.from({ length: 7 }, (_, index) => ({
-      dayOfWeek: index + 1,
-      startTime: '09:00:00',
-      endTime: '10:00:00',
-    }));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-21T06:30:00.000Z'));
+
+    const workingWindows = [
+      {
+        dayOfWeek: 0,
+        startTime: '09:00:00',
+        endTime: '10:00:00',
+      },
+    ];
     const slots = {
       listActiveGenerationTargets: vi.fn().mockResolvedValue([
         {
@@ -167,25 +172,29 @@ describe('query optimization regressions', () => {
     const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;
     installPrivateDependency(service, 'repos', { slots });
 
-    const result = await service.generateSlots({
-      clinicId: 'clinic-1',
-      doctorId: 'doctor-1',
-      clinicServiceId: 'service-1',
-      horizonDays: 0,
-    });
+    try {
+      const result = await service.generateSlots({
+        clinicId: 'clinic-1',
+        doctorId: 'doctor-1',
+        clinicServiceId: 'service-1',
+        horizonDays: 0,
+      });
 
-    expect(slots.listDoctorBlockedSlots).toHaveBeenCalledOnce();
-    expect(slots.listExistingSlotWindows).toHaveBeenCalledOnce();
-    expect(slots.insertSlots).toHaveBeenCalledOnce();
-    expect(slots.insertSlots.mock.calls[0]?.[0]).toHaveLength(2);
-    expect(result).toEqual([
-      expect.objectContaining({
-        clinic_id: 'clinic-1',
-        doctor_id: 'doctor-1',
-        clinic_service_id: 'service-1',
-        inserted: 2,
-        horizon_days: 0,
-      }),
-    ]);
+      expect(slots.listDoctorBlockedSlots).toHaveBeenCalledOnce();
+      expect(slots.listExistingSlotWindows).toHaveBeenCalledOnce();
+      expect(slots.insertSlots).toHaveBeenCalledOnce();
+      expect(slots.insertSlots.mock.calls[0]?.[0]).toHaveLength(2);
+      expect(result).toEqual([
+        expect.objectContaining({
+          clinic_id: 'clinic-1',
+          doctor_id: 'doctor-1',
+          clinic_service_id: 'service-1',
+          inserted: 2,
+          horizon_days: 0,
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

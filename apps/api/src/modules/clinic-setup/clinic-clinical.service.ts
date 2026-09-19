@@ -890,6 +890,21 @@ export class ClinicClinicalService {
     doctorId: string,
     input: ReplaceDoctorSchedulesInput,
   ) {
+    const preview = await this.scheduleChangeImpact.previewDoctorSchedulesReplace(
+      clinicId,
+      doctorId,
+      input,
+    );
+    if (preview.blocked) {
+      throw new AppError(
+        'CONFLICTING_APPOINTMENTS',
+        'Doctor schedule change conflicts with active appointments.',
+        {
+          conflicts: preview.conflicts,
+        },
+      );
+    }
+
     const rows = await this.repos.clinicalSetup.replaceDoctorSchedules(
       clinicId,
       doctorId,

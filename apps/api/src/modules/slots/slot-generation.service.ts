@@ -11,6 +11,7 @@ import {
   formatDateInTimezone,
   intervalsOverlap,
   normalizeTimeString,
+  toStoredDayOfWeek,
   type Repositories,
 } from '@vaidya/db';
 
@@ -135,7 +136,7 @@ export class SlotGenerationService {
         continue;
       }
 
-      const dayOfWeek = dayOfWeekMon1(dateStr, timezone);
+      const dayOfWeek = toStoredDayOfWeek(dayOfWeekMon1(dateStr, timezone));
       const daySchedules = schedules.filter((schedule) => schedule.dayOfWeek === dayOfWeek);
       if (daySchedules.length === 0) {
         continue;

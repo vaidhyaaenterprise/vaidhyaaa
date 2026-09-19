@@ -11,6 +11,7 @@ import {
   formatTimeOptions,
   getAvailableTimePreferencesForDate,
 } from '../src/modules/booking/booking-field-extractor';
+import { formatClinicHoursText } from '../src/modules/structured-info/structured-info-field-extractor';
 
 function classification(entities: IntentClassifierResult['entities']): IntentClassifierResult {
   return {
@@ -86,5 +87,14 @@ describe('A02 LLM entity mapping and booking slot helpers', () => {
     ];
     expect(getAvailableTimePreferencesForDate(slots, '2026-06-21')).toEqual(['evening']);
     expect(formatTimeOptions(['evening'])).toBe('evening');
+  });
+
+  it('includes stored Sunday hours in a Monday-first clinic summary', () => {
+    expect(
+      formatClinicHoursText([
+        { dayOfWeek: 0, startTime: '10:00:00', endTime: '12:00:00' },
+        { dayOfWeek: 1, startTime: '09:00:00', endTime: '13:00:00' },
+      ]),
+    ).toBe('Mon 09:00-13:00; Sun 10:00-12:00');
   });
 });

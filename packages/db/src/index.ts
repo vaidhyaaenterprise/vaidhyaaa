@@ -38,6 +38,7 @@ export {
   hasCapacityToConvertHold,
   intervalsOverlap,
   normalizeTimeString,
+  toStoredDayOfWeek,
   type ClinicLocalTimestamp,
 } from './services/slot-capacity';
 export {
