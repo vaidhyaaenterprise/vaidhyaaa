@@ -1,6 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { createRepositories, dayOfWeekMon1, formatDateInTimezone, type Repositories } from '@vaidya/db';
+import {
+  createRepositories,
+  dayOfWeekMon1,
+  formatDateInTimezone,
+  toStoredDayOfWeek,
+  type Repositories,
+} from '@vaidya/db';
 import { ANSWERING_MODES } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';
@@ -81,7 +87,7 @@ export class VoiceAnsweringPolicyService {
       return true;
     }
 
-    const dayOfWeek = dayOfWeekMon1(today, timezone);
+    const dayOfWeek = toStoredDayOfWeek(dayOfWeekMon1(today, timezone));
     const hours = await this.repos.voice.listClinicHours(clinicId);
     const windows = hours.filter((row) => row.dayOfWeek === dayOfWeek);
     if (windows.length === 0) {

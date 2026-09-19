@@ -1,8 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type ApiEnv } from '@vaidya/config';
 import { DatabaseService } from '@vaidya/db';
-import { AppError } from '@vaidya/shared';
-
 import { API_ENV } from '../../config/api-config.module';
 import { BullMQQueueService } from '../../common/queue/bullmq-queue.service';
 
@@ -36,12 +34,9 @@ export class HealthService {
 
   private async checkDatabase(): Promise<'ok' | 'error'> {
     try {
-      await this.databaseService.findClinicById('00000000-0000-0000-0000-000000000001');
+      await this.databaseService.checkConnection();
       return 'ok';
-    } catch (error) {
-      if (error instanceof AppError && error.code === 'CLINIC_NOT_FOUND') {
-        return 'ok';
-      }
+    } catch {
       return 'error';
     }
   }

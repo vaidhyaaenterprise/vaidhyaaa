@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createTransport, type Transporter } from 'nodemailer';
-import { Resend } from 'resend';
+import { Resend, type CreateEmailRequestOptions } from 'resend';
 
 import { type ApiEnv } from '@vaidya/config';
 import { AppError } from '@vaidya/shared';
@@ -72,6 +74,39 @@ function buildEmailLayout(input: EmailLayoutInput): string {
 
 type EmailProvider = 'smtp' | 'resend' | 'dev';
 
+async function withAbortableProviderTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error('email_provider_timeout'));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([operation(controller.signal), timeoutPromise]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function emailIdempotencyKey(input: { to: string; subject: string; html: string }): string {
+  const digest = createHash('sha256')
+    .update(input.to)
+    .update('\0')
+    .update(input.subject)
+    .update('\0')
+    .update(input.html)
+    .digest('hex');
+  return `vaidya-email-${digest}`;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -88,6 +123,10 @@ export class EmailService {
         secure: this.env.SMTP_PORT === 465,
         requireTLS: this.env.SMTP_PORT !== 465,
         auth: { user: this.env.SMTP_USER, pass: this.env.SMTP_PASS },
+        connectionTimeout: this.env.EMAIL_PROVIDER_TIMEOUT_MS,
+        greetingTimeout: this.env.EMAIL_PROVIDER_TIMEOUT_MS,
+        socketTimeout: this.env.EMAIL_PROVIDER_TIMEOUT_MS,
+        dnsTimeout: this.env.EMAIL_PROVIDER_TIMEOUT_MS,
       });
     } else if (this.env.RESEND_API_KEY) {
       this.provider = 'resend';
@@ -112,10 +151,7 @@ export class EmailService {
       html: buildEmailLayout({
         title: 'Verify Your Email',
         greeting: 'Hello,',
-        paragraphs: [
-          'Thank you for registering with Vaidya.',
-          'Your verification code is:',
-        ],
+        paragraphs: ['Thank you for registering with Vaidya.', 'Your verification code is:'],
         code: otp,
         expiryMinutes: 10,
       }),
@@ -186,6 +222,8 @@ export class EmailService {
     html: string;
   }): Promise<{ messageId?: string }> {
     if (this.provider === 'smtp' && this.smtpTransport) {
+      // Nodemailer owns the socket, so use its connection, DNS, greeting and
+      // inactivity timeouts instead of returning while a send is still alive.
       const info = await this.smtpTransport.sendMail({
         from: this.from,
         to: input.to,
@@ -196,12 +234,24 @@ export class EmailService {
     }
 
     if (this.provider === 'resend' && this.resendClient) {
-      const { data, error } = await this.resendClient.emails.send({
-        from: this.from,
-        to: [input.to],
-        subject: input.subject,
-        html: input.html,
-      });
+      const { data, error } = await withAbortableProviderTimeout((signal) => {
+        // Resend forwards request options to fetch, although its public type
+        // currently omits RequestInit.signal. Supplying it prevents a timed-
+        // out OTP request from completing later and delivering a stale code.
+        const requestOptions: CreateEmailRequestOptions & { signal: AbortSignal } = {
+          idempotencyKey: emailIdempotencyKey(input),
+          signal,
+        };
+        return this.resendClient!.emails.send(
+          {
+            from: this.from,
+            to: [input.to],
+            subject: input.subject,
+            html: input.html,
+          },
+          requestOptions,
+        );
+      }, this.env.EMAIL_PROVIDER_TIMEOUT_MS);
 
       if (error) {
         this.logger.error(

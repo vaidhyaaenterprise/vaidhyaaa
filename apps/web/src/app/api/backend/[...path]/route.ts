@@ -30,7 +30,11 @@ type RouteContext = {
 function errorResponse(message: string, requestId: string, status = 503): Response {
   return Response.json(toApiErrorBody('INTERNAL_ERROR', message, requestId), {
     status,
-    headers: { [REQUEST_ID_HEADER]: requestId },
+    headers: {
+      [REQUEST_ID_HEADER]: requestId,
+      'cache-control': 'no-store, private',
+      'retry-after': '1',
+    },
   });
 }
 
@@ -55,11 +59,22 @@ function isLoopbackUrl(value: string): boolean {
   }
 }
 
+function isSupportedHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
 function getUpstreamBaseUrl(): string | null {
   const configured = process.env.API_BASE_URL?.trim();
 
   if (configured) {
-    if (isVercelRuntime() && isLoopbackUrl(configured)) {
+    if (!isSupportedHttpUrl(configured) || (isVercelRuntime() && isLoopbackUrl(configured))) {
       return null;
     }
     return configured.replace(/\/+$/, '');
@@ -103,6 +118,14 @@ async function proxyRequest(request: NextRequest, context: RouteContext): Promis
     );
   }
 
+  if (upstreamUrl.origin === request.nextUrl.origin) {
+    console.error('API proxy rejected an upstream URL that points back to the web application.');
+    return errorResponse(
+      'The service is temporarily unavailable. Please contact support.',
+      requestId,
+    );
+  }
+
   const headers = new Headers(request.headers);
   for (const header of REQUEST_HEADERS_TO_REMOVE) {
     headers.delete(header);
@@ -131,6 +154,16 @@ async function proxyRequest(request: NextRequest, context: RouteContext): Promis
       responseHeaders.delete(header);
     }
     responseHeaders.set(REQUEST_ID_HEADER, requestId);
+    responseHeaders.set('cache-control', 'no-store, private');
+    if (
+      (upstreamResponse.status === 408 ||
+        upstreamResponse.status === 425 ||
+        upstreamResponse.status === 429 ||
+        upstreamResponse.status >= 500) &&
+      !responseHeaders.has('retry-after')
+    ) {
+      responseHeaders.set('retry-after', '1');
+    }
 
     return new Response(await upstreamResponse.arrayBuffer(), {
       status: upstreamResponse.status,

@@ -11,6 +11,7 @@ import {
   fetchDoctors,
   replaceDoctorSchedules,
 } from '@/lib/api/clinic-clinical';
+import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 import { dayLabel, dayNumber } from '@/lib/clinic-scheduling';
 
 type DoctorScheduleSlot = {
@@ -99,6 +100,7 @@ export function DoctorSchedule() {
   const handleEdit = () => {
     setTempSchedules(schedules);
     setConflicts([]);
+    setError(null);
     setIsEditing(true);
   };
 
@@ -114,12 +116,6 @@ export function DoctorSchedule() {
     const doctorId =
       currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : doctors[0]?.id;
     if (!doctorId) {
-      return;
-    }
-
-    const detectedConflicts = detectConflicts();
-    if (detectedConflicts.length > 0) {
-      setConflicts(detectedConflicts);
       return;
     }
 
@@ -150,16 +146,17 @@ export function DoctorSchedule() {
       setIsEditing(false);
       setConflicts([]);
     } catch (err) {
+      const apiConflicts = conflictsFromApiError(err);
+      if (apiConflicts) {
+        setConflicts(apiConflicts);
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to save doctor schedules.',
       );
     } finally {
       setSaving(false);
     }
-  };
-
-  const detectConflicts = (): string[] => {
-    return [];
   };
 
   const addScheduleSlot = (day: string) => {
@@ -177,14 +174,20 @@ export function DoctorSchedule() {
       endTime: '13:00',
       active: true,
     };
+    setConflicts([]);
+    setError(null);
     setTempSchedules([...tempSchedules, newSlot]);
   };
 
   const removeScheduleSlot = (id: string) => {
+    setConflicts([]);
+    setError(null);
     setTempSchedules(tempSchedules.filter((s) => s.id !== id));
   };
 
   const updateScheduleSlot = (id: string, field: keyof DoctorScheduleSlot, value: string) => {
+    setConflicts([]);
+    setError(null);
     setTempSchedules(tempSchedules.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
   };
 
@@ -211,7 +214,7 @@ export function DoctorSchedule() {
     );
   }
 
-  if (error) {
+  if (error && !isEditing) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load doctor schedules" description={error}>
@@ -248,7 +251,11 @@ export function DoctorSchedule() {
           </label>
           <select
             value={selectedDoctorId}
-            onChange={(e) => setSelectedDoctorId(e.target.value)}
+            onChange={(e) => {
+              setSelectedDoctorId(e.target.value);
+              setConflicts([]);
+              setError(null);
+            }}
             className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
           >
             <option value="all">All doctors</option>
@@ -312,6 +319,11 @@ export function DoctorSchedule() {
         </div>
       ) : (
         <div className="space-y-4">
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+              {error}
+            </p>
+          )}
           {conflicts.length > 0 && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4">
               <h4 className="mb-2 text-sm font-bold text-red-800">⚠ Conflicts detected</h4>

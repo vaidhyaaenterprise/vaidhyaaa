@@ -13,7 +13,12 @@ async function main() {
     'postgresql://postgres:postgres@localhost:5433/vaidya_test';
 
   const dryRun = process.argv.includes('--dry-run');
-  const sql = postgres(databaseUrl, { max: 3 });
+  const sql = postgres(databaseUrl, {
+    max: 1,
+    prepare: false,
+    idle_timeout: 20,
+    connect_timeout: 10,
+  });
 
   try {
     const rows = await sql`

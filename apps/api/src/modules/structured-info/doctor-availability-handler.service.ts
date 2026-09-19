@@ -1,6 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { createRepositories, type ConversationSessionRow, type Repositories } from '@vaidya/db';
+import {
+  createRepositories,
+  toStoredDayOfWeek,
+  type ConversationSessionRow,
+  type Repositories,
+} from '@vaidya/db';
 import type { IntentClassifierResult, MessageTemplateKey } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';
@@ -107,7 +112,9 @@ export class DoctorAvailabilityHandler {
       doctor.id,
       mapping.doctorServiceId,
     );
-    const hasScheduleOnDate = schedules.some((row) => row.dayOfWeek === target.dayOfWeek);
+    const hasScheduleOnDate = schedules.some(
+      (row) => row.dayOfWeek === toStoredDayOfWeek(target.dayOfWeek),
+    );
     if (!hasScheduleOnDate) {
       return this.wrapResult({
         session,

@@ -9,6 +9,7 @@ import {
 } from '@vaidya/db';
 
 import { API_ENV } from '../../config/api-config.module';
+import { DatabaseLifecycleService } from './database-lifecycle.service';
 
 export const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
 
@@ -19,6 +20,11 @@ export const DATABASE_CONNECTION = Symbol('DATABASE_CONNECTION');
       provide: DATABASE_CONNECTION,
       useFactory: (env: ApiEnv): DatabaseConnection => createDatabaseConnection(env.DATABASE_URL),
       inject: [API_ENV],
+    },
+    {
+      provide: DatabaseLifecycleService,
+      useFactory: (connection: DatabaseConnection) => new DatabaseLifecycleService(connection),
+      inject: [DATABASE_CONNECTION],
     },
     {
       provide: DatabaseService,

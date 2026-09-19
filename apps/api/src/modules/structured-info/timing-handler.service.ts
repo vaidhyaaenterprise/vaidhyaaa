@@ -1,6 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { createRepositories, type ConversationSessionRow, type Repositories } from '@vaidya/db';
+import {
+  createRepositories,
+  toStoredDayOfWeek,
+  type ConversationSessionRow,
+  type Repositories,
+} from '@vaidya/db';
 import type { IntentClassifierResult, MessageTemplateKey } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';
@@ -62,7 +67,7 @@ export class TimingHandler {
     } else {
       const dayOfWeek = scope.kind === 'today' ? resolveTodayDayOfWeek(timezone) : scope.dayOfWeek;
       const dayName = scope.kind === 'today' ? 'Today' : scope.dayName;
-      const dayHours = hours.filter((row) => row.dayOfWeek === dayOfWeek);
+      const dayHours = hours.filter((row) => row.dayOfWeek === toStoredDayOfWeek(dayOfWeek));
 
       if (dayHours.length === 0) {
         templateKey = 'timing.day_closed';

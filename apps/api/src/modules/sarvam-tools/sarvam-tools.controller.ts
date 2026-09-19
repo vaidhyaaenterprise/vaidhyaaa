@@ -7,6 +7,7 @@ import {
   dayOfWeekMon1,
   formatDateInTimezone,
   ACTIVE_APPOINTMENT_STATUSES,
+  toStoredDayOfWeek,
   type Repositories,
 } from '@vaidya/db';
 import {
@@ -343,7 +344,7 @@ export class SarvamToolsController {
           ? resolveTodayDayOfWeek(timezone)
           : null;
       if (!dayOfWeek) return { topic, found: false, error: 'day_not_understood', day };
-      const dayHours = hours.filter((row) => row.dayOfWeek === dayOfWeek);
+      const dayHours = hours.filter((row) => row.dayOfWeek === toStoredDayOfWeek(dayOfWeek));
       const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       return {
         topic,
@@ -380,7 +381,10 @@ export class SarvamToolsController {
       const dayOfWeek = dayOfWeekMon1(targetDate, timezone);
       const schedules = await this.repos.clinicalSetup.listDoctorSchedules(clinicId, doctor.id);
       const applicable = schedules.filter(
-        (row) => row.active && row.dayOfWeek === dayOfWeek && isScheduleEffective(row, targetDate),
+        (row) =>
+          row.active &&
+          row.dayOfWeek === toStoredDayOfWeek(dayOfWeek) &&
+          isScheduleEffective(row, targetDate),
       );
       const timings = dedupeTimeRanges(
         applicable.map((row) => `${row.startTime.slice(0, 5)}-${row.endTime.slice(0, 5)}`),

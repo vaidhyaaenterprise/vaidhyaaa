@@ -97,6 +97,11 @@ export function dayOfWeekMon1(dateStr: string, timezone: string): number {
   return map[weekday] ?? 1;
 }
 
+/** Convert Mon=1..Sun=7 into the persisted/API convention Sun=0..Sat=6. */
+export function toStoredDayOfWeek(dayOfWeekMon1Value: number): number {
+  return dayOfWeekMon1Value % 7;
+}
+
 export function combineDateAndTime(dateStr: string, timeStr: string, timezone: string): Date {
   const normalizedTime = normalizeTimeString(timeStr);
   if (timezone === 'Asia/Kolkata') {

@@ -157,8 +157,10 @@ export {
 
 export {
   conflictPreviewResponseSchema,
+  scheduleConflictAppointmentSchema,
   scheduleConflictItemSchema,
   type ConflictPreviewResponse,
+  type ScheduleConflictAppointment,
   type ScheduleConflictItem,
 } from './conflicts';
 

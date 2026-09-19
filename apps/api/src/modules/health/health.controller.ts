@@ -1,4 +1,5 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject, Res } from '@nestjs/common';
+import { FastifyReply } from 'fastify';
 
 import { Public } from '../../common/decorators/public.decorator';
 
@@ -19,7 +20,14 @@ export class HealthController {
 
   @Public()
   @Get('infra')
-  async getInfraHealth() {
-    return this.healthService.getInfraStatus();
+  async getInfraHealth(@Res({ passthrough: true }) response: FastifyReply) {
+    const status = await this.healthService.getInfraStatus();
+    const healthy = status.database === 'ok' && status.redis_connected !== false;
+
+    if (!healthy) {
+      response.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    return status;
   }
 }

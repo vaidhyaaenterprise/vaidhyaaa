@@ -10,6 +10,7 @@ import {
 
 describe('api client', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     window.localStorage.clear();
@@ -54,6 +55,7 @@ describe('api client', () => {
       'x-dev-user-role': 'clinic_admin',
       'x-dev-clinic-id': DEV_AUTH_PRESETS.clinic_admin.profile.clinicId,
     });
+    expect(options.cache).toBe('no-store');
     expect(options.credentials).toBe('include');
   });
 
@@ -87,6 +89,33 @@ describe('api client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries a timed-out read once before reporting failure', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => toApiSuccessBody({ ok: true }, 'req_timeout_retry'),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = apiGet<{ ok: boolean }>('/v1/timeout-retry');
+    await vi.advanceTimersByTimeAsync(20_150);
+
+    await expect(request).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('deduplicates identical GET requests that are already in flight', async () => {
     let releaseResponse: (() => void) | undefined;
     const responseReady = new Promise<void>((resolve) => {
@@ -110,12 +139,90 @@ describe('api client', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('does not let an older read discard a newer post-mutation in-flight read', async () => {
+    let releaseFirstRead: (() => void) | undefined;
+    let releaseSecondRead: (() => void) | undefined;
+    const firstReadReady = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve;
+    });
+    const secondReadReady = new Promise<void>((resolve) => {
+      releaseSecondRead = resolve;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await firstReadReady;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => toApiSuccessBody({ version: 'old' }, 'req_old_read'),
+        };
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => toApiSuccessBody({ saved: true }, 'req_mutation'),
+      })
+      .mockImplementationOnce(async () => {
+        await secondReadReady;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => toApiSuccessBody({ version: 'new' }, 'req_new_read'),
+        };
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const oldRead = apiGet<{ version: string }>('/v1/resource');
+    await apiPost('/v1/resource', { value: true });
+    const newRead = apiGet<{ version: string }>('/v1/resource');
+
+    releaseFirstRead?.();
+    await expect(oldRead).resolves.toEqual({ version: 'old' });
+    const deduplicatedRead = apiGet<{ version: string }>('/v1/resource');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    releaseSecondRead?.();
+    await expect(Promise.all([newRead, deduplicatedRead])).resolves.toEqual([
+      { version: 'new' },
+      { version: 'new' },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('does not retry a failed mutation that might already have been applied', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('network failure'));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(apiPost('/v1/save', { value: true })).rejects.toBeInstanceOf(ApiRequestError);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('retries an explicitly repeatable mutation after a transient service failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: new Headers({ 'retry-after': '0' }),
+        json: async () => null,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => toApiSuccessBody({ access_token: 'token' }, 'req_login_retry'),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      apiPost<{ access_token: string }>(
+        '/v1/auth/login',
+        { username: 'admin', password: 'secret' },
+        { retryTransient: true },
+      ),
+    ).resolves.toEqual({ access_token: 'token' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('throws ApiRequestError with standard API error message', async () => {
@@ -140,6 +247,60 @@ describe('api client', () => {
       apiError: {
         code: 'UNAUTHORIZED',
         message: 'Authentication is required.',
+      },
+    });
+  });
+
+  it('does not expose a structured server error message or details', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      json: async () =>
+        apiErrorBodySchema.parse({
+          error: {
+            code: 'INTERNAL_ERROR',
+            message:
+              '(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15',
+            details: { database_host: 'private-database-host' },
+            request_id: 'req_database_pool',
+          },
+        }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiPost('/v1/auth/login', {})).rejects.toMatchObject({
+      apiError: {
+        code: 'INTERNAL_ERROR',
+        message: 'The service is temporarily unavailable. Please try again shortly.',
+        requestId: 'req_database_pool',
+        details: {},
+      },
+    });
+  });
+
+  it('sanitizes malformed server errors while retaining available diagnostics', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: '(EMAXCONNSESSION) max clients reached',
+      headers: new Headers({ 'x-request-id': 'req_response_header' }),
+      json: async () => ({
+        error: {
+          code: 'DATABASE_CONNECTION_EXHAUSTED',
+          message: '(EMAXCONNSESSION) max clients reached',
+          details: 'invalid-details-shape',
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiPost('/v1/auth/login', {})).rejects.toMatchObject({
+      apiError: {
+        code: 'DATABASE_CONNECTION_EXHAUSTED',
+        message: 'The service is temporarily unavailable. Please try again shortly.',
+        requestId: 'req_response_header',
+        details: {},
       },
     });
   });

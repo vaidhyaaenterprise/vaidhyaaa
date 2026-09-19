@@ -63,7 +63,8 @@ async function main(): Promise<void> {
   process.env.CONVERSATION_AGENT_MODE = process.env.CONVERSATION_AGENT_MODE ?? 'agent';
   process.env.RECEPTIONIST_AGENT_PROVIDER = process.env.RECEPTIONIST_AGENT_PROVIDER ?? 'sarvam';
   process.env.PRIMARY_LLM_PROVIDER = process.env.PRIMARY_LLM_PROVIDER ?? 'mock';
-  process.env.STATE_ENTITY_EXTRACTOR_PROVIDER = process.env.STATE_ENTITY_EXTRACTOR_PROVIDER ?? 'mock';
+  process.env.STATE_ENTITY_EXTRACTOR_PROVIDER =
+    process.env.STATE_ENTITY_EXTRACTOR_PROVIDER ?? 'mock';
   process.env.SERVICE_ROUTER_PROVIDER = process.env.SERVICE_ROUTER_PROVIDER ?? 'mock';
   process.env.QUEUE_MODE = process.env.QUEUE_MODE ?? 'inline';
   delete process.env.REDIS_URL;
@@ -100,7 +101,12 @@ async function main(): Promise<void> {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
 
-  const sql = postgres(env.DATABASE_URL, { max: 3 });
+  const sql = postgres(env.DATABASE_URL, {
+    max: 1,
+    prepare: false,
+    idle_timeout: 20,
+    connect_timeout: 10,
+  });
   const slotGeneration = app.get(SlotGenerationService);
 
   await sql`

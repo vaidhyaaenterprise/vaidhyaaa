@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasCapacityToConvertHold } from '../src/services/slot-capacity';
+import {
+  dayOfWeekMon1,
+  hasCapacityToConvertHold,
+  toStoredDayOfWeek,
+} from '../src/services/slot-capacity';
 
 describe('hasCapacityToConvertHold', () => {
   it('allows conversion when the hold still has a reserved seat', () => {
@@ -31,5 +35,16 @@ describe('hasCapacityToConvertHold', () => {
         otherActiveHolds: 1,
       }),
     ).toBe(false);
+  });
+});
+
+describe('schedule day-of-week conventions', () => {
+  it('keeps Mon1 date semantics while converting Sunday for persisted schedules', () => {
+    const sundayMon1 = dayOfWeekMon1('2026-06-21', 'Asia/Kolkata');
+
+    expect(sundayMon1).toBe(7);
+    expect(toStoredDayOfWeek(sundayMon1)).toBe(0);
+    expect(toStoredDayOfWeek(1)).toBe(1);
+    expect(toStoredDayOfWeek(6)).toBe(6);
   });
 });

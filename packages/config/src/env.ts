@@ -60,6 +60,24 @@ export function assertSupabaseDatabaseUrl(databaseUrl: string): void {
   }
 }
 
+/**
+ * Vercel functions must use Supabase's transaction pooler. A session-pooler
+ * connection pins a database session to every warm function connection and can
+ * exhaust a small Supavisor pool after only a couple of instances are started.
+ */
+export function assertSupabaseTransactionPoolerUrl(databaseUrl: string): void {
+  assertSupabaseDatabaseUrl(databaseUrl);
+
+  const parsedUrl = new URL(databaseUrl);
+  const hostname = parsedUrl.hostname.toLowerCase();
+
+  if (!hostname.endsWith('.pooler.supabase.com') || parsedUrl.port !== '6543') {
+    throw new Error(
+      'DATABASE_URL must use the Supabase transaction pooler URL on port 6543 for Vercel deployments.',
+    );
+  }
+}
+
 export const apiEnvSchema = z
   .object({
     NODE_ENV: nodeEnvSchema.default('development'),
@@ -167,6 +185,7 @@ export const apiEnvSchema = z
     EMBEDDING_PROVIDER: z.enum(['mock', 'sarvam', 'gemini', 'openai', 'nvidia']).default('mock'),
     EMBEDDING_MODEL: z.string().default('mock-embedding-v1'),
     EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(1024),
+    EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     KNOWLEDGE_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.7),
     KNOWLEDGE_VECTOR_MAX_RESULTS: z.coerce.number().int().positive().default(5),
     KNOWLEDGE_VECTOR_USE_HYBRID_FALLBACK: z.preprocess(
@@ -180,6 +199,7 @@ export const apiEnvSchema = z
     CORS_ORIGINS: z.string().default('http://localhost:3001'),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
+    EMAIL_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(465),
     SMTP_USER: z.string().optional(),
@@ -194,6 +214,18 @@ export const apiEnvSchema = z
           message,
         });
       }
+    }
+
+    if (
+      env.APP_ENV !== 'local' &&
+      (env.JWT_SECRET.length < 32 || /dev[_-]?only|change[_-]?me/i.test(env.JWT_SECRET))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message:
+          'JWT_SECRET must be a random secret of at least 32 characters outside the local environment.',
+      });
     }
 
     if (env.QUEUE_MODE === 'bullmq' && !env.REDIS_URL) {

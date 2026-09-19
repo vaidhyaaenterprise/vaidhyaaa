@@ -75,14 +75,22 @@ export function formatClinicHoursText(
     byDay.set(row.dayOfWeek, existing);
   }
 
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const dayNames: Record<number, string> = {
+    0: 'Sun',
+    1: 'Mon',
+    2: 'Tue',
+    3: 'Wed',
+    4: 'Thu',
+    5: 'Fri',
+    6: 'Sat',
+  };
   const parts: string[] = [];
-  for (let day = 1; day <= 7; day += 1) {
+  for (const day of [1, 2, 3, 4, 5, 6, 0]) {
     const ranges = byDay.get(day);
     if (!ranges || ranges.length === 0) {
       continue;
     }
-    parts.push(`${dayNames[day - 1]} ${dedupeTimeRanges(ranges).join(', ')}`);
+    parts.push(`${dayNames[day]} ${dedupeTimeRanges(ranges).join(', ')}`);
   }
   return parts.join('; ');
 }
