@@ -122,6 +122,7 @@ export function HomePageContent() {
   const activeClinicIdRef = useRef(clinicId);
 
   // Call inbox / emergency stats require backend endpoints not yet implemented (P04/P08).
+  const todayCalls = 0;
   const callbacks = 0;
   const emergencyAlerts = 0;
 
@@ -333,27 +334,24 @@ export function HomePageContent() {
             </section>
 
             <section
-              aria-labelledby="missed-actions-heading"
+              aria-labelledby="today-summary-heading"
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
             >
-              <h3 id="missed-actions-heading" className="mb-1 text-lg font-bold text-slate-900">
-                Missed actions
+              <h3 id="today-summary-heading" className="mb-1 text-lg font-bold text-slate-900">
+                Today&apos;s summary
               </h3>
-              <p className="mb-4 text-xs text-slate-500">Unresolved requests from previous days</p>
+              <p className="mb-4 text-xs text-slate-500">Current clinic-day activity</p>
               <div className="space-y-3">
-                {visibleMissedPending.map((appointment) => (
-                  <AppointmentActionCard
-                    key={appointment.id}
-                    appointment={appointment}
-                    missed
-                    isUpdating={updatingAppointmentIds.has(appointment.id)}
-                    onConfirm={handleConfirm}
-                    onCancel={handleCancel}
-                  />
-                ))}
-                {visibleMissedPending.length === 0 ? (
-                  <p className="text-sm text-slate-500">No missed actions</p>
-                ) : null}
+                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <span className="text-sm font-semibold text-slate-700">Total calls</span>
+                  <span className="text-lg font-bold text-slate-900">{todayCalls}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <span className="text-sm font-semibold text-slate-700">
+                    Pending confirmations
+                  </span>
+                  <span className="text-lg font-bold text-amber-600">{pendingConfirmations}</span>
+                </div>
               </div>
             </section>
 
@@ -391,37 +389,35 @@ export function HomePageContent() {
               </div>
             </section>
           </div>
+
+          <section
+            aria-labelledby="missed-actions-heading"
+            className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <h3 id="missed-actions-heading" className="mb-1 text-lg font-bold text-slate-900">
+              Missed actions
+            </h3>
+            <p className="mb-4 text-xs text-slate-500">Unresolved requests from previous days</p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {visibleMissedPending.map((appointment) => (
+                <AppointmentActionCard
+                  key={appointment.id}
+                  appointment={appointment}
+                  missed
+                  isUpdating={updatingAppointmentIds.has(appointment.id)}
+                  onConfirm={handleConfirm}
+                  onCancel={handleCancel}
+                />
+              ))}
+              {visibleMissedPending.length === 0 ? (
+                <p className="text-sm text-slate-500 md:col-span-2 xl:col-span-3">
+                  No missed actions
+                </p>
+              ) : null}
+            </div>
+          </section>
         </>
       )}
-
-      <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-lg font-bold text-slate-900">Session</h3>
-        <dl className="grid gap-3 text-sm sm:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
-              Signed in as
-            </dt>
-            <dd className="mt-1 font-semibold text-slate-900">{me?.user.name ?? '—'}</dd>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
-              Effective role
-            </dt>
-            <dd className="mt-1 font-semibold text-slate-900">{effectiveRole}</dd>
-          </div>
-          {clinicRole ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                Clinic membership
-              </dt>
-              <dd className="mt-1 font-semibold text-slate-900">
-                {clinicRole.role}
-                {clinicRole.doctor_id ? ` · doctor ${clinicRole.doctor_id.slice(0, 8)}…` : ''}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-      </div>
     </>
   );
 }

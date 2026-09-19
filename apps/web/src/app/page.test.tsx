@@ -125,8 +125,10 @@ describe('HomePage dashboard', () => {
 
     expect(screen.getByRole('heading', { name: /^home$/i })).toBeInTheDocument();
     expect(screen.getByLabelText('AI Voice Agent status')).toBeInTheDocument();
-    expect(screen.getByText('Clinic Admin')).toBeInTheDocument();
+    expect(await screen.findByText('Vaidya dashboard for Clinic Admin')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Missed actions' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: "Today's summary" })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
   });
 
   it('shows only clinic-today data in current cards and moves older pending requests to missed actions', async () => {
@@ -145,6 +147,7 @@ describe('HomePage dashboard', () => {
     render(<HomePageContent />);
 
     const needsAction = await screen.findByRole('region', { name: 'Needs your action' });
+    const todaySummary = screen.getByRole('region', { name: "Today's summary" });
     const missedActions = screen.getByRole('region', { name: 'Missed actions' });
     const nextAppointments = screen.getByRole('region', { name: 'Next appointments' });
 
@@ -169,7 +172,17 @@ describe('HomePage dashboard', () => {
     expect(within(nextAppointments).queryByText('Past Confirmed')).not.toBeInTheDocument();
     expect(screen.queryByText('Future Pending')).not.toBeInTheDocument();
     expect(screen.queryByText('Today Cancelled')).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: "Today's summary" })).not.toBeInTheDocument();
+    expect(within(todaySummary).getByText('Total calls')).toBeInTheDocument();
+    expect(within(todaySummary).getByText('0')).toBeInTheDocument();
+    expect(within(todaySummary).getByText('Pending confirmations')).toBeInTheDocument();
+    expect(within(todaySummary).getByText('1')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
+
+    const topCardGrid = needsAction.parentElement;
+    expect(topCardGrid?.children[0]).toBe(needsAction);
+    expect(topCardGrid?.children[1]).toBe(todaySummary);
+    expect(topCardGrid?.children[2]).toBe(nextAppointments);
+    expect(missedActions.parentElement).not.toBe(topCardGrid);
 
     expect(mockedFetchAppointments).toHaveBeenCalledWith(CLINIC_ID, [
       'pending_confirmation',
