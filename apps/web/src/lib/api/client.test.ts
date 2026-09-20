@@ -59,6 +59,31 @@ describe('api client', () => {
     expect(options.credentials).toBe('include');
   });
 
+  it('does not invent a seed clinic header when the saved profile has no clinic', async () => {
+    window.localStorage.setItem(
+      DEV_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        userId: '00000000-0000-0000-0000-000000000101',
+        role: 'platform_admin',
+      }),
+    );
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => toApiSuccessBody({ ok: true }, 'req_no_clinic'),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiGet('/v1/no-clinic-header');
+
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls[0]?.[1].headers).toMatchObject({
+      'x-dev-user-id': '00000000-0000-0000-0000-000000000101',
+      'x-dev-user-role': 'platform_admin',
+    });
+    expect(calls[0]?.[1].headers).not.toHaveProperty('x-dev-clinic-id');
+  });
+
   it('adds the saved bearer token to production-compatible requests', async () => {
     window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'access-token');
     const fetchMock = vi.fn(async () => ({

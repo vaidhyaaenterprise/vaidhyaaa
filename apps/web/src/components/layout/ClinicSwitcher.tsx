@@ -1,46 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 
-import { useAuth } from '@/components/auth/AuthProvider';
-import { DEV_SEED } from '@/lib/dev-auth/constants';
-import { ApiRequestError } from '@/lib/api/client';
-import { fetchClinicProfile, type ClinicProfile } from '@/lib/api/clinic-settings';
-
-type ClinicSwitcherProps = {
-  clinicName?: string | null;
-};
-
-export function ClinicSwitcher({ clinicName }: ClinicSwitcherProps) {
-  const { clinicRole } = useAuth();
-  const [profile, setProfile] = useState<ClinicProfile | null>(null);
-  const [failed, setFailed] = useState(false);
-  const clinicId = clinicRole?.clinic_id ?? null;
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!clinicId) {
-      return;
-    }
-    setProfile(null);
-    setFailed(false);
-    fetchClinicProfile(clinicId)
-      .then((result) => {
-        if (!cancelled) {
-          setProfile(result);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled && err instanceof ApiRequestError) {
-          setFailed(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [clinicId]);
-
-  const label = profile?.name ?? clinicName ?? DEV_SEED.CLINIC_NAME;
+export function ClinicSwitcher() {
+  const { profile, status, refresh } = useClinicProfile();
+  const label = profile?.name ?? (status === 'error' ? 'Clinic details unavailable' : 'Loading clinic…');
   const address = [
     profile?.address_line1,
     profile?.address_line2,
@@ -51,7 +15,12 @@ export function ClinicSwitcher({ clinicName }: ClinicSwitcherProps) {
     .filter((part): part is string => Boolean(part))
     .join(', ');
   const addressDetail =
-    address || (profile ? 'Address not set yet' : 'Loading clinic details…');
+    address ||
+    (profile
+      ? 'Address not set yet'
+      : status === 'error'
+        ? 'Clinic profile could not be loaded.'
+        : 'Loading clinic details…');
   const detailLines = [
     addressDetail,
     profile ? `Clinic line: ${profile.primary_phone ?? '—'}` : null,
@@ -74,8 +43,17 @@ export function ClinicSwitcher({ clinicName }: ClinicSwitcherProps) {
           </span>
         ))}
       </p>
-      {failed ? (
-        <p className="mt-1 text-[11px] text-amber-300/80">Could not load clinic details.</p>
+      {status === 'error' ? (
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-amber-300/80">Could not load clinic details.</p>
+          <button
+            type="button"
+            onClick={refresh}
+            className="text-[11px] font-bold text-teal-300 hover:text-teal-200"
+          >
+            Retry
+          </button>
+        </div>
       ) : null}
     </div>
   );

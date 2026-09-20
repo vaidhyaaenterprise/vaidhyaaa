@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { clearDevAuthProfile } from '@/lib/dev-auth/storage';
 
 type DoctorNavContextValue = {
@@ -23,10 +24,16 @@ export function useDoctorNav() {
 export function DoctorLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { me, refresh } = useAuth();
+  const { profile: clinicProfile, status: clinicProfileStatus } = useClinicProfile();
   const [activeSection, setActiveSection] = useState<'today' | 'analytics' | 'history'>('today');
   const [patientCount, setPatientCount] = useState(8);
 
-  const doctorName = me?.user.name ?? 'Dr. Priya';
+  const doctorName = me?.user.name ?? 'Doctor';
+  const clinicLocation = clinicProfile
+    ? [clinicProfile.name, clinicProfile.city].filter(Boolean).join(' · ')
+    : clinicProfileStatus === 'error'
+      ? 'Clinic details unavailable'
+      : 'Loading clinic…';
 
   async function handleLogout() {
     clearDevAuthProfile();
@@ -61,7 +68,7 @@ export function DoctorLayout({ children }: { children: ReactNode }) {
                 <p className="text-xs text-slate-400">Orthopaedic Surgeon</p>
               </div>
             </div>
-            <p className="text-xs leading-relaxed text-slate-400">Sri Murugan Clinic · Anna Nagar</p>
+            <p className="text-xs leading-relaxed text-slate-400">{clinicLocation}</p>
           </div>
 
           {/* Nav */}

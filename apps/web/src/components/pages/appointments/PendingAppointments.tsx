@@ -6,6 +6,7 @@ import type { Appointment, BookingRules } from './types';
 
 interface PendingAppointmentsProps {
   appointments: Appointment[];
+  emptyMessage?: string;
   bookingRules: BookingRules;
   onConfirm: (id: string) => void;
   onEditTime: (id: string, newTime: string) => void;
@@ -15,6 +16,7 @@ interface PendingAppointmentsProps {
 
 export function PendingAppointments({
   appointments,
+  emptyMessage = 'No pending appointments',
   bookingRules,
   onConfirm,
   onEditTime,
@@ -46,7 +48,7 @@ export function PendingAppointments({
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Pending confirmation</h3>
-        <p className="text-sm text-slate-500">No pending appointments</p>
+        <p className="text-sm text-slate-500">{emptyMessage}</p>
       </div>
     );
   }

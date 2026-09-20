@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { PendingAppointments } from '@/components/pages/appointments/PendingAppointments';
 import { ConfirmedAppointments } from '@/components/pages/appointments/ConfirmedAppointments';
@@ -24,8 +25,10 @@ import {
   resolveAppointmentActionRequest,
 } from '@/lib/api/appointments';
 import { ApiRequestError } from '@/lib/api/client';
+import { filterCurrentAndFuturePendingAppointments } from '@/lib/appointment-filters';
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
+import { getClinicDate } from '@/lib/home-dashboard';
 import type {
   Appointment,
   AppointmentActionRequest,
@@ -63,6 +66,7 @@ function toApiDateTime(value: string): string {
 
 export function AppointmentsPageContent() {
   const { effectiveRole } = useAuth();
+  const { profile: clinicProfile, status: clinicProfileStatus } = useClinicProfile();
   const clinicId = useActiveClinicId();
   const isAdmin = effectiveRole === 'admin';
 
@@ -164,9 +168,35 @@ export function AppointmentsPageContent() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [serviceOptions, pendingAppointments, confirmedAppointments, visitedAppointments]);
 
-  const visiblePending = filterByDate(pendingAppointments, selectedDate);
+  const clinicDate = useMemo(() => {
+    if (!clinicProfile?.timezone) {
+      return null;
+    }
+    try {
+      return getClinicDate(new Date(), clinicProfile.timezone);
+    } catch {
+      return null;
+    }
+  }, [clinicProfile?.timezone]);
+
+  const currentAndFuturePending = useMemo(
+    () =>
+      clinicDate
+        ? filterCurrentAndFuturePendingAppointments(pendingAppointments, clinicDate)
+        : [],
+    [clinicDate, pendingAppointments],
+  );
+
+  const visiblePending = filterByDate(currentAndFuturePending, selectedDate);
   const visibleConfirmed = filterByDate(confirmedAppointments, selectedDate);
   const visibleVisited = filterByDate(visitedAppointments, selectedDate);
+
+  const pendingEmptyMessage =
+    clinicProfileStatus === 'error' || (clinicProfileStatus === 'ready' && !clinicDate)
+      ? 'Unable to determine the clinic date. Retry loading the clinic profile.'
+      : clinicProfileStatus !== 'ready'
+        ? 'Loading current and upcoming confirmations…'
+        : 'No current or upcoming pending appointments';
 
   const handleConfirm = async (id: string) => {
     if (!clinicId) {
@@ -340,6 +370,7 @@ export function AppointmentsPageContent() {
       <div className="grid gap-4 lg:grid-cols-2">
         <PendingAppointments
           appointments={visiblePending}
+          emptyMessage={pendingEmptyMessage}
           bookingRules={bookingRules}
           onConfirm={(id) => void handleConfirm(id)}
           onEditTime={handleEditTime}

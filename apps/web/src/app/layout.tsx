@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { ClinicProfileProvider } from '@/components/clinic/ClinicProfileProvider';
 
 import './globals.css';
 
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="h-full">
       <body className="h-full font-sans">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <ClinicProfileProvider>{children}</ClinicProfileProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -10,7 +10,6 @@ import {
   readAccessToken,
   readDevAuthProfile,
 } from '../dev-auth/storage';
-import { DEV_SEED } from '../dev-auth/constants';
 
 import type { ApiClientError } from './types';
 
@@ -29,9 +28,6 @@ function buildAuthHeaders(): Record<string, string> {
     return headers;
   }
   Object.assign(headers, devAuthHeadersFromProfile(profile));
-  if (!headers['x-dev-clinic-id']) {
-    headers['x-dev-clinic-id'] = DEV_SEED.CLINIC_ID;
-  }
   return headers;
 }
 
