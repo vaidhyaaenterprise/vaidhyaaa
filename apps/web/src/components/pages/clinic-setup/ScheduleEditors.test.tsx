@@ -181,7 +181,7 @@ describe('ClinicHours', () => {
     });
   });
 
-  it('clears a stale API conflict after the hours are edited so save can be retried', async () => {
+  it('keeps conflict details visible and can recheck the same hours after resolution', async () => {
     mockedReplaceClinicHours.mockRejectedValueOnce(conflictError('outside_clinic_hours'));
 
     render(<ClinicHours />);
@@ -193,21 +193,22 @@ describe('ClinicHours', () => {
       await screen.findByText(/Asha Patient.*falls outside the new clinic hours/),
     ).toBeInTheDocument();
     expect(screen.queryByText(new RegExp(APPOINTMENT_ID))).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    const retryButton = screen.getByRole('button', { name: 'Recheck and save' });
+    expect(retryButton).toBeEnabled();
+    fireEvent.click(retryButton);
 
-    fireEvent.change(dayEditor('Monday').getByDisplayValue('09:00'), {
-      target: { value: '08:30' },
+    await waitFor(() => {
+      expect(mockedReplaceClinicHours).toHaveBeenCalledTimes(2);
+      expect(
+        screen.queryByText(/Asha Patient.*falls outside the new clinic hours/),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     });
-
-    expect(
-      screen.queryByText(/Asha Patient.*falls outside the new clinic hours/),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 });
 
 describe('DoctorSchedule', () => {
-  it('shows doctor-hours conflict details inline, stays editing, and clears them after an edit', async () => {
+  it('shows doctor-hours conflict details and can recheck the unchanged schedule', async () => {
     mockedReplaceDoctorSchedules.mockRejectedValueOnce(conflictError('outside_doctor_hours'));
 
     render(<DoctorSchedule />);
@@ -220,15 +221,16 @@ describe('DoctorSchedule', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    const retryButton = screen.getByRole('button', { name: 'Recheck and save' });
+    expect(retryButton).toBeEnabled();
+    fireEvent.click(retryButton);
 
-    fireEvent.change(dayEditor('Monday').getByDisplayValue('09:00'), {
-      target: { value: '08:30' },
+    await waitFor(() => {
+      expect(mockedReplaceDoctorSchedules).toHaveBeenCalledTimes(2);
+      expect(
+        screen.queryByText(/Asha Patient.*falls outside the doctor's new working hours/),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     });
-
-    expect(
-      screen.queryByText(/Asha Patient.*falls outside the doctor's new working hours/),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 });

@@ -452,19 +452,14 @@ export class ClinicClinicalService {
     doctorId: string,
     clinicServiceId?: string,
   ) {
-    try {
-      const input: { clinicId: string; doctorId: string; clinicServiceId?: string } = {
-        clinicId,
-        doctorId,
-      };
-      if (clinicServiceId) {
-        input.clinicServiceId = clinicServiceId;
-      }
-      await this.slotGeneration.generateSlots(input);
-    } catch {
-      // Best-effort: slot generation must not break the main setup flow.
-      // The daily cron will retry generation on the next run.
+    const generationInput: { clinicId: string; doctorId: string; clinicServiceId?: string } = {
+      clinicId,
+      doctorId,
+    };
+    if (clinicServiceId) {
+      generationInput.clinicServiceId = clinicServiceId;
     }
+    await this.slotGeneration.generateSlots(generationInput);
   }
 
   async patchDoctorServiceMapping(
@@ -761,6 +756,7 @@ export class ClinicClinicalService {
         active: window.active ?? true,
       })),
     );
+    await this.slotGeneration.generateSlots({ clinicId });
     return rows.map(mapClinicHoursRow);
   }
 

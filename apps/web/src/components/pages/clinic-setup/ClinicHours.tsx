@@ -230,7 +230,9 @@ export function ClinicHours() {
                   <li key={idx}>• {conflict}</li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-red-600">Please resolve conflicts before saving.</p>
+              <p className="mt-2 text-xs text-red-600">
+                Resolve or reschedule the listed appointments, then recheck and save these hours.
+              </p>
             </div>
           )}
 
@@ -286,10 +288,16 @@ export function ClinicHours() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleSave()}
-              disabled={conflicts.length > 0 || saving}
+              disabled={saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving
+                ? conflicts.length > 0
+                  ? 'Rechecking…'
+                  : 'Saving…'
+                : conflicts.length > 0
+                  ? 'Recheck and save'
+                  : 'Save'}
             </button>
             <button
               onClick={handleCancel}

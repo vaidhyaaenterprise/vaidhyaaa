@@ -236,8 +236,10 @@ export class SlotsRepository {
   ) {
     return this.db
       .select({
+        id: appointmentSlots.id,
         startTime: appointmentSlots.startTime,
         endTime: appointmentSlots.endTime,
+        status: appointmentSlots.status,
       })
       .from(appointmentSlots)
       .where(
@@ -250,6 +252,28 @@ export class SlotsRepository {
           ne(appointmentSlots.status, 'superseded'),
         ),
       );
+  }
+
+  supersedeFutureOpenSlotsByIds(clinicId: string, slotIds: string[]) {
+    if (slotIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    // Schedule conflict validation protects active appointments before this runs.
+    // Retiring the slot only prevents new bookings; appointment rows keep their
+    // slot reference, and any in-flight hold is rejected when it tries to convert.
+    return this.db
+      .update(appointmentSlots)
+      .set({ status: 'superseded', updatedAt: new Date() })
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          inArray(appointmentSlots.id, slotIds),
+          eq(appointmentSlots.status, 'open'),
+          gt(appointmentSlots.startTime, clinicLocalNow(clinicId)),
+        ),
+      )
+      .returning();
   }
 
   insertSlot(values: typeof appointmentSlots.$inferInsert) {
