@@ -212,6 +212,7 @@ export class AppointmentsService {
       input.clinicId,
       input.doctorId,
       input.clinicServiceId,
+      input.date,
     );
 
     let rows = mapSlotsForDate(slots);
@@ -221,23 +222,28 @@ export class AppointmentsService {
       const clinicToday = formatDateInTimezone(new Date(), timezoneRow?.timezone ?? 'Asia/Kolkata');
 
       if (input.date >= clinicToday) {
-        const openFutureSlots = await this.repos.slots.listAvailableOpenSlots(
+        const existingSlotsForDate = await this.repos.slots.listAvailableOpenSlots(
           input.clinicId,
           input.doctorId,
           input.clinicServiceId,
+          input.date,
         );
 
-        if (openFutureSlots.length === 0) {
+        // A full day has slot rows but no remaining capacity. Regeneration cannot
+        // create capacity and is intentionally limited to genuinely missing dates.
+        if (existingSlotsForDate.length === 0) {
           try {
             await this.slotGenerationService.generateSlots({
               clinicId: input.clinicId,
               doctorId: input.doctorId,
               clinicServiceId: input.clinicServiceId,
+              date: input.date,
             });
             slots = await this.slotService.listProposableSlots(
               input.clinicId,
               input.doctorId,
               input.clinicServiceId,
+              input.date,
             );
             rows = mapSlotsForDate(slots);
           } catch {

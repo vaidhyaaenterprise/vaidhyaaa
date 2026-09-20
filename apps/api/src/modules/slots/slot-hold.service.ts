@@ -302,6 +302,13 @@ export class SlotHoldService {
     routingSource?: string | null;
   }) {
     return this.dbService.withSlotForUpdate(input.clinicId, input.slotId, async (slot, tx) => {
+      if (slot.status !== 'open') {
+        throw new AppError('SLOT_NOT_AVAILABLE', 'Slot is no longer open for booking.', {
+          clinic_id: input.clinicId,
+          slot_id: input.slotId,
+        });
+      }
+
       const [holiday] = await this.repos.slots.isDoctorHolidayForWindow(
         input.clinicId,
         slot.doctorId,

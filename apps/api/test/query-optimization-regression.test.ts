@@ -9,6 +9,144 @@ function installPrivateDependency(target: object, name: string, value: unknown):
 }
 
 describe('query optimization regressions', () => {
+  it('generates slots for an empty requested date even when other future slots exist', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-20T03:00:00.000Z'));
+
+    const requestedDate = '2026-09-20';
+    const sundaySlot = {
+      slot_id: 'slot-sunday-0900',
+      clinic_id: 'clinic-1',
+      doctor_id: 'doctor-1',
+      clinic_service_id: 'service-1',
+      start_time: '2026-09-20 09:00:00',
+      end_time: '2026-09-20 09:30:00',
+      capacity_total: 1,
+      available_count: 1,
+    };
+    const listProposableSlots = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([sundaySlot]);
+    const listAvailableOpenSlots = vi.fn(
+      async (_clinicId: string, _doctorId: string, _serviceId: string, date?: string) =>
+        date
+          ? []
+          : [
+              {
+                id: 'slot-monday-0900',
+                startTime: '2026-09-21 09:00:00',
+              },
+            ],
+    );
+    const generateSlots = vi.fn().mockResolvedValue([]);
+    const service = Object.create(AppointmentsService.prototype) as AppointmentsService;
+    installPrivateDependency(service, 'slotService', { listProposableSlots });
+    installPrivateDependency(service, 'slotGenerationService', { generateSlots });
+    installPrivateDependency(service, 'repos', {
+      slots: {
+        findClinicTimezone: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]),
+        listAvailableOpenSlots,
+      },
+    });
+
+    try {
+      const result = await service.listAvailableSlots({
+        clinicId: 'clinic-1',
+        doctorId: 'doctor-1',
+        clinicServiceId: 'service-1',
+        date: requestedDate,
+      });
+
+      expect(listProposableSlots).toHaveBeenNthCalledWith(
+        1,
+        'clinic-1',
+        'doctor-1',
+        'service-1',
+        requestedDate,
+      );
+      expect(generateSlots).toHaveBeenCalledOnce();
+      expect(generateSlots).toHaveBeenCalledWith({
+        clinicId: 'clinic-1',
+        doctorId: 'doctor-1',
+        clinicServiceId: 'service-1',
+        date: requestedDate,
+      });
+      expect(listProposableSlots).toHaveBeenNthCalledWith(
+        2,
+        'clinic-1',
+        'doctor-1',
+        'service-1',
+        requestedDate,
+      );
+      expect(listAvailableOpenSlots).toHaveBeenCalledOnce();
+      expect(listAvailableOpenSlots).toHaveBeenCalledWith(
+        'clinic-1',
+        'doctor-1',
+        'service-1',
+        requestedDate,
+      );
+      expect(result).toEqual([
+        {
+          slot_id: sundaySlot.slot_id,
+          doctor_id: sundaySlot.doctor_id,
+          clinic_service_id: sundaySlot.clinic_service_id,
+          appointment_start: sundaySlot.start_time,
+          appointment_end: sundaySlot.end_time,
+          available_count: sundaySlot.available_count,
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not regenerate a requested date that already has full slot rows', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-20T03:00:00.000Z'));
+
+    const requestedDate = '2026-09-20';
+    const listProposableSlots = vi.fn().mockResolvedValue([]);
+    const listAvailableOpenSlots = vi.fn().mockResolvedValue([
+      {
+        id: 'slot-sunday-full',
+        startTime: '2026-09-20 09:30:00',
+      },
+    ]);
+    const generateSlots = vi.fn().mockResolvedValue([]);
+    const service = Object.create(AppointmentsService.prototype) as AppointmentsService;
+    installPrivateDependency(service, 'slotService', { listProposableSlots });
+    installPrivateDependency(service, 'slotGenerationService', { generateSlots });
+    installPrivateDependency(service, 'repos', {
+      slots: {
+        findClinicTimezone: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]),
+        listAvailableOpenSlots,
+      },
+    });
+
+    try {
+      await expect(
+        service.listAvailableSlots({
+          clinicId: 'clinic-1',
+          doctorId: 'doctor-1',
+          clinicServiceId: 'service-1',
+          date: requestedDate,
+        }),
+      ).resolves.toEqual([]);
+
+      expect(listAvailableOpenSlots).toHaveBeenCalledWith(
+        'clinic-1',
+        'doctor-1',
+        'service-1',
+        requestedDate,
+      );
+      expect(generateSlots).not.toHaveBeenCalled();
+      expect(listProposableSlots).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('loads action-request appointments in one clinic-scoped bulk query', async () => {
     const appointmentLifecycle = {
       listPendingActionRequests: vi.fn().mockResolvedValue([
@@ -167,6 +305,7 @@ describe('query optimization regressions', () => {
       listDoctorBlockedSlots: vi.fn().mockResolvedValue([]),
       listExistingSlotWindows: vi.fn().mockResolvedValue([]),
       insertSlots: vi.fn(async (values: unknown[]) => values),
+      supersedeFutureOpenSlotsByIds: vi.fn().mockResolvedValue([]),
       completeBatch: vi.fn().mockResolvedValue([]),
     };
     const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;

@@ -23,6 +23,7 @@ export type GenerateSlotsInput = {
   doctorId?: string;
   clinicServiceId?: string;
   horizonDays?: number;
+  date?: string;
 };
 
 @Injectable()
@@ -45,6 +46,15 @@ export class SlotGenerationService {
         continue;
       }
 
+      const targetHorizonDays = input.horizonDays ?? target.rule.bookingHorizonDays;
+      if (input.date) {
+        const targetToday = formatDateInTimezone(new Date(), target.clinicTimezone);
+        const targetEndDate = addDays(targetToday, targetHorizonDays, target.clinicTimezone);
+        if (input.date < targetToday || input.date > targetEndDate) {
+          continue;
+        }
+      }
+
       const summary = await this.generateForTarget(
         target.clinicId,
         target.clinicTimezone,
@@ -53,6 +63,7 @@ export class SlotGenerationService {
         target.clinicServiceId,
         target.rule,
         input.horizonDays,
+        input.date,
       );
       summaries.push(summary);
     }
@@ -74,13 +85,16 @@ export class SlotGenerationService {
       version: number;
     },
     horizonOverride?: number,
+    requestedDate?: string,
   ) {
     const horizonDays = horizonOverride ?? rule.bookingHorizonDays;
     const today = formatDateInTimezone(new Date(), timezone);
     const endDate = addDays(today, horizonDays, timezone);
+    const generationStartDate = requestedDate ?? today;
+    const generationEndDate = requestedDate ?? endDate;
 
-    const rangeStart = `${today} 00:00:00`;
-    const rangeEnd = `${endDate} 23:59:59`;
+    const rangeStart = `${generationStartDate} 00:00:00`;
+    const rangeEnd = `${generationEndDate} 23:59:59`;
     const [[batch], schedules, clinicHours, holidays, blocked, existingSlots] = await Promise.all([
       this.repos.slots.insertBatch({
         clinicId,
@@ -91,12 +105,17 @@ export class SlotGenerationService {
       }),
       this.repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId),
       this.repos.slots.listClinicHours(clinicId),
-      this.repos.slots.listClinicHolidays(clinicId, today, endDate, doctorId),
+      this.repos.slots.listClinicHolidays(
+        clinicId,
+        generationStartDate,
+        generationEndDate,
+        doctorId,
+      ),
       this.repos.slots.listDoctorBlockedSlots(
         clinicId,
         doctorId,
-        combineDateAndTime(today, '00:00:00', timezone),
-        combineDateAndTime(endDate, '23:59:59', timezone),
+        combineDateAndTime(generationStartDate, '00:00:00', timezone),
+        combineDateAndTime(generationEndDate, '23:59:59', timezone),
       ),
       this.repos.slots.listExistingSlotWindows(
         clinicId,
@@ -127,17 +146,26 @@ export class SlotGenerationService {
     const knownSlotWindows = new Set(
       existingSlots.map((slot) => `${slot.startTime}|${slot.endTime}`),
     );
+    const desiredSlotWindows = new Set<string>();
     const slotsToInsert: Array<typeof appointmentSlots.$inferInsert> = [];
 
-    for (let offset = 0; offset <= horizonDays; offset += 1) {
-      const dateStr = addDays(today, offset, timezone);
+    const generationDates = requestedDate
+      ? [requestedDate]
+      : Array.from({ length: horizonDays + 1 }, (_, offset) => addDays(today, offset, timezone));
+
+    for (const dateStr of generationDates) {
       if (holidayDates.has(dateStr)) {
         skipped += 1;
         continue;
       }
 
       const dayOfWeek = toStoredDayOfWeek(dayOfWeekMon1(dateStr, timezone));
-      const daySchedules = schedules.filter((schedule) => schedule.dayOfWeek === dayOfWeek);
+      const daySchedules = schedules.filter(
+        (schedule) =>
+          schedule.dayOfWeek === dayOfWeek &&
+          (!schedule.effectiveFrom || dateStr >= schedule.effectiveFrom) &&
+          (!schedule.effectiveTo || dateStr <= schedule.effectiveTo),
+      );
       if (daySchedules.length === 0) {
         continue;
       }
@@ -178,6 +206,7 @@ export class SlotGenerationService {
 
             if (!overlapsBlocked && !overlapsHoliday) {
               const windowKey = `${startLocal}|${endLocal}`;
+              desiredSlotWindows.add(windowKey);
               if (!knownSlotWindows.has(windowKey)) {
                 slotsToInsert.push({
                   clinicId,
@@ -208,12 +237,23 @@ export class SlotGenerationService {
     const insertedSlots = await this.repos.slots.insertSlots(slotsToInsert);
     const inserted = insertedSlots.length;
     skipped += slotsToInsert.length - inserted;
+    const staleOpenSlotIds = existingSlots
+      .filter(
+        (slot) =>
+          slot.status === 'open' && !desiredSlotWindows.has(`${slot.startTime}|${slot.endTime}`),
+      )
+      .map((slot) => slot.id);
+    const supersededSlots = await this.repos.slots.supersedeFutureOpenSlotsByIds(
+      clinicId,
+      staleOpenSlotIds,
+    );
 
     const summary = {
       clinic_id: clinicId,
       doctor_id: doctorId,
       clinic_service_id: clinicServiceId,
       inserted,
+      superseded: supersededSlots.length,
       skipped,
       horizon_days: horizonDays,
     };
@@ -231,7 +271,7 @@ function intersectWindows(
   secondary: Array<{ start: string; end: string }>,
 ): Array<{ start: string; end: string }> {
   if (secondary.length === 0) {
-    return primary;
+    return [];
   }
 
   const results: Array<{ start: string; end: string }> = [];
