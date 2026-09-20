@@ -1,6 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+
+import { useAuth } from '@/components/auth/AuthProvider';
+
 import { DAILY_DATA, WEEKLY_DATA, MONTHLY_DATA, CONDITIONS, VISIT_TYPES, AGE_GROUPS, type DailyData } from './doctor-data';
 
 type GroupBy = 'daily' | 'weekly' | 'monthly';
@@ -13,6 +16,7 @@ function dataForGroup(groupBy: GroupBy): DailyData[] {
 }
 
 export function DoctorAnalytics() {
+  const { me } = useAuth();
   const [groupBy, setGroupBy] = useState<GroupBy>('daily');
   const [chartType, setChartType] = useState<ChartType>('area');
 
@@ -26,7 +30,9 @@ export function DoctorAnalytics() {
       {/* Header */}
       <div className="mb-5">
         <h1 className="text-[26px] font-black tracking-tight text-slate-900">Patient Analytics</h1>
-        <p className="mt-1 text-sm text-slate-500">Visualise patient visits, conditions, and trends for Dr. M. Kumar</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Visualise patient visits, conditions, and trends for {me?.user.name ?? 'the signed-in doctor'}
+        </p>
       </div>
 
       {/* Stats */}

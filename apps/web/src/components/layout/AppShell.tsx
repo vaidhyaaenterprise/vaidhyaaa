@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 
 import { ClinicSwitcher } from '@/components/layout/ClinicSwitcher';
 import { SidebarNav } from '@/components/layout/SidebarNav';
-import { DEV_SEED } from '@/lib/dev-auth/constants';
 
 type AppShellProps = {
   children: ReactNode;
@@ -24,7 +23,7 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        <ClinicSwitcher clinicName={DEV_SEED.CLINIC_NAME} />
+        <ClinicSwitcher />
 
         <div className="mt-4 flex-1">
           <SidebarNav />
