@@ -68,6 +68,10 @@ export const markAppointmentVisitedSchema = z.object({
   advice: z.string().min(1).optional(),
 });
 
+export const rescheduleAppointmentSchema = z.object({
+  new_slot_id: uuidSchema,
+});
+
 export const patchAppointmentRequestSchema = z.object({
   status: appointmentStatusSchema.optional(),
   reason_for_visit: z.string().min(1).optional(),
@@ -79,4 +83,5 @@ export type AppointmentResponse = z.infer<typeof appointmentResponseSchema>;
 export type CreateAppointmentRequestInput = z.infer<typeof createAppointmentRequestSchema>;
 export type ManualAppointmentCreateInput = z.infer<typeof manualAppointmentCreateSchema>;
 export type MarkAppointmentVisitedInput = z.infer<typeof markAppointmentVisitedSchema>;
+export type RescheduleAppointmentInput = z.infer<typeof rescheduleAppointmentSchema>;
 export type PatchAppointmentRequestInput = z.infer<typeof patchAppointmentRequestSchema>;

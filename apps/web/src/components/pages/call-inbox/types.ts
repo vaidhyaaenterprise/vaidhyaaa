@@ -1,5 +1,16 @@
-export type CallOutcome = 'appointment_booked' | 'callback_requested' | 'emergency' | 'general_inquiry' | 'no_action_needed' | 'voicemail';
-export type CallAction = 'confirmation_needed' | 'callback_needed' | 'emergency_response' | 'none';
+export type CallOutcome =
+  | 'appointment_booked'
+  | 'appointment_cancelled'
+  | 'appointment_rescheduled'
+  | 'callback_requested'
+  | 'emergency'
+  | 'general_inquiry';
+export type CallAction =
+  | 'confirmation_needed'
+  | 'appointment_action_needed'
+  | 'callback_needed'
+  | 'emergency_response'
+  | 'none';
 export type CallLinkType = 'appointment' | 'callback' | 'emergency' | 'none';
 
 export interface Call {
@@ -11,6 +22,7 @@ export interface Call {
   summary: string;
   outcome: CallOutcome;
   actionNeeded: CallAction;
+  sourceStatus?: string;
   linkedAppointmentId?: string;
   linkedCallbackId?: string;
   linkedEmergencyId?: string;
@@ -24,7 +36,7 @@ export interface Call {
 
 export interface CallFilters {
   dateRange?: { start: string; end: string };
-  outcome?: CallOutcome;
+  outcomes: CallOutcome[];
   emergencyOnly?: boolean;
   callbackOnly?: boolean;
   appointmentRequestOnly?: boolean;

@@ -36,6 +36,7 @@ import { DoctorsRepository } from './doctors.repository';
 import { PatientsRepository } from './patients.repository';
 import { ClinicalSetupRepository } from './clinical-setup.repository';
 import { SlotsRepository } from './slots.repository';
+import { CallInboxRepository } from './call-inbox.repository';
 
 export { AuthRepository } from './auth.repository';
 export { OtpRepository, type OtpPurpose } from './otp.repository';
@@ -75,6 +76,7 @@ export {
   type ReviewedExampleRow,
 } from './reviewed-examples.repository';
 export { VoiceRepository, type CallRow } from './voice.repository';
+export { CallInboxRepository } from './call-inbox.repository';
 export class ClinicsRepository {
   constructor(private readonly db: Database) {}
 
@@ -473,6 +475,7 @@ export function createRepositories(db: Database) {
     nluReview: new NluReviewRepository(db),
     reviewedExamples: new ReviewedExamplesRepository(db),
     voice: new VoiceRepository(db),
+    callInbox: new CallInboxRepository(db),
   };
 }
 

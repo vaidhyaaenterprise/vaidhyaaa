@@ -1,32 +1,55 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
-import {
-  fetchCallbackRequests,
-  fetchCalls,
-  type CallApiRow,
-} from '@/lib/api/clinic-clinical';
+import { fetchCallInbox, type CallInboxApiRow } from '@/lib/api/clinic-clinical';
 
 import type { Call, CallAction, CallFilters, CallOutcome } from './types';
 
-function mapOutcome(value: string | null): CallOutcome {
+const OUTCOME_OPTIONS: ReadonlyArray<{ value: CallOutcome; label: string }> = [
+  { value: 'appointment_booked', label: 'Appointment booked' },
+  { value: 'appointment_cancelled', label: 'Cancelled Appointment' },
+  { value: 'appointment_rescheduled', label: 'Appointment Rescheduled' },
+  { value: 'general_inquiry', label: 'General inquiry' },
+  { value: 'callback_requested', label: 'Callback requested' },
+  { value: 'emergency', label: 'Emergency' },
+];
+
+function mapOutcome(value: string | null): CallOutcome | null {
   const known: CallOutcome[] = [
     'appointment_booked',
+    'appointment_cancelled',
+    'appointment_rescheduled',
     'callback_requested',
     'emergency',
     'general_inquiry',
-    'no_action_needed',
-    'voicemail',
   ];
   if (value && known.includes(value as CallOutcome)) {
     return value as CallOutcome;
   }
-  return 'general_inquiry';
+  return null;
+}
+
+function matchesFilters(call: Call, filters: CallFilters): boolean {
+  if (filters.emergencyOnly && call.outcome !== 'emergency') return false;
+  if (filters.callbackOnly && call.outcome !== 'callback_requested') return false;
+  if (
+    filters.appointmentRequestOnly &&
+    ![
+      'appointment_booked',
+      'appointment_cancelled',
+      'appointment_rescheduled',
+    ].includes(call.outcome)
+  ) {
+    return false;
+  }
+  if (filters.actionNeeded && call.actionNeeded === 'none') return false;
+  if (filters.outcomes.length > 0 && !filters.outcomes.includes(call.outcome)) return false;
+  return true;
 }
 
 function mapAction(outcome: CallOutcome): CallAction {
@@ -51,7 +74,16 @@ export function CallInboxPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [calls, setCalls] = useState<Call[]>([]);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
-  const [filters, setFilters] = useState<CallFilters>({ emergencyOnly: false, callbackOnly: false });
+  const [filters, setFilters] = useState<CallFilters>({
+    outcomes: [],
+    emergencyOnly: false,
+    callbackOnly: false,
+  });
+  const [outcomeMenuOpen, setOutcomeMenuOpen] = useState(false);
+  const outcomeMenuRef = useRef<HTMLDivElement>(null);
+  const outcomeTriggerRef = useRef<HTMLButtonElement>(null);
+  const requestSequence = useRef(0);
+  const loadedClinicRef = useRef<string | null>(null);
 
   const mapCallRows = (rows: unknown): Call[] => {
     if (!Array.isArray(rows)) {
@@ -59,57 +91,76 @@ export function CallInboxPageContent() {
     }
 
     return rows
-      .filter((row): row is CallApiRow => Boolean(row && typeof row === 'object' && 'id' in row))
-      .map((row) => {
+      .filter((row): row is CallInboxApiRow => Boolean(row && typeof row === 'object' && 'id' in row))
+      .flatMap((row) => {
         const outcome = mapOutcome(row.outcome);
+        if (!outcome) return [];
         const call: Call = {
           id: row.id,
-          callTime: row.started_at ?? new Date().toISOString(),
+          callTime: row.occurred_at ?? row.started_at ?? new Date().toISOString(),
           callerPhone: row.patient_phone ?? 'Unknown',
           duration: row.duration_seconds ?? 0,
           summary: row.summary ?? '',
           outcome,
-          actionNeeded: mapAction(outcome),
+          actionNeeded: row.action_needed ?? mapAction(outcome),
           source: 'voice_bot',
         };
+        if (row.source_status) {
+          call.sourceStatus = row.source_status;
+        }
         if (row.patient_name) {
           call.patientName = row.patient_name;
         }
         if (row.recording_url) {
           call.recordingUrl = row.recording_url;
         }
-        return call;
+        if (row.recording_expires_at) {
+          call.recordingExpiresAt = row.recording_expires_at;
+        }
+        if (row.transcript_expires_at) {
+          call.transcriptExpiresAt = row.transcript_expires_at;
+        }
+        if (row.created_appointment_request_id) {
+          call.linkedAppointmentId = row.created_appointment_request_id;
+        }
+        if (row.created_callback_request_id) {
+          call.linkedCallbackId = row.created_callback_request_id;
+        }
+        if (row.created_emergency_incident_id) {
+          call.linkedEmergencyId = row.created_emergency_incident_id;
+        }
+        return [call];
       });
   };
 
   const loadCalls = useCallback(async () => {
+    const requestId = ++requestSequence.current;
     if (!isAdmin || !clinicId) {
+      setCalls([]);
+      setSelectedCall(null);
+      setError(null);
+      setOutcomeMenuOpen(false);
+      loadedClinicRef.current = null;
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (loadedClinicRef.current !== clinicId) {
+      setCalls([]);
+      setSelectedCall(null);
+      setLoading(true);
+    }
     setError(null);
     try {
-      const [rows, callbackRequests] = await Promise.all([
-        fetchCalls(clinicId),
-        fetchCallbackRequests(clinicId).catch(() => []),
-      ]);
-      const callbackRows: CallApiRow[] = callbackRequests.map((row) => ({
-        id: row.id,
-        patient_phone: row.patient_phone,
-        patient_name: row.patient_name,
-        started_at: row.created_at,
-        duration_seconds: 0,
-        outcome: 'callback_requested',
-        summary: row.reason ?? '',
-        recording_url: null,
-      }));
-      const mapped = mapCallRows([...callbackRows, ...rows]);
+      const rows = await fetchCallInbox(clinicId, filters.outcomes);
+      if (requestId !== requestSequence.current) return;
+      const mapped = mapCallRows(rows);
+      loadedClinicRef.current = clinicId;
       setCalls(mapped);
       setSelectedCall((current) =>
-        current && mapped.some((call) => call.id === current.id) ? current : null,
+        current ? (mapped.find((call) => call.id === current.id) ?? null) : null,
       );
     } catch (err) {
+      if (requestId !== requestSequence.current) return;
       setError(
         err instanceof ApiRequestError
           ? err.apiError.message
@@ -118,13 +169,42 @@ export function CallInboxPageContent() {
             : 'Failed to load calls.',
       );
     } finally {
-      setLoading(false);
+      if (requestId === requestSequence.current) {
+        setLoading(false);
+      }
     }
-  }, [isAdmin, clinicId]);
+  }, [isAdmin, clinicId, filters.outcomes]);
 
   useEffect(() => {
     void loadCalls();
   }, [loadCalls]);
+
+  useEffect(() => {
+    if (selectedCall && !matchesFilters(selectedCall, filters)) {
+      setSelectedCall(null);
+    }
+  }, [filters, selectedCall]);
+
+  useEffect(() => {
+    if (!outcomeMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!outcomeMenuRef.current?.contains(event.target as Node)) {
+        setOutcomeMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOutcomeMenuOpen(false);
+        outcomeTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [outcomeMenuOpen]);
 
   if (!isAdmin) {
     return (
@@ -172,10 +252,14 @@ export function CallInboxPageContent() {
     );
   }
 
-  const getOutcomeBadge = (outcome: string) => {
+  const getOutcomeBadge = (outcome: string, sourceStatus?: string) => {
     switch (outcome) {
       case 'appointment_booked':
         return <span className="rounded-full border-2 border-green-300 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">Booked</span>;
+      case 'appointment_cancelled':
+        return <span className="rounded-full border-2 border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">{sourceStatus === 'pending' ? 'Cancellation requested' : 'Cancelled'}</span>;
+      case 'appointment_rescheduled':
+        return <span className="rounded-full border-2 border-violet-300 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">{sourceStatus === 'pending' ? 'Reschedule requested' : 'Rescheduled'}</span>;
       case 'callback_requested':
         return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Callback</span>;
       case 'emergency':
@@ -192,6 +276,8 @@ export function CallInboxPageContent() {
     switch (action) {
       case 'confirmation_needed':
         return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Confirm</span>;
+      case 'appointment_action_needed':
+        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Review</span>;
       case 'callback_needed':
         return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Callback</span>;
       case 'emergency_response':
@@ -233,14 +319,23 @@ export function CallInboxPageContent() {
     }
   };
 
-  const filteredCalls = calls.filter(call => {
-    if (filters.emergencyOnly && call.outcome !== 'emergency') return false;
-    if (filters.callbackOnly && call.outcome !== 'callback_requested') return false;
-    if (filters.appointmentRequestOnly && call.outcome !== 'appointment_booked') return false;
-    if (filters.actionNeeded && call.actionNeeded === 'none') return false;
-    if (filters.outcome && call.outcome !== filters.outcome) return false;
-    return true;
-  });
+  const filteredCalls = calls.filter((call) => matchesFilters(call, filters));
+  const outcomeTriggerLabel =
+    filters.outcomes.length === 0
+      ? 'All outcomes'
+      : filters.outcomes.length === 1
+        ? OUTCOME_OPTIONS.find((option) => option.value === filters.outcomes[0])?.label ??
+          '1 outcome selected'
+        : `${filters.outcomes.length} outcomes selected`;
+
+  const toggleOutcome = (outcome: CallOutcome) => {
+    setFilters((current) => ({
+      ...current,
+      outcomes: current.outcomes.includes(outcome)
+        ? current.outcomes.filter((value) => value !== outcome)
+        : [...current.outcomes, outcome],
+    }));
+  };
 
   return (
     <>
@@ -251,17 +346,54 @@ export function CallInboxPageContent() {
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap gap-3">
-          <select
-            value={filters.outcome || ''}
-            onChange={(e) => setFilters({ ...filters, outcome: e.target.value as Call['outcome'] })}
-            className="rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-          >
-            <option value="">All outcomes</option>
-            <option value="appointment_booked">Appointment booked</option>
-            <option value="callback_requested">Callback requested</option>
-            <option value="emergency">Emergency</option>
-            <option value="general_inquiry">General inquiry</option>
-          </select>
+          <div ref={outcomeMenuRef} className="relative">
+            <button
+              ref={outcomeTriggerRef}
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls="call-inbox-outcome-menu"
+              aria-expanded={outcomeMenuOpen}
+              onClick={() => setOutcomeMenuOpen((open) => !open)}
+              className="flex min-w-48 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
+            >
+              <span>{outcomeTriggerLabel}</span>
+              <span aria-hidden="true" className="text-slate-500">⌄</span>
+            </button>
+
+            {outcomeMenuOpen && (
+              <div
+                id="call-inbox-outcome-menu"
+                role="dialog"
+                aria-label="Filter by outcomes"
+                className="absolute left-0 top-full z-30 mt-2 min-w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-xl"
+              >
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={filters.outcomes.length === 0}
+                    onChange={() => setFilters((current) => ({ ...current, outcomes: [] }))}
+                    className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
+                  />
+                  <span className="text-sm font-semibold text-slate-900">All outcomes</span>
+                </label>
+                <div className="my-1 border-t border-slate-100" />
+                {OUTCOME_OPTIONS.map((option) => (
+                  <label
+                    key={option.value}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filters.outcomes.includes(option.value)}
+                      onChange={() => toggleOutcome(option.value)}
+                      className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
+                    />
+                    <span className="text-sm font-medium text-slate-800">{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
 
           <label className="flex cursor-pointer items-center gap-2">
             <input
@@ -336,7 +468,7 @@ export function CallInboxPageContent() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1">
-                      {getOutcomeBadge(call.outcome)}
+                      {getOutcomeBadge(call.outcome, call.sourceStatus)}
                       {getActionBadge(call.actionNeeded)}
                     </div>
                   </div>
@@ -368,7 +500,7 @@ export function CallInboxPageContent() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Outcome</h4>
-                  {getOutcomeBadge(selectedCall.outcome)}
+                  {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
                 </div>
                 <div>
                   <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Action needed</h4>

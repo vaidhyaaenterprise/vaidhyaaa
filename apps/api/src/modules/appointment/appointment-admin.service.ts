@@ -403,6 +403,9 @@ export class AppointmentAdminService {
       appointmentId: actionRequest.appointmentId,
       newSlotId: slotId,
       actorUserId: input.actorUserId,
+      ...(actionRequest.sourceSessionId
+        ? { reservationSessionId: actionRequest.sourceSessionId }
+        : {}),
     });
 
     const [updated] = await this.repos.appointmentLifecycle.updateActionRequest(

@@ -9,7 +9,7 @@ interface PendingAppointmentsProps {
   emptyMessage?: string;
   bookingRules: BookingRules;
   onConfirm: (id: string) => void;
-  onEditTime: (id: string, newTime: string) => void;
+  onEditTime: (id: string, newTime: string) => Promise<void>;
   onCancel: (id: string) => void;
   onViewHistory: (patientPhone: string) => void;
 }

@@ -7,7 +7,7 @@ import type { Appointment, BookingRules } from './types';
 interface ConfirmedAppointmentsProps {
   appointments: Appointment[];
   bookingRules: BookingRules;
-  onEditTime: (id: string, newTime: string) => void;
+  onEditTime: (id: string, newTime: string) => Promise<void>;
   onCancel: (id: string) => void;
   onMarkVisited: (id: string, visitReason: string) => void;
   onViewHistory: (patientPhone: string) => void;

@@ -5,6 +5,7 @@ import {
   AppError,
   manualAppointmentCreateSchema,
   markAppointmentVisitedSchema,
+  rescheduleAppointmentSchema,
   resolveAppointmentActionRequestSchema,
   type AuthContext,
 } from '@vaidya/shared';
@@ -170,12 +171,19 @@ export class AppointmentsController {
   async rescheduleAppointment(
     @Param('clinicId') clinicId: string,
     @Param('appointmentId') appointmentId: string,
-    @Body() body: { new_slot_id: string },
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
+    const parsed = rescheduleAppointmentSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid appointment reschedule payload.');
+    }
+    const auth = getAuthContext(request);
     const appointment = await this.appointmentLifecycleService.rescheduleAppointmentTime({
       clinicId,
       appointmentId,
-      newSlotId: body.new_slot_id,
+      newSlotId: parsed.data.new_slot_id,
+      actorUserId: auth.userId,
     });
     return { appointment };
   }

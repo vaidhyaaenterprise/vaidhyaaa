@@ -810,11 +810,26 @@ export class SarvamToolsController {
       };
     }
 
+    const sessionId = await this.resolveSessionId(
+      clinicId,
+      readParam(b, req, 'session_id'),
+      phone,
+    );
+
     await this.slotHoldService.cancelAppointment(clinicId, appointment.id);
     await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
       clinicId,
       appointment.id,
     );
+    await this.repos.appointmentLifecycle.insertActionRequest({
+      clinicId,
+      appointmentId: appointment.id,
+      requestType: 'cancel',
+      requestedBy: 'patient_call',
+      status: 'completed',
+      reason: 'Patient confirmed cancellation during the call.',
+      sourceSessionId: sessionId,
+    });
     await this.staffNotification.notifyStaffActionRequest({
       clinicId,
       eventType: 'appointment.cancelled',
@@ -822,6 +837,7 @@ export class SarvamToolsController {
       deduplicationKey: `sarvam-cancel:${appointment.id}`,
       payload: {
         appointment_id: appointment.id,
+        session_id: sessionId,
         cancelled_by: 'patient_call',
         patient_phone: phone,
       },

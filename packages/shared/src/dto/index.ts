@@ -3,6 +3,13 @@ export const DTO_PACKAGE_VERSION = '0.1.0';
 export * from './common';
 
 export {
+  PREDEFINED_CLINIC_SERVICES,
+  findPredefinedClinicService,
+  type PredefinedClinicService,
+  type PredefinedClinicServiceKey,
+} from './clinic-service';
+
+export {
   createConversationSessionSchema,
   sendConversationMessageSchema,
   type CreateConversationSessionInput,
@@ -137,11 +144,13 @@ export {
   manualAppointmentCreateSchema,
   markAppointmentVisitedSchema,
   patchAppointmentRequestSchema,
+  rescheduleAppointmentSchema,
   type AppointmentResponse,
   type CreateAppointmentRequestInput,
   type ManualAppointmentCreateInput,
   type MarkAppointmentVisitedInput,
   type PatchAppointmentRequestInput,
+  type RescheduleAppointmentInput,
 } from './appointment';
 
 export {
@@ -222,9 +231,14 @@ export {
 export {
   callInboxItemSchema,
   callInboxListResponseSchema,
+  callInboxOutcomeSchema,
+  callInboxSourceSchema,
   callTranscriptEntrySchema,
+  CALL_INBOX_OUTCOMES,
   type CallInboxItem,
   type CallInboxListResponse,
+  type CallInboxOutcome,
+  type CallInboxSource,
   type CallTranscriptEntry,
 } from './call-inbox';
 

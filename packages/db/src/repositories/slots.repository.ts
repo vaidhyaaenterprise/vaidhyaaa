@@ -719,6 +719,7 @@ export class SlotsRepository {
     appointmentId: string,
     values: {
       slotId: string;
+      slotHoldId: string | null;
       appointmentStart: string;
       appointmentEnd: string;
     },
@@ -728,8 +729,10 @@ export class SlotsRepository {
       .update(appointmentRequests)
       .set({
         slotId: values.slotId,
+        slotHoldId: values.slotHoldId,
         appointmentStart: values.appointmentStart,
         appointmentEnd: values.appointmentEnd,
+        updatedAt: new Date(),
       })
       .where(
         and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)),
@@ -740,7 +743,7 @@ export class SlotsRepository {
   updateHoldStatus(clinicId: string, holdId: string, status: string, db: Database = this.db) {
     return db
       .update(slotHolds)
-      .set({ status })
+      .set({ status, updatedAt: new Date() })
       .where(and(eq(slotHolds.clinicId, clinicId), eq(slotHolds.id, holdId)))
       .returning();
   }
@@ -759,8 +762,12 @@ export class SlotsRepository {
       .returning();
   }
 
-  findActiveHoldForSession(clinicId: string, sessionId: string) {
-    return this.db
+  findActiveHoldForSession(
+    clinicId: string,
+    sessionId: string,
+    db: Database = this.db,
+  ) {
+    return db
       .select()
       .from(slotHolds)
       .where(

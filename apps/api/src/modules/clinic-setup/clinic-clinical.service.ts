@@ -4,6 +4,7 @@ import { createRepositories, formatDateInTimezone, type Repositories } from '@va
 import type { DatabaseConnection } from '@vaidya/db';
 import {
   AppError,
+  findPredefinedClinicService,
   type CreateDoctorServiceMappingInput,
   type CreateClinicHolidayInput,
   type PatchClinicHolidayInput,
@@ -189,9 +190,40 @@ export class ClinicClinicalService {
       throw new AppError('VALIDATION_ERROR', 'Service name is required.');
     }
 
+    const baseKey = this.buildServiceKey(input.service_key?.trim() || trimmedName);
+    const predefinedService = findPredefinedClinicService(baseKey);
+
+    if (predefinedService) {
+      const [row] = await this.repos.clinicalSetup.upsertClinicService({
+        clinicId,
+        serviceName: predefinedService.service_name,
+        serviceKey: predefinedService.service_key,
+        description: null,
+        handlesJson: [],
+        doesNotHandleJson: [],
+        redFlagsJson: [],
+        routingExamplesJson: [],
+        active: input.active ?? true,
+      });
+
+      if (!row) {
+        throw new AppError('INTERNAL_ERROR', 'Failed to save the predefined clinic service.');
+      }
+
+      return {
+        id: row.id,
+        clinic_id: row.clinicId,
+        service_key: row.serviceKey,
+        service_name: row.serviceName,
+        description: row.description,
+        active: row.active,
+        created_at: row.createdAt.toISOString(),
+        updated_at: row.updatedAt.toISOString(),
+      };
+    }
+
     const existingServices = await this.repos.clinicalSetup.listServices(clinicId);
     const usedKeys = new Set(existingServices.map((row) => row.serviceKey));
-    const baseKey = this.buildServiceKey(input.service_key?.trim() || trimmedName);
 
     let nextKey = baseKey;
     let suffix = 2;

@@ -409,6 +409,16 @@ export class CancelMachineService {
       appointmentId,
     );
 
+    await this.repos.appointmentLifecycle.insertActionRequest({
+      clinicId: input.session.clinicId,
+      appointmentId,
+      requestType: 'cancel',
+      requestedBy: 'patient_call',
+      status: 'completed',
+      reason: 'Patient confirmed cancellation during the call.',
+      sourceSessionId: input.session.id,
+    });
+
     await this.staffNotification.notifyStaffActionRequest({
       clinicId: input.session.clinicId,
       eventType: 'appointment.cancelled',
