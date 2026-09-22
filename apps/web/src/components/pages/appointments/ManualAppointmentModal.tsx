@@ -7,11 +7,7 @@ import {
   fetchAvailableAppointmentSlots,
   type AppointmentAvailableSlotApiRow,
 } from '@/lib/api/appointments';
-import {
-  fetchHolidays,
-  searchPatientHistory,
-  type HolidayApiRow,
-} from '@/lib/api/clinic-clinical';
+import { fetchHolidays, searchPatientHistory, type HolidayApiRow } from '@/lib/api/clinic-clinical';
 import type { BookingRules } from './types';
 
 interface ManualAppointmentModalProps {
@@ -21,7 +17,7 @@ interface ManualAppointmentModalProps {
   doctors: Array<{ id: string; name: string }>;
   services: Array<{ id: string; name: string }>;
   doctorServiceMappings: Array<{ doctorId: string; serviceId: string }>;
-  onCreateAppointment: (data: ManualAppointmentData) => void;
+  onCreateAppointment: (data: ManualAppointmentData) => Promise<void>;
 }
 
 export interface ManualAppointmentData {
@@ -185,10 +181,10 @@ export function ManualAppointmentModal({
   doctorServiceMappings,
   onCreateAppointment,
 }: ManualAppointmentModalProps) {
-  const { effectiveRole, me } = useAuth();
+  const { effectiveRole, clinicRole } = useAuth();
   const clinicId = useActiveClinicId();
   const isAdmin = effectiveRole === 'admin';
-  const currentDoctorId = me?.clinics[0]?.doctor_id;
+  const currentDoctorId = clinicRole?.doctor_id;
 
   const [formData, setFormData] = useState<ManualAppointmentData>({
     patientName: '',
@@ -216,6 +212,43 @@ export function ManualAppointmentModal({
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [followupIdentityHint, setFollowupIdentityHint] = useState<string | null>(null);
   const [checkingFollowupIdentity, setCheckingFollowupIdentity] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const availableDoctors = useMemo(
+    () => (isAdmin ? doctors : doctors.filter((doctor) => doctor.id === currentDoctorId)),
+    [currentDoctorId, doctors, isAdmin],
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setSubmitError(null);
+    setFormData((previous) => {
+      const currentDoctorIsAvailable = availableDoctors.some(
+        (doctor) => doctor.id === previous.doctorId,
+      );
+      const doctorId = currentDoctorIsAvailable
+        ? previous.doctorId
+        : (availableDoctors[0]?.id ?? '');
+
+      if (doctorId === previous.doctorId) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        doctorId,
+        serviceId: '',
+        slotId: '',
+        appointmentTime: '',
+        appointmentStart: undefined,
+        appointmentEnd: undefined,
+      };
+    });
+  }, [availableDoctors, isOpen]);
 
   const serviceOptionsForDoctor = useMemo(() => {
     if (!formData.doctorId) {
@@ -380,8 +413,11 @@ export function ManualAppointmentModal({
             return;
           }
           setFormData((previous) => {
-            const stillValid = previous.slotId && mapped.some((slot) => slot.slotId === previous.slotId);
-            const chosen = stillValid ? mapped.find((slot) => slot.slotId === previous.slotId) : nextSlot;
+            const stillValid =
+              previous.slotId && mapped.some((slot) => slot.slotId === previous.slotId);
+            const chosen = stillValid
+              ? mapped.find((slot) => slot.slotId === previous.slotId)
+              : nextSlot;
             if (!chosen) {
               return previous;
             }
@@ -495,12 +531,47 @@ export function ManualAppointmentModal({
     isOpen,
   ]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const resetForm = () => {
+    setFormData({
+      patientName: '',
+      patientPhone: '',
+      patientAge: '',
+      patientDateOfBirth: '',
+      doctorId: currentDoctorId || availableDoctors[0]?.id || '',
+      serviceId: services[0]?.id || '',
+      appointmentDate: '',
+      appointmentTime: '',
+      reasonForVisit: '',
+      visitType: 'new',
+      overrideReason: '',
+      slotId: '',
+      appointmentStart: undefined,
+      appointmentEnd: undefined,
+    });
+    setShowOverride(false);
+    setSlotOptions([]);
+    setSlotsError(null);
+    setSubmitError(null);
+    setFollowupIdentityHint(null);
+    setCheckingFollowupIdentity(false);
+    setIsDatePickerOpen(false);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (isSubmitting) {
+      return;
+    }
+
     const parsedAge = Number.parseInt(formData.patientAge.trim(), 10);
 
-    if (!formData.patientName || !formData.patientPhone || !formData.reasonForVisit || !formData.patientAge.trim()) {
+    if (
+      !formData.patientName ||
+      !formData.patientPhone ||
+      !formData.reasonForVisit ||
+      !formData.patientAge.trim()
+    ) {
       alert('Please fill in all required fields');
       return;
     }
@@ -529,7 +600,11 @@ export function ManualAppointmentModal({
       return;
     }
 
-    if (formData.visitType === 'follow_up' && !formData.patientDateOfBirth && followupIdentityHint) {
+    if (
+      formData.visitType === 'follow_up' &&
+      !formData.patientDateOfBirth &&
+      followupIdentityHint
+    ) {
       alert(followupIdentityHint);
       return;
     }
@@ -539,36 +614,25 @@ export function ManualAppointmentModal({
       return;
     }
 
-    onCreateAppointment({
-      ...formData,
-      patientAge: String(parsedAge),
-      ...(formData.patientDateOfBirth ? { patientDateOfBirth: formData.patientDateOfBirth } : {}),
-    });
-    onClose();
-    
-    // Reset form
-    setFormData({
-      patientName: '',
-      patientPhone: '',
-      patientAge: '',
-      patientDateOfBirth: '',
-      doctorId: currentDoctorId || doctors[0]?.id || '',
-      serviceId: services[0]?.id || '',
-      appointmentDate: '',
-      appointmentTime: '',
-      reasonForVisit: '',
-      visitType: 'new',
-      overrideReason: '',
-      slotId: '',
-      appointmentStart: undefined,
-      appointmentEnd: undefined,
-    });
-    setShowOverride(false);
-    setSlotOptions([]);
-    setSlotsError(null);
-    setFollowupIdentityHint(null);
-    setCheckingFollowupIdentity(false);
-    setIsDatePickerOpen(false);
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onCreateAppointment({
+        ...formData,
+        patientAge: String(parsedAge),
+        ...(formData.patientDateOfBirth ? { patientDateOfBirth: formData.patientDateOfBirth } : {}),
+      });
+      resetForm();
+      onClose();
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'The appointment could not be created. Please try again.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const openDatePicker = () => {
@@ -607,19 +671,26 @@ export function ManualAppointmentModal({
     handleDateSelection(formatIsoDate(today), today);
   };
 
-  const availableDoctors = isAdmin ? doctors : doctors.filter((doctor) => doctor.id === currentDoctorId);
-
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="manual-appointment-title"
+        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
+      >
         <div className="mb-6">
-          <h3 className="text-xl font-bold text-slate-900">New manual appointment</h3>
-          <p className="text-sm text-slate-500">Create an appointment outside the normal booking flow.</p>
+          <h3 id="manual-appointment-title" className="text-xl font-bold text-slate-900">
+            New manual appointment
+          </h3>
+          <p className="text-sm text-slate-500">
+            Create an appointment outside the normal booking flow.
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
           <div>
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
               Patient name *
@@ -676,12 +747,20 @@ export function ManualAppointmentModal({
                 className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 max={todayIsoDate}
               />
-              {formData.visitType === 'follow_up' && !formData.patientDateOfBirth && checkingFollowupIdentity && (
-                <p className="mt-1 text-xs font-semibold text-slate-500">Checking follow-up patient match...</p>
-              )}
-              {formData.visitType === 'follow_up' && !formData.patientDateOfBirth && followupIdentityHint && (
-                <p className="mt-1 text-xs font-semibold text-amber-700">{followupIdentityHint}</p>
-              )}
+              {formData.visitType === 'follow_up' &&
+                !formData.patientDateOfBirth &&
+                checkingFollowupIdentity && (
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    Checking follow-up patient match...
+                  </p>
+                )}
+              {formData.visitType === 'follow_up' &&
+                !formData.patientDateOfBirth &&
+                followupIdentityHint && (
+                  <p className="mt-1 text-xs font-semibold text-amber-700">
+                    {followupIdentityHint}
+                  </p>
+                )}
             </div>
           </div>
 
@@ -706,7 +785,9 @@ export function ManualAppointmentModal({
                 required
               >
                 {availableDoctors.map((doctor) => (
-                  <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                  <option key={doctor.id} value={doctor.id}>
+                    {doctor.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -731,7 +812,9 @@ export function ManualAppointmentModal({
                 required
               >
                 {serviceOptionsForDoctor.map((service) => (
-                  <option key={service.id} value={service.id}>{service.name}</option>
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -757,7 +840,9 @@ export function ManualAppointmentModal({
                   className="flex w-full items-center justify-between rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 >
                   <span>
-                    {formData.appointmentDate ? formatDisplayDate(formData.appointmentDate) : 'Select date'}
+                    {formData.appointmentDate
+                      ? formatDisplayDate(formData.appointmentDate)
+                      : 'Select date'}
                   </span>
                   <span className="text-base leading-none text-slate-400">▾</span>
                 </button>
@@ -772,7 +857,9 @@ export function ManualAppointmentModal({
                       >
                         ←
                       </button>
-                      <p className="text-sm font-bold text-slate-900">{monthLabel(calendarMonth)}</p>
+                      <p className="text-sm font-bold text-slate-900">
+                        {monthLabel(calendarMonth)}
+                      </p>
                       <button
                         type="button"
                         onClick={() => setCalendarMonth((previous) => addMonths(previous, 1))}
@@ -813,10 +900,7 @@ export function ManualAppointmentModal({
                           styleClass = `${styleClass} ring-1 ring-teal-300`;
                         }
 
-                        const title = [
-                          isHoliday ? holidayReason : null,
-                          isSunday ? 'Sunday' : null,
-                        ]
+                        const title = [isHoliday ? holidayReason : null, isSunday ? 'Sunday' : null]
                           .filter(Boolean)
                           .join(' · ');
 
@@ -970,7 +1054,9 @@ export function ManualAppointmentModal({
                   name="visitType"
                   value="new"
                   checked={formData.visitType === 'new'}
-                  onChange={(e) => setFormData({ ...formData, visitType: e.target.value as 'new' | 'follow_up' })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, visitType: e.target.value as 'new' | 'follow_up' })
+                  }
                   className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
                 />
                 <span className="text-sm font-semibold text-slate-900">New patient</span>
@@ -981,7 +1067,9 @@ export function ManualAppointmentModal({
                   name="visitType"
                   value="follow_up"
                   checked={formData.visitType === 'follow_up'}
-                  onChange={(e) => setFormData({ ...formData, visitType: e.target.value as 'new' | 'follow_up' })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, visitType: e.target.value as 'new' | 'follow_up' })
+                  }
                   className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
                 />
                 <span className="text-sm font-semibold text-slate-900">Follow-up</span>
@@ -1023,7 +1111,7 @@ export function ManualAppointmentModal({
                 />
                 <span className="text-sm font-semibold text-slate-900">Override clinic hours</span>
               </label>
-              
+
               {showOverride && (
                 <div className="mt-2">
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -1042,17 +1130,29 @@ export function ManualAppointmentModal({
             </div>
           )}
 
+          {submitError ? (
+            <p
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+            >
+              {submitError}
+            </p>
+          ) : null}
+
           <div className="flex gap-2 pt-4">
             <button
               type="submit"
-              disabled={!showOverride && (!formData.slotId || slotOptions.length === 0)}
+              disabled={
+                isSubmitting || (!showOverride && (!formData.slotId || slotOptions.length === 0))
+              }
               className="flex-1 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Create appointment
+              {isSubmitting ? 'Creating appointment…' : 'Create appointment'}
             </button>
             <button
               type="button"
               onClick={onClose}
+              disabled={isSubmitting}
               className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-100"
             >
               Cancel

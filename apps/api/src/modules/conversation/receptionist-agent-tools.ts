@@ -811,6 +811,15 @@ export class ReceptionistAgentToolsService {
       ctx.clinicId,
       appointment.id,
     );
+    await this.repos.appointmentLifecycle.insertActionRequest({
+      clinicId: ctx.clinicId,
+      appointmentId: appointment.id,
+      requestType: 'cancel',
+      requestedBy: 'patient_call',
+      status: 'completed',
+      reason: 'Patient confirmed cancellation during the call.',
+      sourceSessionId: ctx.sessionId,
+    });
     await this.staffNotification.notifyStaffActionRequest({
       clinicId: ctx.clinicId,
       eventType: 'appointment.cancelled',

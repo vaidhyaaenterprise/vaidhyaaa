@@ -5,13 +5,24 @@ import { HomePageContent } from '@/components/pages/HomePageContent';
 import {
   cancelAppointment,
   confirmAppointment,
+  createManualAppointment,
+  fetchAvailableAppointmentSlots,
   fetchAppointments,
   type AppointmentApiRow,
 } from '@/lib/api/appointments';
+import {
+  fetchDoctorServices,
+  fetchDoctors,
+  fetchHolidays,
+  fetchServices,
+  searchPatientHistory,
+} from '@/lib/api/clinic-clinical';
 import { fetchClinicProfile, fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { getClinicDate } from '@/lib/home-dashboard';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+const DOCTOR_ID = '00000000-0000-0000-0000-000000000201';
+const SERVICE_ID = '00000000-0000-0000-0000-000000000301';
 
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({
@@ -49,8 +60,18 @@ vi.mock('@/components/auth/AuthProvider', () => ({
 
 vi.mock('@/lib/api/appointments', () => ({
   fetchAppointments: vi.fn(),
+  fetchAvailableAppointmentSlots: vi.fn(),
   confirmAppointment: vi.fn(),
   cancelAppointment: vi.fn(),
+  createManualAppointment: vi.fn(),
+}));
+
+vi.mock('@/lib/api/clinic-clinical', () => ({
+  fetchDoctorServices: vi.fn(),
+  fetchDoctors: vi.fn(),
+  fetchHolidays: vi.fn(),
+  fetchServices: vi.fn(),
+  searchPatientHistory: vi.fn(),
 }));
 
 vi.mock('@/lib/api/clinic-settings', () => ({
@@ -75,9 +96,9 @@ function appointmentRow(
     id,
     patient_name: patientName,
     patient_phone: '+919876543210',
-    doctor_id: '00000000-0000-0000-0000-000000000201',
+    doctor_id: DOCTOR_ID,
     doctor_name: 'Dr. Test',
-    clinic_service_id: '00000000-0000-0000-0000-000000000301',
+    clinic_service_id: SERVICE_ID,
     service_name: 'General Consultation',
     appointment_start: `${date} ${time}:00`,
     appointment_end: `${date} ${time}:00`,
@@ -91,15 +112,52 @@ function appointmentRow(
 }
 
 const mockedFetchAppointments = vi.mocked(fetchAppointments);
+const mockedFetchAvailableAppointmentSlots = vi.mocked(fetchAvailableAppointmentSlots);
 const mockedConfirmAppointment = vi.mocked(confirmAppointment);
 const mockedCancelAppointment = vi.mocked(cancelAppointment);
+const mockedCreateManualAppointment = vi.mocked(createManualAppointment);
+const mockedFetchDoctorServices = vi.mocked(fetchDoctorServices);
+const mockedFetchDoctors = vi.mocked(fetchDoctors);
+const mockedFetchHolidays = vi.mocked(fetchHolidays);
+const mockedFetchServices = vi.mocked(fetchServices);
+const mockedSearchPatientHistory = vi.mocked(searchPatientHistory);
 const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
 const mockedFetchClinicProfile = vi.mocked(fetchClinicProfile);
 
 beforeEach(() => {
   mockedFetchAppointments.mockReset().mockResolvedValue([]);
+  mockedFetchAvailableAppointmentSlots.mockReset().mockResolvedValue([]);
   mockedConfirmAppointment.mockReset().mockResolvedValue({ appointment: {} });
   mockedCancelAppointment.mockReset().mockResolvedValue({ appointment: {} });
+  mockedCreateManualAppointment.mockReset().mockResolvedValue({});
+  mockedFetchDoctors.mockReset().mockResolvedValue([
+    {
+      id: DOCTOR_ID,
+      name: 'Dr. Test',
+      qualification: 'MD',
+      user_id: null,
+      active: true,
+    },
+  ]);
+  mockedFetchServices.mockReset().mockResolvedValue([
+    {
+      id: SERVICE_ID,
+      service_name: 'General Consultation',
+      service_key: 'general_consultation',
+      active: true,
+    },
+  ]);
+  mockedFetchDoctorServices.mockReset().mockResolvedValue([
+    {
+      id: '00000000-0000-0000-0000-000000000401',
+      doctor_id: DOCTOR_ID,
+      clinic_service_id: SERVICE_ID,
+      consultation_fee_amount: '500.00',
+      active: true,
+    },
+  ]);
+  mockedFetchHolidays.mockReset().mockResolvedValue([]);
+  mockedSearchPatientHistory.mockReset().mockResolvedValue([]);
   mockedFetchClinicSettings.mockReset().mockRejectedValue(new Error('Settings unavailable'));
   mockedFetchClinicProfile.mockReset().mockResolvedValue({
     name: 'Test Clinic',
@@ -129,6 +187,99 @@ describe('HomePage dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Missed actions' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: "Today's summary" })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
+  });
+
+  it('opens the shared manual-booking modal and creates a slot-backed appointment', async () => {
+    const today = new Date();
+    const todayDate = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-');
+    const appointmentStart = `${todayDate}T09:00:00Z`;
+    const appointmentEnd = `${todayDate}T09:30:00Z`;
+    let resolveCreateAppointment: (value: unknown) => void = () => {};
+    const createAppointmentRequest = new Promise<unknown>((resolve) => {
+      resolveCreateAppointment = resolve;
+    });
+    mockedCreateManualAppointment.mockReturnValue(createAppointmentRequest);
+    mockedFetchAvailableAppointmentSlots.mockResolvedValue([
+      {
+        slot_id: '00000000-0000-0000-0000-000000000501',
+        doctor_id: DOCTOR_ID,
+        clinic_service_id: SERVICE_ID,
+        appointment_start: appointmentStart,
+        appointment_end: appointmentEnd,
+        available_count: 1,
+      },
+    ]);
+    mockedFetchAppointments.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    render(<HomePageContent />);
+
+    await screen.findByText('Vaidya dashboard for Clinic Admin');
+    const manualBookingButton = screen.getByRole('button', { name: 'Add manual booking' });
+    expect(manualBookingButton).toBeEnabled();
+    fireEvent.click(manualBookingButton);
+
+    const dialog = await screen.findByRole('dialog', { name: 'New manual appointment' });
+    fireEvent.change(within(dialog).getByPlaceholderText('Enter patient name'), {
+      target: { value: 'New Patient' },
+    });
+    fireEvent.change(within(dialog).getByPlaceholderText('+91 98765 43210'), {
+      target: { value: '9876543210' },
+    });
+    fireEvent.change(within(dialog).getByPlaceholderText('e.g. 38'), {
+      target: { value: '38' },
+    });
+    fireEvent.change(within(dialog).getByPlaceholderText('Describe the reason for visit'), {
+      target: { value: 'Routine checkup' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Select date/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Today' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(CLINIC_ID, {
+        doctor_id: DOCTOR_ID,
+        clinic_service_id: SERVICE_ID,
+        date: todayDate,
+      });
+    });
+
+    const createButton = within(dialog).getByRole('button', { name: 'Create appointment' });
+    await waitFor(() => expect(createButton).toBeEnabled());
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(mockedCreateManualAppointment).toHaveBeenCalledWith(CLINIC_ID, {
+        patient_name: 'New Patient',
+        patient_phone: '9876543210',
+        patient_age: 38,
+        slot_id: '00000000-0000-0000-0000-000000000501',
+        doctor_id: DOCTOR_ID,
+        clinic_service_id: SERVICE_ID,
+        reason_for_visit: 'Routine checkup',
+        appointment_start: appointmentStart,
+        appointment_end: appointmentEnd,
+        is_followup: false,
+        status: 'confirmed',
+      });
+    });
+    expect(within(dialog).getByRole('button', { name: 'Creating appointment…' })).toBeDisabled();
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Creating appointment…' }));
+    expect(mockedCreateManualAppointment).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCreateAppointment({});
+      await createAppointmentRequest;
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'New manual appointment' }),
+      ).not.toBeInTheDocument();
+    });
+    expect(mockedFetchAppointments).toHaveBeenCalledTimes(2);
   });
 
   it('shows only clinic-today data in current cards and moves older pending requests to missed actions', async () => {

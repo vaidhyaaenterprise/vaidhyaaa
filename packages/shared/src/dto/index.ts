@@ -222,9 +222,14 @@ export {
 export {
   callInboxItemSchema,
   callInboxListResponseSchema,
+  callInboxOutcomeSchema,
+  callInboxSourceSchema,
   callTranscriptEntrySchema,
+  CALL_INBOX_OUTCOMES,
   type CallInboxItem,
   type CallInboxListResponse,
+  type CallInboxOutcome,
+  type CallInboxSource,
   type CallTranscriptEntry,
 } from './call-inbox';
 

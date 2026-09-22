@@ -3,14 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
+import {
+  ManualAppointmentModal,
+  type ManualAppointmentData,
+} from '@/components/pages/appointments/ManualAppointmentModal';
 import { LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
-import type { Appointment } from '@/components/pages/appointments/types';
+import type { Appointment, BookingRules } from '@/components/pages/appointments/types';
 import { mapAppointmentRow } from '@/lib/api/appointment-mappers';
-import { cancelAppointment, confirmAppointment, fetchAppointments } from '@/lib/api/appointments';
+import {
+  cancelAppointment,
+  confirmAppointment,
+  createManualAppointment,
+  fetchAppointments,
+} from '@/lib/api/appointments';
+import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicProfile, fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { ApiRequestError } from '@/lib/api/client';
 import { getClinicDate, groupHomeAppointments } from '@/lib/home-dashboard';
+import { buildManualAppointmentPayload, DEFAULT_BOOKING_RULES } from '@/lib/manual-appointment';
 
 const DEFAULT_CLINIC_TIMEZONE = 'Asia/Kolkata';
 
@@ -121,7 +132,14 @@ export function HomePageContent() {
   const currentDoctorId = clinicRole?.doctor_id ?? null;
 
   const [loading, setLoading] = useState(true);
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [bookingRules, setBookingRules] = useState<BookingRules>(DEFAULT_BOOKING_RULES);
   const [activeAppointments, setActiveAppointments] = useState<Appointment[]>([]);
+  const [doctorOptions, setDoctorOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [serviceOptions, setServiceOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [doctorServiceMappings, setDoctorServiceMappings] = useState<
+    Array<{ doctorId: string; serviceId: string }>
+  >([]);
   const [agentStatus, setAgentStatus] = useState('unknown');
   const [clinicTimezone, setClinicTimezone] = useState(DEFAULT_CLINIC_TIMEZONE);
   const [now, setNow] = useState(() => new Date());
@@ -143,6 +161,10 @@ export function HomePageContent() {
       const loadSequence = ++dashboardLoadSequenceRef.current;
       if (!clinicId) {
         setActiveAppointments([]);
+        setDoctorOptions([]);
+        setServiceOptions([]);
+        setDoctorServiceMappings([]);
+        setIsManualModalOpen(false);
         setLoading(false);
         return;
       }
@@ -153,11 +175,23 @@ export function HomePageContent() {
       }
       setActionError(null);
       try {
-        const [appointments, settings, profile] = await Promise.all([
-          fetchAppointments(clinicId, ['pending_confirmation', 'confirmed']),
-          includeSettings ? fetchClinicSettings(clinicId).catch(() => null) : Promise.resolve(null),
-          includeSettings ? fetchClinicProfile(clinicId) : Promise.resolve(null),
-        ]);
+        const [appointments, settings, profile, doctors, services, doctorServices] =
+          await Promise.all([
+            fetchAppointments(clinicId, ['pending_confirmation', 'confirmed']),
+            includeSettings
+              ? fetchClinicSettings(clinicId).catch(() => null)
+              : Promise.resolve(null),
+            includeSettings ? fetchClinicProfile(clinicId) : Promise.resolve(null),
+            includeSettings && isAdmin
+              ? fetchDoctors(clinicId).catch(() => [])
+              : Promise.resolve(null),
+            includeSettings && isAdmin
+              ? fetchServices(clinicId).catch(() => [])
+              : Promise.resolve(null),
+            includeSettings && isAdmin
+              ? fetchDoctorServices(clinicId).catch(() => [])
+              : Promise.resolve(null),
+          ]);
 
         if (loadSequence !== dashboardLoadSequenceRef.current) {
           return;
@@ -168,8 +202,26 @@ export function HomePageContent() {
           setClinicTimezone(profile.timezone);
         }
         setActiveAppointments(appointments.map(mapAppointmentRow));
+        if (doctors && services && doctorServices) {
+          setDoctorOptions(doctors.map((doctor) => ({ id: doctor.id, name: doctor.name })));
+          setServiceOptions(
+            services.map((service) => ({ id: service.id, name: service.service_name })),
+          );
+          setDoctorServiceMappings(
+            doctorServices
+              .filter((mapping) => mapping.active)
+              .map((mapping) => ({
+                doctorId: mapping.doctor_id,
+                serviceId: mapping.clinic_service_id,
+              })),
+          );
+        }
         if (settings) {
           setAgentStatus(settings.agent_enabled ? 'active' : 'inactive');
+          setBookingRules({
+            ...DEFAULT_BOOKING_RULES,
+            allowDoctorServiceEdit: settings.allow_doctor_service_edit,
+          });
         }
       } catch (err) {
         if (loadSequence === dashboardLoadSequenceRef.current) {
@@ -185,11 +237,12 @@ export function HomePageContent() {
         }
       }
     },
-    [clinicId],
+    [clinicId, isAdmin],
   );
 
   useEffect(() => {
     activeClinicIdRef.current = clinicId;
+    setIsManualModalOpen(false);
   }, [clinicId]);
 
   useEffect(() => {
@@ -210,6 +263,22 @@ export function HomePageContent() {
         : activeAppointments.filter((appointment) => appointment.doctorId === currentDoctorId),
     [activeAppointments, currentDoctorId, isAdmin],
   );
+
+  const doctors = useMemo(() => {
+    const doctorMap = new Map(doctorOptions.map((doctor) => [doctor.id, doctor.name]));
+    for (const appointment of activeAppointments) {
+      doctorMap.set(appointment.doctorId, appointment.doctorName);
+    }
+    return Array.from(doctorMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [activeAppointments, doctorOptions]);
+
+  const services = useMemo(() => {
+    const serviceMap = new Map(serviceOptions.map((service) => [service.id, service.name]));
+    for (const appointment of activeAppointments) {
+      serviceMap.set(appointment.serviceId, appointment.serviceName);
+    }
+    return Array.from(serviceMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [activeAppointments, serviceOptions]);
   const groupedAppointments = useMemo(
     () => groupHomeAppointments(roleScopedAppointments, clinicDate),
     [clinicDate, roleScopedAppointments],
@@ -251,6 +320,31 @@ export function HomePageContent() {
   const handleCancel = (id: string) =>
     runAppointmentAction(id, cancelAppointment, 'Failed to cancel appointment.');
 
+  const handleCreateAppointment = async (data: ManualAppointmentData) => {
+    if (!clinicId) {
+      throw new Error('Select a clinic before creating an appointment.');
+    }
+
+    const targetClinicId = clinicId;
+    try {
+      await createManualAppointment(
+        targetClinicId,
+        buildManualAppointmentPayload(data, bookingRules.slotDurationMinutes),
+      );
+      if (activeClinicIdRef.current === targetClinicId) {
+        await loadDashboard(false);
+      }
+    } catch (error) {
+      throw new Error(
+        error instanceof ApiRequestError
+          ? error.apiError.message
+          : error instanceof Error
+            ? error.message
+            : 'Failed to create the appointment.',
+      );
+    }
+  };
+
   const pendingConfirmations = visibleTodayPending.length;
   const missedActions = visibleMissedPending.length;
   const pendingStaffActions = pendingConfirmations + callbacks + emergencyAlerts;
@@ -265,8 +359,8 @@ export function HomePageContent() {
           isAdmin && (
             <button
               type="button"
-              disabled
-              className="rounded-[13px] border border-brand-600 bg-brand-600 px-4 py-2.5 text-sm font-extrabold text-white opacity-60"
+              onClick={() => setIsManualModalOpen(true)}
+              className="rounded-[13px] border border-brand-600 bg-brand-600 px-4 py-2.5 text-sm font-extrabold text-white transition-colors hover:bg-brand-700"
             >
               Add manual booking
             </button>
@@ -426,6 +520,16 @@ export function HomePageContent() {
           </section>
         </>
       )}
+
+      <ManualAppointmentModal
+        isOpen={isManualModalOpen}
+        onClose={() => setIsManualModalOpen(false)}
+        bookingRules={bookingRules}
+        doctors={doctors}
+        services={services}
+        doctorServiceMappings={doctorServiceMappings}
+        onCreateAppointment={handleCreateAppointment}
+      />
     </>
   );
 }

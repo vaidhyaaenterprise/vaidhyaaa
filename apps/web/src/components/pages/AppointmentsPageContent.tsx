@@ -29,39 +29,18 @@ import { filterCurrentAndFuturePendingAppointments } from '@/lib/appointment-fil
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { getClinicDate } from '@/lib/home-dashboard';
+import { buildManualAppointmentPayload, DEFAULT_BOOKING_RULES } from '@/lib/manual-appointment';
 import type {
   Appointment,
   AppointmentActionRequest,
   BookingRules,
 } from '@/components/pages/appointments/types';
 
-const defaultBookingRules: BookingRules = {
-  slotDurationMinutes: 30,
-  capacityPerSlot: 1,
-  bookingHorizonDays: 45,
-  manualEditCutoffBeforeStartMinutes: 60,
-  manualEditMaxShiftMinutes: 60,
-  allowDoctorServiceEdit: false,
-};
-
 function filterByDate(appointments: Appointment[], date: string) {
   if (!date) {
     return appointments;
   }
   return appointments.filter((apt) => apt.appointmentDate === date);
-}
-
-function toApiDateTime(value: string): string {
-  const normalized = value.trim().replace(' ', 'T');
-  const withSeconds = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)
-    ? `${normalized}:00`
-    : normalized;
-
-  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(withSeconds)) {
-    return withSeconds;
-  }
-
-  return `${withSeconds}Z`;
 }
 
 export function AppointmentsPageContent() {
@@ -74,7 +53,7 @@ export function AppointmentsPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [bookingRules, setBookingRules] = useState<BookingRules>(defaultBookingRules);
+  const [bookingRules, setBookingRules] = useState<BookingRules>(DEFAULT_BOOKING_RULES);
   const [pendingAppointments, setPendingAppointments] = useState<Appointment[]>([]);
   const [confirmedAppointments, setConfirmedAppointments] = useState<Appointment[]>([]);
   const [visitedAppointments, setVisitedAppointments] = useState<Appointment[]>([]);
@@ -131,7 +110,7 @@ export function AppointmentsPageContent() {
 
         if (settings) {
           setBookingRules({
-            ...defaultBookingRules,
+            ...DEFAULT_BOOKING_RULES,
             allowDoctorServiceEdit: settings.allow_doctor_service_edit,
           });
         }
@@ -181,9 +160,7 @@ export function AppointmentsPageContent() {
 
   const currentAndFuturePending = useMemo(
     () =>
-      clinicDate
-        ? filterCurrentAndFuturePendingAppointments(pendingAppointments, clinicDate)
-        : [],
+      clinicDate ? filterCurrentAndFuturePendingAppointments(pendingAppointments, clinicDate) : [],
     [clinicDate, pendingAppointments],
   );
 
@@ -234,37 +211,13 @@ export function AppointmentsPageContent() {
 
   const handleCreateAppointment = async (data: ManualAppointmentData) => {
     if (!clinicId) {
-      return;
+      throw new Error('Select a clinic before creating an appointment.');
     }
 
-    const slotStart = data.appointmentStart ? toApiDateTime(data.appointmentStart) : undefined;
-    const slotEnd = data.appointmentEnd ? toApiDateTime(data.appointmentEnd) : undefined;
-
-    const fallbackStart = toApiDateTime(`${data.appointmentDate}T${data.appointmentTime}`);
-    const fallbackStartDate = new Date(fallbackStart);
-    const fallbackEnd = new Date(
-      fallbackStartDate.getTime() + bookingRules.slotDurationMinutes * 60_000,
-    ).toISOString();
-
-    const appointmentStart = slotStart ?? fallbackStart;
-    const appointmentEnd = slotEnd ?? fallbackEnd;
-
-    await createManualAppointment(clinicId, {
-      patient_name: data.patientName,
-      patient_phone: data.patientPhone,
-      patient_age: Number.parseInt(data.patientAge, 10),
-      ...(data.patientDateOfBirth ? { patient_date_of_birth: data.patientDateOfBirth } : {}),
-      ...(data.slotId ? { slot_id: data.slotId } : {}),
-      doctor_id: data.doctorId,
-      clinic_service_id: data.serviceId,
-      reason_for_visit: data.reasonForVisit,
-      appointment_start: appointmentStart,
-      appointment_end: appointmentEnd,
-      is_followup: data.visitType === 'follow_up',
-      ...(data.overrideReason ? { override_reason: data.overrideReason } : {}),
-      status: 'confirmed',
-    });
-    setIsManualModalOpen(false);
+    await createManualAppointment(
+      clinicId,
+      buildManualAppointmentPayload(data, bookingRules.slotDurationMinutes),
+    );
     await loadAppointments(false, false);
   };
 

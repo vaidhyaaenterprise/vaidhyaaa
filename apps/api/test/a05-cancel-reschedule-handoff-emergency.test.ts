@@ -191,10 +191,11 @@ describe('A05 cancel, reschedule, handoff, and emergency', () => {
     expect(appointment?.status).toBe('cancelled');
 
     const [actionRequest] = await sql`
-      SELECT count(*)::int AS count FROM appointment_action_requests
+      SELECT request_type, status FROM appointment_action_requests
       WHERE source_session_id = ${sessionId}
     `;
-    expect(actionRequest?.count).toBe(0);
+    expect(actionRequest?.request_type).toBe('cancel');
+    expect(actionRequest?.status).toBe('completed');
 
     const [notification] = await sql`
       SELECT event_type FROM notification_events
@@ -401,6 +402,14 @@ describe('A05 cancel, reschedule, handoff, and emergency', () => {
         AND payload_json->>'session_id' = ${sessionId}
     `;
     expect(notifications[0]?.count).toBe(1);
+
+    const actions = await sql`
+      SELECT count(*)::int AS count FROM appointment_action_requests
+      WHERE source_session_id = ${sessionId}
+        AND request_type = 'cancel'
+        AND status = 'completed'
+    `;
+    expect(actions[0]?.count).toBe(1);
   });
 
   it('10. reschedule after cancel finds no appointment', async () => {

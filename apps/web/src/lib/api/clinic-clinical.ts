@@ -88,6 +88,48 @@ export type CallApiRow = {
   recording_url: string | null;
 };
 
+export type CallInboxApiRow = {
+  id: string;
+  call_id: string | null;
+  source_type:
+    | 'appointment_request'
+    | 'appointment_action_request'
+    | 'callback_request'
+    | 'emergency_incident'
+    | 'conversation_message'
+    | 'call';
+  source_id: string;
+  patient_phone: string | null;
+  patient_name: string | null;
+  patient_id: string | null;
+  occurred_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  outcome:
+    | 'appointment_booked'
+    | 'appointment_cancelled'
+    | 'appointment_rescheduled'
+    | 'general_inquiry'
+    | 'callback_requested'
+    | 'emergency';
+  action_needed:
+    | 'confirmation_needed'
+    | 'appointment_action_needed'
+    | 'callback_needed'
+    | 'emergency_response'
+    | 'none';
+  summary: string | null;
+  recording_url: string | null;
+  recording_expires_at: string | null;
+  transcript_expires_at: string | null;
+  created_appointment_request_id: string | null;
+  created_callback_request_id: string | null;
+  created_emergency_incident_id: string | null;
+  appointment_action_request_id: string | null;
+  source_status: string | null;
+};
+
 export type PatientHistoryItemApiRow = {
   kind: 'visit' | 'appointment';
   id: string;
@@ -295,6 +337,17 @@ export async function replaceDoctorSchedules(
 export async function fetchCalls(clinicId: string) {
   const data = await apiGet<{ calls: CallApiRow[] }>(clinicPath(clinicId, '/calls'));
   return data.calls;
+}
+
+export async function fetchCallInbox(clinicId: string, outcomes: CallInboxApiRow['outcome'][] = []) {
+  const params = new URLSearchParams({ limit: '200' });
+  if (outcomes.length > 0) {
+    params.set('outcomes', outcomes.join(','));
+  }
+  const data = await apiGet<{ items: CallInboxApiRow[]; next_cursor: string | null }>(
+    clinicPath(clinicId, `/call-inbox?${params.toString()}`),
+  );
+  return data.items;
 }
 
 export type CallbackRequestApiRow = {
