@@ -1,7 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { createRepositories, type Repositories } from '@vaidya/db';
-import { ACTIVE_APPOINTMENT_STATUSES } from '@vaidya/db';
+import {
+  ACTIVE_APPOINTMENT_STATUSES,
+  ACTIVE_HOLD_STATUS,
+  createRepositories,
+  DatabaseService,
+  type Repositories,
+} from '@vaidya/db';
 import { AppError } from '@vaidya/shared';
 
 import type { DatabaseConnection } from '@vaidya/db';
@@ -15,6 +20,7 @@ export class AppointmentLifecycleService {
 
   constructor(
     @Inject(DATABASE_CONNECTION) connection: DatabaseConnection,
+    @Inject(DatabaseService) private readonly dbService: DatabaseService,
     @Inject(NotificationOutboxService) private readonly notificationOutbox: NotificationOutboxService,
   ) {
     this.repos = createRepositories(connection.db);
@@ -137,80 +143,171 @@ export class AppointmentLifecycleService {
     appointmentId: string;
     newSlotId: string;
     actorUserId?: string;
+    reservationSessionId?: string;
   }) {
-    const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
+    const result = await this.dbService.withSlotForUpdate(
       input.clinicId,
-      input.appointmentId,
-    );
-    if (!appointment) {
-      throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
-    }
+      input.newSlotId,
+      async (slot, tx) => {
+        const [appointment] = await this.repos.appointmentLifecycle.findAppointmentByIdForUpdate(
+          input.clinicId,
+          input.appointmentId,
+          tx,
+        );
+        if (!appointment) {
+          throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+        }
 
-    if (!ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')) {
-      throw new AppError('APPOINTMENT_NOT_CONFIRMABLE', 'Cancelled appointments cannot be rescheduled.', {
-        appointment_id: appointment.id,
-        status: appointment.status,
-      });
-    }
+        if (
+          !ACTIVE_APPOINTMENT_STATUSES.includes(
+            appointment.status as 'pending_confirmation' | 'confirmed',
+          )
+        ) {
+          throw new AppError(
+            'APPOINTMENT_NOT_CONFIRMABLE',
+            'Cancelled appointments cannot be rescheduled.',
+            {
+              appointment_id: appointment.id,
+              status: appointment.status,
+            },
+          );
+        }
 
-    const [slot] = await this.repos.slots.findOpenSlot(input.clinicId, input.newSlotId);
-    if (!slot) {
-      throw new AppError('NOT_FOUND', 'Slot not found.');
-    }
+        if (slot.status !== 'open') {
+          throw new AppError('SLOT_NOT_AVAILABLE', 'Selected slot is not available.');
+        }
 
-    const [holiday] = await this.repos.slots.isDoctorHolidayForWindow(
-      input.clinicId,
-      slot.doctorId,
-      slot.startTime,
-      slot.endTime,
-    );
-    if (holiday) {
-      throw new AppError('SLOT_NOT_AVAILABLE', 'Selected slot falls on doctor holiday.');
-    }
+        const [sessionHold] = input.reservationSessionId
+          ? await this.repos.slots.findActiveHoldForSession(
+              input.clinicId,
+              input.reservationSessionId,
+              tx,
+            )
+          : [];
+        const reservationHold = sessionHold?.slotId === slot.id ? sessionHold : undefined;
 
-    const [updated] = await this.repos.slots.updateAppointmentSlotAndTime(
-      input.clinicId,
-      appointment.id,
-      {
-        slotId: slot.id,
-        appointmentStart: slot.startTime,
-        appointmentEnd: slot.endTime,
+        // Saving the already-selected time is idempotent. Capacity-one slots are
+        // intentionally absent from the availability list because this appointment
+        // already occupies their only seat.
+        if (appointment.slotId === slot.id) {
+          if (sessionHold) {
+            await this.repos.slots.updateHoldStatus(input.clinicId, sessionHold.id, 'released', tx);
+          }
+          return { changed: false as const, appointment };
+        }
+
+        if (
+          slot.doctorId !== appointment.doctorId ||
+          slot.clinicServiceId !== appointment.clinicServiceId
+        ) {
+          throw new AppError(
+            'SLOT_NOT_AVAILABLE',
+            'Selected slot does not match the appointment doctor and service.',
+          );
+        }
+
+        const [holiday] = await this.repos.slots.isDoctorHolidayForWindow(
+          input.clinicId,
+          slot.doctorId,
+          slot.startTime,
+          slot.endTime,
+          tx,
+        );
+        if (holiday) {
+          throw new AppError('SLOT_NOT_AVAILABLE', 'Selected slot falls on doctor holiday.');
+        }
+
+        const load = await this.repos.slots.countSlotLoad(
+          input.clinicId,
+          slot.id,
+          reservationHold ? { excludeHoldId: reservationHold.id } : {},
+          tx,
+        );
+        if (load.activeAppointments + load.activeHolds >= slot.capacityTotal) {
+          throw new AppError('SLOT_FULL', 'Slot is full for that time.', {
+            slot_id: slot.id,
+          });
+        }
+
+        if (appointment.slotHoldId && appointment.slotHoldId !== reservationHold?.id) {
+          const [oldHold] = await this.repos.slots.findHoldById(
+            input.clinicId,
+            appointment.slotHoldId,
+            tx,
+          );
+          if (oldHold?.status === ACTIVE_HOLD_STATUS) {
+            await this.repos.slots.updateHoldStatus(input.clinicId, oldHold.id, 'released', tx);
+          }
+        }
+
+        if (sessionHold && !reservationHold && sessionHold.id !== appointment.slotHoldId) {
+          await this.repos.slots.updateHoldStatus(input.clinicId, sessionHold.id, 'released', tx);
+        }
+
+        const [updated] = await this.repos.slots.updateAppointmentSlotAndTime(
+          input.clinicId,
+          appointment.id,
+          {
+            slotId: slot.id,
+            slotHoldId: reservationHold?.id ?? null,
+            appointmentStart: slot.startTime,
+            appointmentEnd: slot.endTime,
+          },
+          tx,
+        );
+        if (!updated) {
+          throw new AppError('INTERNAL_ERROR', 'Failed to reschedule appointment.');
+        }
+
+        if (reservationHold) {
+          await this.repos.slots.updateHoldStatus(
+            input.clinicId,
+            reservationHold.id,
+            'converted',
+            tx,
+          );
+        }
+
+        await this.repos.appointmentLifecycle.insertAppointmentEvent(
+          {
+            clinicId: input.clinicId,
+            appointmentRequestId: appointment.id,
+            eventType: 'appointment.rescheduled',
+            actorType: 'clinic_admin',
+            ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+            ...(input.reservationSessionId ? { sourceSessionId: input.reservationSessionId } : {}),
+            oldValuesJson: {
+              slot_id: appointment.slotId,
+              slot_hold_id: appointment.slotHoldId,
+              appointment_start: appointment.appointmentStart,
+              appointment_end: appointment.appointmentEnd,
+            },
+            newValuesJson: {
+              slot_id: slot.id,
+              slot_hold_id: reservationHold?.id ?? null,
+              appointment_start: slot.startTime,
+              appointment_end: slot.endTime,
+            },
+          },
+          tx,
+        );
+
+        return { changed: true as const, appointment: updated };
       },
     );
-    if (!updated) {
-      throw new AppError('INTERNAL_ERROR', 'Failed to reschedule appointment.');
-    }
 
-    await this.repos.appointmentLifecycle.insertAppointmentEvent({
-      clinicId: input.clinicId,
-      appointmentRequestId: appointment.id,
-      eventType: 'appointment.rescheduled',
-      actorType: 'clinic_admin',
-      ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
-      oldValuesJson: {
-        slot_id: appointment.slotId,
-        appointment_start: appointment.appointmentStart,
-        appointment_end: appointment.appointmentEnd,
-      },
-      newValuesJson: {
-        slot_id: slot.id,
-        appointment_start: slot.startTime,
-        appointment_end: slot.endTime,
-      },
-    });
-
-    if (updated.patientPhone) {
+    if (result.changed && result.appointment.patientPhone) {
       await this.notificationOutbox.notifyPatientAppointmentRescheduled({
         clinicId: input.clinicId,
-        appointmentId: updated.id,
-        patientPhone: updated.patientPhone,
+        appointmentId: result.appointment.id,
+        patientPhone: result.appointment.patientPhone,
         payload: {
-          appointment_start: updated.appointmentStart,
-          appointment_end: updated.appointmentEnd,
+          appointment_start: result.appointment.appointmentStart,
+          appointment_end: result.appointment.appointmentEnd,
         },
       });
     }
 
-    return updated;
+    return result.appointment;
   }
 }

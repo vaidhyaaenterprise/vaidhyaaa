@@ -19,9 +19,11 @@ import {
   cancelAppointment,
   confirmAppointment,
   createManualAppointment,
+  fetchAvailableAppointmentSlots,
   fetchAppointmentActionRequests,
   fetchAppointments,
   markAppointmentVisited,
+  rescheduleAppointment,
   resolveAppointmentActionRequest,
 } from '@/lib/api/appointments';
 import { ApiRequestError } from '@/lib/api/client';
@@ -183,8 +185,40 @@ export function AppointmentsPageContent() {
     await loadAppointments(false, false);
   };
 
-  const handleEditTime = (id: string, newTime: string) => {
-    console.log('Edit time:', id, newTime);
+  const handleEditTime = async (id: string, newTime: string) => {
+    if (!clinicId) {
+      throw new Error('Select a clinic before editing an appointment.');
+    }
+
+    const appointment = [...pendingAppointments, ...confirmedAppointments].find(
+      (item) => item.id === id,
+    );
+    if (!appointment) {
+      throw new Error('Appointment could not be found. Reload the page and try again.');
+    }
+
+    if (newTime === appointment.appointmentTime) {
+      return;
+    }
+
+    const slots = await fetchAvailableAppointmentSlots(clinicId, {
+      doctor_id: appointment.doctorId,
+      clinic_service_id: appointment.serviceId,
+      date: appointment.appointmentDate,
+    });
+    const targetSlot = slots.find((slot) => {
+      const match = slot.appointment_start
+        .trim()
+        .match(/^\d{4}-\d{2}-\d{2}[T\s](\d{2}:\d{2})/);
+      return match?.[1] === newTime && slot.available_count > 0;
+    });
+
+    if (!targetSlot) {
+      throw new Error('Slot is full for that time. Choose another available time.');
+    }
+
+    await rescheduleAppointment(clinicId, appointment.id, targetSlot.slot_id);
+    await loadAppointments(false, false);
   };
 
   const handleCancel = async (id: string) => {

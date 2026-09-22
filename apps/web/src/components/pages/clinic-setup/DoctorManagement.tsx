@@ -1,6 +1,11 @@
 'use client';
 
+import {
+  PREDEFINED_CLINIC_SERVICES,
+  findPredefinedClinicService,
+} from '@vaidya/shared';
 import { useCallback, useEffect, useState } from 'react';
+
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -10,8 +15,6 @@ import {
   createDoctorService,
   createService,
   deleteDoctor,
-  deleteDoctorService,
-  deleteService,
   fetchDoctorServices,
   fetchDoctors,
   fetchServices,
@@ -24,6 +27,8 @@ type Doctor = {
   name: string;
   specialization: string;
   serviceId: string;
+  serviceKey: string;
+  serviceName: string;
   fee: number;
   active: boolean;
   userId: string | null;
@@ -31,6 +36,7 @@ type Doctor = {
 
 type Service = {
   id: string;
+  key: string;
   name: string;
   active: boolean;
 };
@@ -43,6 +49,10 @@ type DoctorServiceMapping = {
   active: boolean;
 };
 
+function displayServiceName(serviceKey: string, fallback: string): string {
+  return findPredefinedClinicService(serviceKey)?.service_name ?? (fallback || 'Unassigned');
+}
+
 export function DoctorManagement() {
   const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
@@ -54,96 +64,108 @@ export function DoctorManagement() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [doctorServiceMappings, setDoctorServiceMappings] = useState<DoctorServiceMapping[]>([]);
-const [tempDoctors, setTempDoctors] = useState<Doctor[]>([]);
-  const [tempServices, setTempServices] = useState<Service[]>([]);
+  const [tempDoctors, setTempDoctors] = useState<Doctor[]>([]);
   const [deletedDoctorIds, setDeletedDoctorIds] = useState<string[]>([]);
-  const [deletedServiceIds, setDeletedServiceIds] = useState<string[]>([]);
-  const [deletedMappingIds, setDeletedMappingIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const loadData = useCallback(async (showLoading = true) => {
-    if (!isAdmin || !clinicId) {
-      setLoading(false);
-      return;
-    }
-    if (showLoading) {
-      setLoading(true);
-    }
-    setError(null);
-    try {
-      const [doctorRows, serviceRows, mappingRows] = await Promise.all([
-        fetchDoctors(clinicId),
-        fetchServices(clinicId),
-        fetchDoctorServices(clinicId),
-      ]);
-
-      const mappedServices = serviceRows.map((row) => ({
-        id: row.id,
-        name: row.service_name,
-        active: row.active,
-      }));
-
-      const mappedMappings = mappingRows.map((row) => ({
-        id: row.id,
-        doctorId: row.doctor_id,
-        serviceId: row.clinic_service_id,
-        fee: row.consultation_fee_amount ? parseFloat(row.consultation_fee_amount) : 0,
-        active: row.active,
-      }));
-
-      const mappedDoctors = doctorRows.map((row) => {
-        const mapping = mappedMappings.find((m) => m.doctorId === row.id && m.active)
-          ?? mappedMappings.find((m) => m.doctorId === row.id);
-        const service = mapping
-          ? mappedServices.find((s) => s.id === mapping.serviceId)
-          : null;
-        return {
-          id: row.id,
-          name: row.name,
-          specialization: row.qualification ?? service?.name ?? '',
-          serviceId: mapping?.serviceId ?? '',
-          fee: mapping?.fee ?? 0,
-          active: row.active,
-          userId: row.user_id,
-        };
-      });
-
-setDoctors(mappedDoctors);
-      setServices(mappedServices);
-      setDoctorServiceMappings(mappedMappings);
-      setTempDoctors(mappedDoctors);
-      setTempServices(mappedServices);
-      setDeletedDoctorIds([]);
-      setDeletedServiceIds([]);
-      setDeletedMappingIds([]);
-    } catch (err) {
-      setError(
-        err instanceof ApiRequestError
-          ? err.apiError.message
-          : 'Failed to load doctors and services.',
-      );
-    } finally {
-      if (showLoading) {
+  const loadData = useCallback(
+    async (showLoading = true) => {
+      if (!isAdmin || !clinicId) {
+        setDoctors([]);
+        setServices([]);
+        setDoctorServiceMappings([]);
+        setTempDoctors([]);
         setLoading(false);
+        return;
       }
-    }
-  }, [isAdmin, clinicId]);
+
+      if (showLoading) {
+        setLoading(true);
+      }
+      setError(null);
+
+      try {
+        const [doctorRows, serviceRows, mappingRows] = await Promise.all([
+          fetchDoctors(clinicId),
+          fetchServices(clinicId),
+          fetchDoctorServices(clinicId),
+        ]);
+
+        const mappedServices = serviceRows.map((row) => ({
+          id: row.id,
+          key: row.service_key,
+          name: row.service_name,
+          active: row.active,
+        }));
+
+        const mappedMappings = mappingRows.map((row) => ({
+          id: row.id,
+          doctorId: row.doctor_id,
+          serviceId: row.clinic_service_id,
+          fee: row.consultation_fee_amount ? Number.parseFloat(row.consultation_fee_amount) : 0,
+          active: row.active,
+        }));
+
+        const mappedDoctors = doctorRows.map((row) => {
+          const mapping =
+            mappedMappings.find((entry) => entry.doctorId === row.id && entry.active) ??
+            mappedMappings.find((entry) => entry.doctorId === row.id);
+          const service = mapping
+            ? mappedServices.find((entry) => entry.id === mapping.serviceId)
+            : undefined;
+
+          return {
+            id: row.id,
+            name: row.name,
+            specialization: row.qualification ?? '',
+            serviceId: mapping?.serviceId ?? '',
+            serviceKey: service?.key ?? '',
+            serviceName: service?.name ?? '',
+            fee: mapping?.fee ?? 0,
+            active: row.active && (mapping?.active ?? true),
+            userId: row.user_id,
+          };
+        });
+
+        setDoctors(mappedDoctors);
+        setServices(mappedServices);
+        setDoctorServiceMappings(mappedMappings);
+        setTempDoctors(mappedDoctors);
+        setDeletedDoctorIds([]);
+      } catch (err) {
+        setError(
+          err instanceof ApiRequestError
+            ? err.apiError.message
+            : 'Failed to load doctors and services.',
+        );
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [clinicId, isAdmin],
+  );
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
   const handleEdit = () => {
-    setTempDoctors(doctors);
-    setTempServices(services);
+    setTempDoctors(doctors.map((doctor) => ({ ...doctor })));
+    setDeletedDoctorIds([]);
+    setError(null);
     setIsEditing(true);
   };
 
   const handleCancel = () => {
+    setTempDoctors(doctors.map((doctor) => ({ ...doctor })));
+    setDeletedDoctorIds([]);
+    setError(null);
     setIsEditing(false);
   };
 
-const handleSave = async () => {
+  const handleSave = async () => {
     if (!clinicId) {
       return;
     }
@@ -152,64 +174,79 @@ const handleSave = async () => {
     setSaving(true);
 
     try {
-      // First, handle deletions
-      for (const mappingId of deletedMappingIds) {
-        await deleteDoctorService(clinicId, mappingId);
+      const doctorsToSave = tempDoctors.filter(
+        (doctor) => !doctor.id.startsWith('new-') || doctor.name.trim().length > 0,
+      );
+
+      for (const doctor of doctorsToSave) {
+        const doctorName = doctor.name.trim();
+        if (!doctorName) {
+          throw new Error('Doctor name cannot be empty.');
+        }
+        if (!doctor.serviceKey) {
+          throw new Error(`Select a service for ${doctorName}.`);
+        }
+        if (
+          !findPredefinedClinicService(doctor.serviceKey) &&
+          !services.some((service) => service.key === doctor.serviceKey)
+        ) {
+          throw new Error(`Select a predefined service for ${doctorName}.`);
+        }
       }
 
       for (const doctorId of deletedDoctorIds) {
         await deleteDoctor(clinicId, doctorId);
       }
 
-      for (const serviceId of deletedServiceIds) {
-        await deleteService(clinicId, serviceId);
-      }
+      const serviceIdByKey = new Map(services.map((service) => [service.key, service.id]));
+      const selectedServiceKeys = [...new Set(doctorsToSave.map((doctor) => doctor.serviceKey))];
+      const activeServiceKeys = new Set(
+        doctorsToSave.filter((doctor) => doctor.active).map((doctor) => doctor.serviceKey),
+      );
 
-      const serviceIdMap = new Map<string, string>();
+      for (const serviceKey of selectedServiceKeys) {
+        const predefinedService = findPredefinedClinicService(serviceKey);
+        const existingService = services.find((service) => service.key === serviceKey);
+        const shouldBeActive = activeServiceKeys.has(serviceKey);
 
-      for (const service of tempServices) {
-        const serviceName = service.name.trim();
-        if (!serviceName) {
-          if (service.id.startsWith('new-')) {
-            continue;
+        if (!predefinedService) {
+          if (!existingService) {
+            throw new Error('Select one of the predefined services.');
           }
-          throw new Error('Service name cannot be empty.');
-        }
-
-        if (service.id.startsWith('new-')) {
-          const created = await createService(clinicId, {
-            service_name: serviceName,
-            active: service.active,
-          });
-          serviceIdMap.set(service.id, created.id);
+          serviceIdByKey.set(serviceKey, existingService.id);
+          if (existingService.active !== shouldBeActive) {
+            await patchService(clinicId, existingService.id, { active: shouldBeActive });
+          }
           continue;
         }
 
-        serviceIdMap.set(service.id, service.id);
-        const original = services.find((entry) => entry.id === service.id);
-        if (!original) {
+        if (existingService) {
+          serviceIdByKey.set(serviceKey, existingService.id);
+          if (
+            existingService.name !== predefinedService.service_name ||
+            existingService.active !== shouldBeActive
+          ) {
+            await patchService(clinicId, existingService.id, {
+              service_name: predefinedService.service_name,
+              active: shouldBeActive,
+            });
+          }
           continue;
         }
-        if (original.name !== serviceName || original.active !== service.active) {
-          await patchService(clinicId, service.id, {
-            service_name: serviceName,
-            active: service.active,
-          });
-        }
+
+        const createdService = await createService(clinicId, {
+          service_key: predefinedService.service_key,
+          service_name: predefinedService.service_name,
+          active: shouldBeActive,
+        });
+        serviceIdByKey.set(serviceKey, createdService.id);
       }
 
-      for (const doctor of tempDoctors) {
+      for (const doctor of doctorsToSave) {
         const doctorName = doctor.name.trim();
-        if (!doctorName) {
-          if (doctor.id.startsWith('new-')) {
-            continue;
-          }
-          throw new Error('Doctor name cannot be empty.');
-        }
-
-        const resolvedServiceId = serviceIdMap.get(doctor.serviceId) ?? doctor.serviceId;
+        const resolvedServiceId = serviceIdByKey.get(doctor.serviceKey);
         if (!resolvedServiceId) {
-          throw new Error(`Select a service for ${doctorName}.`);
+          throw new Error(`Could not save the selected service for ${doctorName}.`);
         }
 
         const consultationFeeAmount = Number.isFinite(doctor.fee) ? doctor.fee : 0;
@@ -226,56 +263,49 @@ const handleSave = async () => {
             doctor_id: createdDoctor.id,
             clinic_service_id: resolvedServiceId,
             consultation_fee_amount: consultationFeeAmount,
-            active: true,
+            active: doctor.active,
           });
           continue;
         }
 
-        const originalDoctor = doctors.find((entry) => entry.id === doctor.id);
-        if (!originalDoctor) {
-          continue;
-        }
-
-        const originalMapping = doctorServiceMappings.find(
+        const doctorMappings = doctorServiceMappings.filter(
           (mapping) => mapping.doctorId === doctor.id,
         );
-        const serviceChanged = originalDoctor.serviceId !== resolvedServiceId;
+        const targetMapping = doctorMappings.find(
+          (mapping) => mapping.serviceId === resolvedServiceId,
+        );
 
-        if (serviceChanged) {
-          const sameServiceMapping =
-            originalMapping && originalMapping.serviceId === resolvedServiceId
-              ? originalMapping
-              : null;
-
-          if (sameServiceMapping) {
-            await patchDoctorService(clinicId, sameServiceMapping.id, {
+        if (targetMapping) {
+          if (
+            targetMapping.active !== doctor.active ||
+            targetMapping.fee !== consultationFeeAmount
+          ) {
+            await patchDoctorService(clinicId, targetMapping.id, {
               consultation_fee_amount: consultationFeeAmount,
-              active: true,
+              active: doctor.active,
             });
-          } else {
-            await createDoctorService(clinicId, {
-              doctor_id: doctor.id,
-              clinic_service_id: resolvedServiceId,
-              consultation_fee_amount: consultationFeeAmount,
-              active: true,
-            });
-
-            if (originalMapping) {
-              await patchDoctorService(clinicId, originalMapping.id, { active: false });
-            }
           }
-          continue;
+        } else {
+          await createDoctorService(clinicId, {
+            doctor_id: doctor.id,
+            clinic_service_id: resolvedServiceId,
+            consultation_fee_amount: consultationFeeAmount,
+            active: doctor.active,
+          });
         }
 
-        const originalActiveMapping = doctorServiceMappings.find(
-          (mapping) => mapping.doctorId === doctor.id && mapping.active,
+        const mappingsToDisable = doctorMappings.filter(
+          (mapping) => mapping.active && mapping.serviceId !== resolvedServiceId,
         );
-        const feeChanged = originalDoctor.fee !== consultationFeeAmount;
-        if ((feeChanged || !originalActiveMapping) && originalMapping) {
-          await patchDoctorService(clinicId, originalMapping.id, {
-            consultation_fee_amount: consultationFeeAmount,
-            active: true,
-          });
+        for (const mapping of mappingsToDisable) {
+          await patchDoctorService(clinicId, mapping.id, { active: false });
+        }
+      }
+
+      const selectedServiceKeySet = new Set(selectedServiceKeys);
+      for (const service of services) {
+        if (!selectedServiceKeySet.has(service.key) && service.active) {
+          await patchService(clinicId, service.id, { active: false });
         }
       }
 
@@ -295,76 +325,62 @@ const handleSave = async () => {
   };
 
   const addDoctor = () => {
-    const firstServiceId = tempServices[0]?.id ?? '';
-    const newDoctor: Doctor = {
-      id: `new-${Date.now()}`,
-      name: '',
-      specialization: '',
-      serviceId: firstServiceId,
-      fee: 0,
-      active: true,
-      userId: null,
-    };
-    setTempDoctors([...tempDoctors, newDoctor]);
+    setTempDoctors((current) => [
+      ...current,
+      {
+        id: `new-${Date.now()}-${current.length}`,
+        name: '',
+        specialization: '',
+        serviceId: '',
+        serviceKey: '',
+        serviceName: '',
+        fee: 0,
+        active: true,
+        userId: null,
+      },
+    ]);
   };
 
-const removeDoctor = (id: string) => {
-    setTempDoctors(tempDoctors.filter((d) => d.id !== id));
+  const removeDoctor = (id: string) => {
+    setTempDoctors((current) => current.filter((doctor) => doctor.id !== id));
     if (!id.startsWith('new-')) {
-      setDeletedDoctorIds([...deletedDoctorIds, id]);
-      // Also find and mark associated mappings for deletion
-      const mappings = doctorServiceMappings.filter((m) => m.doctorId === id && m.active);
-      mappings.forEach((m) => setDeletedMappingIds((prev) => [...prev, m.id]));
+      setDeletedDoctorIds((current) => [...current, id]);
     }
   };
 
   const updateDoctor = (id: string, field: keyof Doctor, value: string | number) => {
-    setTempDoctors(tempDoctors.map((d) => (d.id === id ? { ...d, [field]: value } : d)));
-  };
-
-  const addService = () => {
-    const newService: Service = {
-      id: `new-${Date.now()}`,
-      name: '',
-      active: true,
-    };
-    setTempServices([...tempServices, newService]);
-  };
-
-  const removeService = (id: string) => {
-    setTempServices(tempServices.filter((s) => s.id !== id));
-    if (!id.startsWith('new-')) {
-      setDeletedServiceIds([...deletedServiceIds, id]);
-    }
-  };
-
-  const updateService = (id: string, field: keyof Service, value: string) => {
-    setTempServices(tempServices.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+    setTempDoctors((current) =>
+      current.map((doctor) => (doctor.id === id ? { ...doctor, [field]: value } : doctor)),
+    );
   };
 
   const toggleDoctorActive = async (id: string) => {
     if (!clinicId) {
       return;
     }
-    const doctorMappings = doctorServiceMappings.filter((m) => m.doctorId === id);
-    const nextActive = !doctors.find((d) => d.id === id)?.active;
-    await Promise.all(
-      doctorMappings.map((mapping) =>
-        patchDoctorService(clinicId, mapping.id, { active: nextActive }),
-      ),
-    );
-    await loadData();
-  };
 
-  const toggleServiceActive = async (id: string) => {
-    if (!clinicId) {
+    const doctor = doctors.find((entry) => entry.id === id);
+    const currentMapping = doctorServiceMappings.find(
+      (mapping) => mapping.doctorId === id && mapping.serviceId === doctor?.serviceId,
+    );
+    if (!doctor || !currentMapping) {
       return;
     }
-    const service = services.find((s) => s.id === id);
-    if (!service) {
-      return;
+
+    const nextActive = !doctor.active;
+    await patchDoctorService(clinicId, currentMapping.id, { active: nextActive });
+
+    const service = services.find((entry) => entry.id === currentMapping.serviceId);
+    const hasOtherActiveDoctor = doctorServiceMappings.some(
+      (mapping) =>
+        mapping.doctorId !== id &&
+        mapping.serviceId === currentMapping.serviceId &&
+        mapping.active,
+    );
+    const shouldBeActive = nextActive || hasOtherActiveDoctor;
+    if (service && service.active !== shouldBeActive) {
+      await patchService(clinicId, service.id, { active: shouldBeActive });
     }
-    await patchService(clinicId, id, { active: !service.active });
     await loadData();
   };
 
@@ -387,7 +403,7 @@ const removeDoctor = (id: string) => {
     );
   }
 
-  if (error) {
+  if (error && !isEditing) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load doctors and services" description={error}>
@@ -409,6 +425,7 @@ const removeDoctor = (id: string) => {
         <h3 className="text-lg font-bold text-slate-900">Doctors and services</h3>
         {!isEditing && (
           <button
+            type="button"
             onClick={handleEdit}
             className="rounded-xl border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
           >
@@ -418,29 +435,42 @@ const removeDoctor = (id: string) => {
       </div>
 
       {!isEditing ? (
-        <div className="space-y-4">
-          <div>
-            <h4 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
-              Doctors
-            </h4>
+        <div>
+          <h4 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
+            Doctors
+          </h4>
+          {doctors.length === 0 ? (
+            <p className="text-sm text-slate-500">No doctors configured.</p>
+          ) : (
             <div className="space-y-2">
               {doctors.map((doctor) => (
                 <div
                   key={doctor.id}
-                  className={`flex items-center justify-between rounded-lg border p-3 ${doctor.active ? 'border-slate-200 bg-white' : 'border-red-200 bg-red-50'}`}
+                  className={`flex items-center justify-between rounded-lg border p-3 ${
+                    doctor.active
+                      ? 'border-slate-200 bg-white'
+                      : 'border-red-200 bg-red-50'
+                  }`}
                 >
                   <div>
                     <p className="font-bold text-slate-900">{doctor.name}</p>
-                    <p className="text-sm text-slate-500">{doctor.specialization || 'No qualification'}</p>
+                    <p className="text-sm text-slate-500">
+                      {doctor.specialization || 'No qualification'}
+                    </p>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Service: {services.find((service) => service.id === doctor.serviceId)?.name ?? 'Unassigned'}
+                      Service: {displayServiceName(doctor.serviceKey, doctor.serviceName)}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-bold text-slate-900">Rs.{doctor.fee}</span>
                     <button
+                      type="button"
                       onClick={() => void toggleDoctorActive(doctor.id)}
-                      className={`rounded-lg px-2 py-1 text-xs font-bold ${doctor.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                      className={`rounded-lg px-2 py-1 text-xs font-bold ${
+                        doctor.active
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}
                     >
                       {doctor.active ? 'Active' : 'Disabled'}
                     </button>
@@ -448,135 +478,126 @@ const removeDoctor = (id: string) => {
                 </div>
               ))}
             </div>
-          </div>
-
-          <div>
-            <h4 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
-              Services
-            </h4>
-            <div className="space-y-2">
-              {services.map((service) => (
-                <div
-                  key={service.id}
-                  className={`flex items-center justify-between rounded-lg border p-3 ${service.active ? 'border-slate-200 bg-white' : 'border-red-200 bg-red-50'}`}
-                >
-                  <p className="font-bold text-slate-900">{service.name}</p>
-                  <button
-                    onClick={() => void toggleServiceActive(service.id)}
-                    className={`rounded-lg px-2 py-1 text-xs font-bold ${service.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
-                  >
-                    {service.active ? 'Active' : 'Disabled'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
         </div>
       ) : (
         <div className="space-y-6">
+          {error && (
+            <div
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700"
+            >
+              {error}
+            </div>
+          )}
+
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500">Doctors</h4>
+              <div>
+                <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Doctors
+                </h4>
+                <p className="mt-1 text-xs text-slate-500">
+                  Select one predefined service for each doctor.
+                </p>
+              </div>
               <button
+                type="button"
                 onClick={addDoctor}
-                disabled={tempServices.length === 0}
-                className="rounded-lg border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100"
               >
                 + Add doctor
               </button>
             </div>
-            {tempServices.length === 0 && (
-              <p className="mb-3 text-xs font-semibold text-amber-700">
-                Add at least one service before adding a doctor.
-              </p>
-            )}
+
             <div className="space-y-3">
-              {tempDoctors.map((doctor) => (
-                <div key={doctor.id} className="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_100px_40px]">
-                  <input
-                    type="text"
-                    value={doctor.name}
-                    onChange={(e) => updateDoctor(doctor.id, 'name', e.target.value)}
-                    placeholder="Doctor name"
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                  />
-                  <input
-                    type="text"
-                    value={doctor.specialization}
-                    onChange={(e) => updateDoctor(doctor.id, 'specialization', e.target.value)}
-                    placeholder="Qualification"
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                  />
-                  <select
-                    value={doctor.serviceId}
-                    onChange={(e) => updateDoctor(doctor.id, 'serviceId', e.target.value)}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                    required
+              {tempDoctors.map((doctor) => {
+                const isLegacyService =
+                  doctor.serviceKey.length > 0 &&
+                  !findPredefinedClinicService(doctor.serviceKey);
+
+                return (
+                  <div
+                    key={doctor.id}
+                    className="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_100px_40px]"
                   >
-                    <option value="">Select service</option>
-                    {tempServices.map((service) => (
-                      <option key={service.id} value={service.id}>
-                        {service.name || 'Untitled service'}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    value={doctor.fee}
-                    onChange={(e) => updateDoctor(doctor.id, 'fee', Number(e.target.value) || 0)}
-                    placeholder="Fee"
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                    min={0}
-                  />
-                  <button
-                    onClick={() => removeDoctor(doctor.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+                    <input
+                      type="text"
+                      value={doctor.name}
+                      onChange={(event) => updateDoctor(doctor.id, 'name', event.target.value)}
+                      placeholder="Doctor name"
+                      aria-label="Doctor name"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                    />
+                    <input
+                      type="text"
+                      value={doctor.specialization}
+                      onChange={(event) =>
+                        updateDoctor(doctor.id, 'specialization', event.target.value)
+                      }
+                      placeholder="Qualification"
+                      aria-label={`Qualification for ${doctor.name || 'new doctor'}`}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                    />
+                    <select
+                      value={doctor.serviceKey}
+                      onChange={(event) => {
+                        const selected = findPredefinedClinicService(event.target.value);
+                        updateDoctor(doctor.id, 'serviceKey', event.target.value);
+                        if (selected) {
+                          updateDoctor(doctor.id, 'serviceName', selected.service_name);
+                        }
+                      }}
+                      aria-label={`Service for ${doctor.name || 'new doctor'}`}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                      required
+                    >
+                      <option value="">Select service</option>
+                      {isLegacyService && (
+                        <option value={doctor.serviceKey}>
+                          {doctor.serviceName || doctor.serviceKey} (Current custom service)
+                        </option>
+                      )}
+                      {PREDEFINED_CLINIC_SERVICES.map((service) => (
+                        <option key={service.service_key} value={service.service_key}>
+                          {service.service_name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={doctor.fee}
+                      onChange={(event) =>
+                        updateDoctor(doctor.id, 'fee', Number(event.target.value) || 0)
+                      }
+                      placeholder="Fee"
+                      aria-label={`Fee for ${doctor.name || 'new doctor'}`}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                      min={0}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeDoctor(doctor.id)}
+                      aria-label={`Remove ${doctor.name || 'new doctor'}`}
+                      className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-            {tempDoctors.some((doctor) => !doctor.serviceId) && (
+
+            {tempDoctors.some((doctor) => doctor.name.trim() && !doctor.serviceKey) && (
               <p className="mt-2 text-xs font-semibold text-amber-700">
                 Each doctor must have a selected service.
               </p>
             )}
           </div>
 
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500">Services</h4>
-              <button
-                onClick={addService}
-                className="rounded-lg border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100"
-              >
-                + Add service
-              </button>
-            </div>
-            <div className="space-y-3">
-              {tempServices.map((service) => (
-                <div key={service.id} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={service.name}
-                    onChange={(e) => updateService(service.id, 'name', e.target.value)}
-                    placeholder="Service name"
-                    className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                  />
-                  <button
-                    onClick={() => removeService(service.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => void handleSave()}
               disabled={saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -584,6 +605,7 @@ const removeDoctor = (id: string) => {
               {saving ? 'Saving…' : 'Save'}
             </button>
             <button
+              type="button"
               onClick={handleCancel}
               disabled={saving}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"

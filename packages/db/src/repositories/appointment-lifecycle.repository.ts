@@ -55,6 +55,21 @@ export class AppointmentLifecycleRepository {
       .limit(1);
   }
 
+  findAppointmentByIdForUpdate(
+    clinicId: string,
+    appointmentId: string,
+    db: Database = this.db,
+  ) {
+    return db
+      .select()
+      .from(appointmentRequests)
+      .where(
+        and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)),
+      )
+      .for('update')
+      .limit(1);
+  }
+
   findAppointmentsByIds(clinicId: string, appointmentIds: string[]) {
     if (appointmentIds.length === 0) {
       return Promise.resolve([]);
@@ -268,8 +283,11 @@ export class AppointmentLifecycleRepository {
       .where(and(...filters));
   }
 
-  insertAppointmentEvent(values: typeof appointmentEvents.$inferInsert) {
-    return this.db.insert(appointmentEvents).values(values).returning();
+  insertAppointmentEvent(
+    values: typeof appointmentEvents.$inferInsert,
+    db: Database = this.db,
+  ) {
+    return db.insert(appointmentEvents).values(values).returning();
   }
 
   async insertNotificationEvent(values: typeof notificationEvents.$inferInsert) {

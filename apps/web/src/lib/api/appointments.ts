@@ -94,6 +94,17 @@ export async function cancelAppointment(clinicId: string, appointmentId: string)
   );
 }
 
+export async function rescheduleAppointment(
+  clinicId: string,
+  appointmentId: string,
+  newSlotId: string,
+) {
+  return apiPatch<{ appointment: unknown }>(
+    `/v1/clinics/${clinicId}/appointments/${appointmentId}/reschedule`,
+    { new_slot_id: newSlotId },
+  );
+}
+
 export type ManualAppointmentPayload = {
   patient_name: string;
   patient_phone?: string;

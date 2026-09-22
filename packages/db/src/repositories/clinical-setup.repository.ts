@@ -390,6 +390,21 @@ export class ClinicalSetupRepository {
     return this.db.insert(clinicServices).values(values).returning();
   }
 
+  upsertClinicService(values: typeof clinicServices.$inferInsert) {
+    return this.db
+      .insert(clinicServices)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [clinicServices.clinicId, clinicServices.serviceKey],
+        set: {
+          serviceName: values.serviceName,
+          active: values.active ?? true,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+  }
+
   listBookingRules(clinicId: string) {
     return this.db
       .select()

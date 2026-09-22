@@ -8,7 +8,7 @@ interface AppointmentCardProps {
   appointment: Appointment;
   bookingRules: BookingRules;
   onConfirm?: (id: string) => void;
-  onEditTime?: (id: string, newTime: string) => void;
+  onEditTime?: (id: string, newTime: string) => Promise<void>;
   onCancel?: (id: string) => void;
   onMarkVisited?: (id: string, visitReason: string) => void;
   onViewHistory?: (patientPhone: string) => void;
@@ -30,6 +30,8 @@ export function AppointmentCard({
   
   const [isEditingTime, setIsEditingTime] = useState(false);
   const [editedTime, setEditedTime] = useState(appointment.appointmentTime);
+  const [isSavingTime, setIsSavingTime] = useState(false);
+  const [editTimeError, setEditTimeError] = useState<string | null>(null);
   const [isMarkingVisited, setIsMarkingVisited] = useState(false);
   const [visitReason, setVisitReason] = useState('');
 
@@ -43,10 +45,22 @@ export function AppointmentCard({
     }
   };
 
-  const handleEditTimeSave = () => {
-    if (onEditTime && canEdit) {
-      onEditTime(appointment.id, editedTime);
+  const handleEditTimeSave = async () => {
+    if (!onEditTime || !canEdit || !editedTime || isSavingTime) {
+      return;
+    }
+
+    setIsSavingTime(true);
+    setEditTimeError(null);
+    try {
+      await onEditTime(appointment.id, editedTime);
       setIsEditingTime(false);
+    } catch (error) {
+      setEditTimeError(
+        error instanceof Error ? error.message : 'Unable to update the appointment time.',
+      );
+    } finally {
+      setIsSavingTime(false);
     }
   };
 
@@ -161,7 +175,11 @@ export function AppointmentCard({
 
         {appointment.status === 'confirmed' && canEdit && (
           <button
-            onClick={() => setIsEditingTime(true)}
+            onClick={() => {
+              setEditedTime(appointment.appointmentTime);
+              setEditTimeError(null);
+              setIsEditingTime(true);
+            }}
             className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
           >
             Edit Time
@@ -184,25 +202,37 @@ export function AppointmentCard({
             <input
               type="time"
               value={editedTime}
-              onChange={(e) => setEditedTime(e.target.value)}
+              onChange={(e) => {
+                setEditedTime(e.target.value);
+                setEditTimeError(null);
+              }}
+              disabled={isSavingTime}
               className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
             />
             <button
-              onClick={handleEditTimeSave}
-              className="rounded-lg border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100"
+              onClick={() => void handleEditTimeSave()}
+              disabled={isSavingTime || !editedTime}
+              className="rounded-lg border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Save
+              {isSavingTime ? 'Saving…' : 'Save'}
             </button>
             <button
+              disabled={isSavingTime}
               onClick={() => {
                 setIsEditingTime(false);
                 setEditedTime(appointment.appointmentTime);
+                setEditTimeError(null);
               }}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
           </div>
+          {editTimeError && (
+            <p role="alert" className="mb-2 text-xs font-semibold text-red-600">
+              {editTimeError}
+            </p>
+          )}
           <p className="text-xs text-slate-500">
             ⏱ Edit available within {bookingRules.manualEditCutoffBeforeStartMinutes} min of appointment. 
             Max shift: {bookingRules.manualEditMaxShiftMinutes} min.
