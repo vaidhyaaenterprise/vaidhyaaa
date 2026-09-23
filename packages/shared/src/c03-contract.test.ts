@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { APPOINTMENT_STATUSES, clinicRoleSchema, platformRoleSchema } from './enums/index';
 import {
-  APPOINTMENT_STATUSES,
-  clinicRoleSchema,
-  platformRoleSchema,
-} from './enums/index';
-import {
+  clinicProfilePatchSchema,
   clinicSettingsPatchSchema,
   clinicSettingsPutSchema,
   createAppointmentRequestSchema,
@@ -116,6 +113,31 @@ describe('C03 shared DTO contracts', () => {
     expect(enumsModule.APPOINTMENT_STATUSES.length).toBeGreaterThan(0);
     expect(dtoModule.createAppointmentRequestSchema).toBeDefined();
     expect(enumsModule).not.toHaveProperty('createAppointmentRequestSchema');
+  });
+
+  it('8. clinic profile patch allows details but rejects clinic identifiers', () => {
+    expect(
+      clinicProfilePatchSchema.safeParse({
+        name: 'High on Love Clinic',
+        primary_phone: '+91 98765 43210',
+        address_line1: 'Mettukuppam',
+        city: 'Chennai',
+      }).success,
+    ).toBe(true);
+
+    expect(
+      clinicProfilePatchSchema.safeParse({
+        name: 'Changed clinic',
+        clinic_unique_number: 9999,
+      }).success,
+    ).toBe(false);
+    expect(
+      clinicProfilePatchSchema.safeParse({
+        name: 'Changed clinic',
+        clinic_id: '00000000-0000-0000-0000-000000000001',
+      }).success,
+    ).toBe(false);
+    expect(clinicProfilePatchSchema.safeParse({}).success).toBe(false);
   });
 });
 

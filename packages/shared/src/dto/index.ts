@@ -80,6 +80,13 @@ export {
 } from './clinic-settings';
 
 export {
+  clinicProfilePatchSchema,
+  clinicProfileResponseSchema,
+  type ClinicProfilePatchInput,
+  type ClinicProfileResponse,
+} from './clinic-profile';
+
+export {
   createDoctorSchema,
   doctorResponseSchema,
   linkDoctorLoginSchema,

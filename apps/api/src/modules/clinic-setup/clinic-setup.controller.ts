@@ -3,6 +3,7 @@ import { FastifyRequest } from 'fastify';
 
 import {
   AppError,
+  clinicProfilePatchSchema,
   clinicSettingsPatchSchema,
   type AuthContext,
 } from '@vaidya/shared';
@@ -49,9 +50,24 @@ function mapSettingsResponse(settings: {
   };
 }
 
-function mapClinicUserRows(
-  rows: Awaited<ReturnType<ClinicUsersService['listUsers']>>['users'],
+function mapClinicProfileResponse(
+  profile: Awaited<ReturnType<ClinicSettingsService['getClinicProfile']>>,
 ) {
+  return {
+    name: profile.name,
+    clinic_unique_number: profile.uniqueNumber,
+    primary_phone: profile.primaryPhone,
+    address_line1: profile.addressLine1,
+    address_line2: profile.addressLine2,
+    city: profile.city,
+    state: profile.state,
+    postal_code: profile.postalCode,
+    country: profile.country,
+    timezone: profile.timezone,
+  };
+}
+
+function mapClinicUserRows(rows: Awaited<ReturnType<ClinicUsersService['listUsers']>>['users']) {
   return rows.map((row) => ({
     id: row.membership.id,
     clinic_id: row.membership.clinicId,
@@ -87,32 +103,46 @@ function resolveClinicIdFromLegacyRequest(
 @Controller('clinics/:clinicId/profile')
 @ClinicScoped()
 export class ClinicProfileController {
-  constructor(@Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService) {}
+  constructor(
+    @Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService,
+  ) {}
 
   @Get()
   async getProfile(@Param('clinicId') clinicId: string) {
     const profile = await this.settingsService.getClinicProfile(clinicId);
-    return {
-      clinic: {
-        name: profile.name,
-        clinic_unique_number: profile.uniqueNumber,
-        primary_phone: profile.primaryPhone,
-        address_line1: profile.addressLine1,
-        address_line2: profile.addressLine2,
-        city: profile.city,
-        state: profile.state,
-        postal_code: profile.postalCode,
-        country: profile.country,
-        timezone: profile.timezone,
-      },
-    };
+    return { clinic: mapClinicProfileResponse(profile) };
+  }
+
+  @Patch()
+  @ClinicAdmin()
+  async patchProfile(
+    @Param('clinicId') clinicId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = clinicProfilePatchSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid clinic profile payload.', {
+        fields: parsed.error.issues,
+      });
+    }
+
+    const auth = getAuthContext(request);
+    const profile = await this.settingsService.patchClinicProfile(
+      clinicId,
+      parsed.data,
+      auth.userId,
+    );
+    return { clinic: mapClinicProfileResponse(profile) };
   }
 }
 
 @Controller('clinics/:clinicId/settings')
 @ClinicScoped()
 export class ClinicSettingsController {
-  constructor(@Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService) {}
+  constructor(
+    @Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService,
+  ) {}
 
   @Get()
   @ClinicAdmin()
@@ -136,11 +166,7 @@ export class ClinicSettingsController {
     }
 
     const auth = getAuthContext(request);
-    const settings = await this.settingsService.patchSettings(
-      clinicId,
-      parsed.data,
-      auth.userId,
-    );
+    const settings = await this.settingsService.patchSettings(clinicId, parsed.data, auth.userId);
     return { settings: mapSettingsResponse(settings) };
   }
 }
@@ -148,7 +174,9 @@ export class ClinicSettingsController {
 @Controller('clinics/:clinicId/users')
 @ClinicScoped()
 export class ClinicUsersController {
-  constructor(@Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService) {}
+  constructor(
+    @Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService,
+  ) {}
 
   @Get()
   @ClinicAdmin()
@@ -244,7 +272,9 @@ export class ClinicUsersController {
 @Controller('clinic/users')
 @ClinicScoped()
 export class ClinicUsersLegacyController {
-  constructor(@Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService) {}
+  constructor(
+    @Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService,
+  ) {}
 
   @Get()
   @ClinicAdmin()

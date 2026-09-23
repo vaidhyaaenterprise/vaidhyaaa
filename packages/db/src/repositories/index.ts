@@ -38,6 +38,33 @@ import { ClinicalSetupRepository } from './clinical-setup.repository';
 import { SlotsRepository } from './slots.repository';
 import { CallInboxRepository } from './call-inbox.repository';
 
+const clinicProfileSelection = {
+  name: clinics.name,
+  uniqueNumber: clinics.uniqueNumber,
+  primaryPhone: clinics.primaryPhone,
+  addressLine1: clinics.addressLine1,
+  addressLine2: clinics.addressLine2,
+  city: clinics.city,
+  state: clinics.state,
+  postalCode: clinics.postalCode,
+  country: clinics.country,
+  timezone: clinics.timezone,
+};
+
+export type ClinicProfileUpdateValues = Partial<
+  Pick<
+    typeof clinics.$inferInsert,
+    | 'name'
+    | 'primaryPhone'
+    | 'addressLine1'
+    | 'addressLine2'
+    | 'city'
+    | 'state'
+    | 'postalCode'
+    | 'country'
+  >
+>;
+
 export { AuthRepository } from './auth.repository';
 export { OtpRepository, type OtpPurpose } from './otp.repository';
 export {
@@ -94,21 +121,18 @@ export class ClinicsRepository {
 
   getClinicLocation(clinicId: string) {
     return this.db
-      .select({
-        name: clinics.name,
-        uniqueNumber: clinics.uniqueNumber,
-        primaryPhone: clinics.primaryPhone,
-        addressLine1: clinics.addressLine1,
-        addressLine2: clinics.addressLine2,
-        city: clinics.city,
-        state: clinics.state,
-        postalCode: clinics.postalCode,
-        country: clinics.country,
-        timezone: clinics.timezone,
-      })
+      .select(clinicProfileSelection)
       .from(clinics)
       .where(eq(clinics.id, clinicId))
       .limit(1);
+  }
+
+  updateClinicProfile(clinicId: string, values: ClinicProfileUpdateValues) {
+    return this.db
+      .update(clinics)
+      .set({ ...values, updatedAt: new Date() })
+      .where(eq(clinics.id, clinicId))
+      .returning(clinicProfileSelection);
   }
 
   findClinicByPhone(phone: string) {

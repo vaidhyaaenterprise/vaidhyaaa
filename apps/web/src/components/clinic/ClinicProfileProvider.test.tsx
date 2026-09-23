@@ -1,29 +1,34 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  ClinicProfileProvider,
-  useClinicProfile,
-} from '@/components/clinic/ClinicProfileProvider';
+import { ClinicProfileProvider, useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { ClinicSwitcher } from '@/components/layout/ClinicSwitcher';
 import type { ClinicProfile } from '@/lib/api/clinic-settings';
 
 const authMock = vi.hoisted(() => ({
   clinicId: '00000000-0000-0000-0000-000000000111' as string | null,
   status: 'authenticated',
+  clinicRole: 'clinic_admin' as 'clinic_admin' | 'doctor',
+  platformRole: null as 'platform_admin' | null,
 }));
 
 const clinicApiMock = vi.hoisted(() => ({
   fetchClinicProfile: vi.fn(),
+  patchClinicProfile: vi.fn(),
 }));
 
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({
     status: authMock.status,
+    me: {
+      user: {
+        platform_role: authMock.platformRole,
+      },
+    },
     clinicRole: authMock.clinicId
       ? {
           clinic_id: authMock.clinicId,
-          role: 'clinic_admin',
+          role: authMock.clinicRole,
           doctor_id: null,
           active: true,
         }
@@ -33,6 +38,7 @@ vi.mock('@/components/auth/AuthProvider', () => ({
 
 vi.mock('@/lib/api/clinic-settings', () => ({
   fetchClinicProfile: clinicApiMock.fetchClinicProfile,
+  patchClinicProfile: clinicApiMock.patchClinicProfile,
 }));
 
 const HIGH_ON_LOVE: ClinicProfile = {
@@ -46,6 +52,16 @@ const HIGH_ON_LOVE: ClinicProfile = {
   postal_code: '600097',
   country: 'India',
   timezone: 'Asia/Kolkata',
+};
+
+const UPDATED_CLINIC: ClinicProfile = {
+  ...HIGH_ON_LOVE,
+  name: 'High on care',
+  primary_phone: '+91 90000 00000',
+  address_line1: '42 Clinic Road',
+  address_line2: null,
+  city: 'Coimbatore',
+  postal_code: '641001',
 };
 
 function deferred<T>() {
@@ -66,7 +82,10 @@ function ProfileProbe() {
 beforeEach(() => {
   authMock.clinicId = '00000000-0000-0000-0000-000000000111';
   authMock.status = 'authenticated';
+  authMock.clinicRole = 'clinic_admin';
+  authMock.platformRole = null;
   clinicApiMock.fetchClinicProfile.mockReset();
+  clinicApiMock.patchClinicProfile.mockReset();
 });
 
 afterEach(() => {
@@ -119,6 +138,152 @@ describe('ClinicProfileProvider', () => {
 
     expect(screen.getByText('High on love')).toBeInTheDocument();
     expect(screen.queryByText('Loading clinic…')).not.toBeInTheDocument();
+    expect(clinicApiMock.fetchClinicProfile).toHaveBeenCalledOnce();
+  });
+
+  it('opens an admin-only edit dialog without exposing the clinic identifier and cancels cleanly', async () => {
+    clinicApiMock.fetchClinicProfile.mockResolvedValue(HIGH_ON_LOVE);
+
+    render(
+      <ClinicProfileProvider>
+        <ClinicSwitcher />
+      </ClinicProfileProvider>,
+    );
+
+    expect(await screen.findByText('High on love')).toBeInTheDocument();
+    expect(screen.getByText('#1003')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit clinic details' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit clinic details' });
+    expect(within(dialog).getByRole('textbox', { name: 'Clinic name' })).toHaveValue(
+      'High on love',
+    );
+    expect(within(dialog).getByRole('textbox', { name: 'Phone number' })).toHaveValue('9876543211');
+    expect(within(dialog).getByRole('textbox', { name: 'Address line 1' })).toHaveValue(
+      'Mettukuppam',
+    );
+    expect(within(dialog).getByRole('textbox', { name: 'Address line 2' })).toHaveValue('');
+    expect(within(dialog).getByRole('textbox', { name: 'City' })).toHaveValue('Chennai');
+    expect(within(dialog).getByRole('textbox', { name: 'State' })).toHaveValue('Tamil Nadu');
+    expect(within(dialog).getByRole('textbox', { name: 'Postal code' })).toHaveValue('600097');
+    expect(within(dialog).getByRole('textbox', { name: 'Country' })).toHaveValue('India');
+    expect(
+      within(dialog).queryByLabelText(/clinic (?:id|number|unique number)/i),
+    ).not.toBeInTheDocument();
+    expect(within(dialog).queryByDisplayValue('1003')).not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Clinic name' }), {
+      target: { value: 'Discarded clinic name' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Edit clinic details' })).not.toBeInTheDocument();
+    expect(screen.getByText('High on love')).toBeInTheDocument();
+    expect(screen.getByText('#1003')).toBeInTheDocument();
+    expect(clinicApiMock.patchClinicProfile).not.toHaveBeenCalled();
+  });
+
+  it('hides the clinic edit control from doctors', async () => {
+    authMock.clinicRole = 'doctor';
+    clinicApiMock.fetchClinicProfile.mockResolvedValue(HIGH_ON_LOVE);
+
+    render(
+      <ClinicProfileProvider>
+        <ClinicSwitcher />
+      </ClinicProfileProvider>,
+    );
+
+    expect(await screen.findByText('High on love')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit clinic details' })).not.toBeInTheDocument();
+  });
+
+  it('saves editable profile fields and updates provider state without refetching', async () => {
+    clinicApiMock.fetchClinicProfile.mockResolvedValue(HIGH_ON_LOVE);
+    clinicApiMock.patchClinicProfile.mockResolvedValue(UPDATED_CLINIC);
+
+    render(
+      <ClinicProfileProvider>
+        <ClinicSwitcher />
+      </ClinicProfileProvider>,
+    );
+
+    expect(await screen.findByText('High on love')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit clinic details' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit clinic details' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Clinic name' }), {
+      target: { value: '  High on care  ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Phone number' }), {
+      target: { value: '  +91 90000 00000  ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Address line 1' }), {
+      target: { value: '  42 Clinic Road  ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Address line 2' }), {
+      target: { value: '   ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'City' }), {
+      target: { value: '  Coimbatore  ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'State' }), {
+      target: { value: '  Tamil Nadu  ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Postal code' }), {
+      target: { value: '  641001  ' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Country' }), {
+      target: { value: '  India  ' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(clinicApiMock.patchClinicProfile).toHaveBeenCalledWith(
+        '00000000-0000-0000-0000-000000000111',
+        {
+          name: 'High on care',
+          primary_phone: '+91 90000 00000',
+          address_line1: '42 Clinic Road',
+          address_line2: null,
+          city: 'Coimbatore',
+          state: 'Tamil Nadu',
+          postal_code: '641001',
+          country: 'India',
+        },
+      );
+    });
+    expect(await screen.findByText('High on care')).toBeInTheDocument();
+    expect(screen.getByText('42 Clinic Road, Coimbatore, Tamil Nadu, 641001')).toBeInTheDocument();
+    expect(screen.getByText('Clinic line: +91 90000 00000')).toBeInTheDocument();
+    expect(screen.getByText('#1003')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Edit clinic details' })).not.toBeInTheDocument();
+    expect(clinicApiMock.fetchClinicProfile).toHaveBeenCalledOnce();
+  });
+
+  it('keeps unsaved values in the dialog and preserves the ready profile when saving fails', async () => {
+    clinicApiMock.fetchClinicProfile.mockResolvedValue(HIGH_ON_LOVE);
+    clinicApiMock.patchClinicProfile.mockRejectedValue(new Error('Clinic update failed.'));
+
+    render(
+      <ClinicProfileProvider>
+        <ClinicSwitcher />
+      </ClinicProfileProvider>,
+    );
+
+    expect(await screen.findByText('High on love')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit clinic details' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit clinic details' });
+    const nameInput = within(dialog).getByRole('textbox', { name: 'Clinic name' });
+    fireEvent.change(nameInput, { target: { value: 'Still in the form' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Clinic update failed.');
+    expect(nameInput).toHaveValue('Still in the form');
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    expect(screen.getByText('High on love')).toBeInTheDocument();
     expect(clinicApiMock.fetchClinicProfile).toHaveBeenCalledOnce();
   });
 

@@ -8,7 +8,7 @@ import {
   formatClinicLocalTimestamp,
   formatDateInTimezone,
 } from '@vaidya/db';
-import { apiSuccessBodySchema } from '@vaidya/shared';
+import { apiErrorBodySchema, apiSuccessBodySchema } from '@vaidya/shared';
 
 import { prepareTestDatabase } from './db-setup';
 import { createTestApp } from './test-app';
@@ -43,6 +43,13 @@ describe('C08 web API to DB connectivity', () => {
     role: 'clinic_admin',
   });
 
+  const doctorHeaders = devAuthHeaders({
+    userId: SEED.DOCTOR_PRIYA_USER_ID,
+    clinicId: SEED.CLINIC_ID,
+    role: 'doctor',
+    doctorId: SEED.DOCTOR_PRIYA_ID,
+  });
+
   const platformHeaders = devAuthHeaders({
     userId: SEED.PLATFORM_ADMIN_ID,
     role: 'platform_admin',
@@ -56,8 +63,7 @@ describe('C08 web API to DB connectivity', () => {
 
   beforeAll(async () => {
     process.env.DATABASE_URL =
-      process.env.TEST_DATABASE_URL ??
-      'postgresql://postgres:postgres@localhost:5433/vaidya_test';
+      process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test';
     await prepareTestDatabase();
     app = await createTestApp();
     sql = postgres(process.env.DATABASE_URL, { max: 1 });
@@ -137,6 +143,147 @@ describe('C08 web API to DB connectivity', () => {
       WHERE id = ${doctorMembership!.id}::uuid
     `;
     expect(enabledMembership?.active).toBe(true);
+  });
+
+  it('1a. clinic admins can update profile details without changing clinic identifiers', async () => {
+    const [before] = await sql<
+      {
+        id: string;
+        unique_number: number;
+        timezone: string;
+      }[]
+    >`
+      SELECT id, unique_number, timezone
+      FROM clinics
+      WHERE id = ${SEED.CLINIC_ID}::uuid
+    `;
+
+    expect(before).toBeTruthy();
+
+    const patchResponse = await app.inject({
+      method: 'PATCH',
+      url: `/v1/clinics/${SEED.CLINIC_ID}/profile`,
+      headers: adminHeaders,
+      payload: {
+        name: 'C08 Updated Clinic',
+        primary_phone: '+91 98765 43219',
+        address_line1: '42 Connectivity Road',
+        address_line2: 'Second Floor',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        postal_code: '600097',
+        country: 'India',
+      },
+    });
+
+    expect(patchResponse.statusCode).toBe(200);
+    const patchBody = apiSuccessBodySchema.parse(patchResponse.json()).data as {
+      clinic: {
+        name: string;
+        clinic_unique_number: number;
+        primary_phone: string | null;
+        address_line1: string | null;
+        address_line2: string | null;
+        city: string | null;
+        state: string | null;
+        postal_code: string | null;
+        country: string | null;
+        timezone: string;
+      };
+    };
+    expect(patchBody.clinic).toEqual({
+      name: 'C08 Updated Clinic',
+      clinic_unique_number: before?.unique_number,
+      primary_phone: '+91 98765 43219',
+      address_line1: '42 Connectivity Road',
+      address_line2: 'Second Floor',
+      city: 'Chennai',
+      state: 'Tamil Nadu',
+      postal_code: '600097',
+      country: 'India',
+      timezone: before?.timezone,
+    });
+
+    const [updated] = await sql<
+      {
+        id: string;
+        unique_number: number;
+        name: string;
+        primary_phone: string | null;
+        address_line1: string | null;
+        address_line2: string | null;
+        city: string | null;
+        state: string | null;
+        postal_code: string | null;
+        country: string | null;
+        timezone: string;
+      }[]
+    >`
+      SELECT
+        id,
+        unique_number,
+        name,
+        primary_phone,
+        address_line1,
+        address_line2,
+        city,
+        state,
+        postal_code,
+        country,
+        timezone
+      FROM clinics
+      WHERE id = ${SEED.CLINIC_ID}::uuid
+    `;
+    expect(updated).toEqual({
+      id: before?.id,
+      unique_number: before?.unique_number,
+      name: 'C08 Updated Clinic',
+      primary_phone: '+91 98765 43219',
+      address_line1: '42 Connectivity Road',
+      address_line2: 'Second Floor',
+      city: 'Chennai',
+      state: 'Tamil Nadu',
+      postal_code: '600097',
+      country: 'India',
+      timezone: before?.timezone,
+    });
+
+    const doctorPatchResponse = await app.inject({
+      method: 'PATCH',
+      url: `/v1/clinics/${SEED.CLINIC_ID}/profile`,
+      headers: doctorHeaders,
+      payload: { name: 'Doctor must not update the clinic' },
+    });
+
+    expect(doctorPatchResponse.statusCode).toBe(403);
+    const doctorError = apiErrorBodySchema.parse(doctorPatchResponse.json());
+    expect(doctorError.error.code).toBe('FORBIDDEN');
+
+    const identifierPatchResponse = await app.inject({
+      method: 'PATCH',
+      url: `/v1/clinics/${SEED.CLINIC_ID}/profile`,
+      headers: adminHeaders,
+      payload: {
+        name: 'Must not be applied',
+        clinic_id: '00000000-0000-0000-0000-000000000999',
+        clinic_unique_number: (before?.unique_number ?? 0) + 1,
+      },
+    });
+
+    expect(identifierPatchResponse.statusCode).toBe(400);
+    const identifierError = apiErrorBodySchema.parse(identifierPatchResponse.json());
+    expect(identifierError.error.code).toBe('VALIDATION_ERROR');
+
+    const [afterRejectedPatch] = await sql<{ id: string; unique_number: number; name: string }[]>`
+      SELECT id, unique_number, name
+      FROM clinics
+      WHERE id = ${SEED.CLINIC_ID}::uuid
+    `;
+    expect(afterRejectedPatch).toEqual({
+      id: before?.id,
+      unique_number: before?.unique_number,
+      name: 'C08 Updated Clinic',
+    });
   });
 
   it('2. doctors/services/mappings CRUD endpoints are DB-backed', async () => {
@@ -225,7 +372,9 @@ describe('C08 web API to DB connectivity', () => {
     const mappingsBody = apiSuccessBodySchema.parse(mappingsResponse.json()).data as {
       doctor_services: Array<{ id: string }>;
     };
-    expect(mappingsBody.doctor_services.some((mapping) => mapping.id === createdMappingId)).toBe(true);
+    expect(mappingsBody.doctor_services.some((mapping) => mapping.id === createdMappingId)).toBe(
+      true,
+    );
 
     const patchServiceResponse = await app.inject({
       method: 'PATCH',
@@ -567,9 +716,8 @@ describe('C08 web API to DB connectivity', () => {
     });
 
     expect(listActionRequestsResponse.statusCode).toBe(200);
-    const listActionRequestsBody = apiSuccessBodySchema.parse(
-      listActionRequestsResponse.json(),
-    ).data as {
+    const listActionRequestsBody = apiSuccessBodySchema.parse(listActionRequestsResponse.json())
+      .data as {
       action_requests: Array<{ id: string }>;
     };
     expect(
@@ -779,7 +927,9 @@ describe('C08 web API to DB connectivity', () => {
       notifications: Array<{ id: string }>;
     };
     expect(
-      notificationsBody.notifications.some((notification) => notification.id === notificationRow?.id),
+      notificationsBody.notifications.some(
+        (notification) => notification.id === notificationRow?.id,
+      ),
     ).toBe(true);
 
     const [jobRow] = await sql<{ id: string }[]>`
@@ -815,9 +965,9 @@ describe('C08 web API to DB connectivity', () => {
       recent_runs: Array<{ id: string; status: string }>;
     };
 
-    expect(
-      jobHealthBody.health.some((row) => row.status === 'pending' && row.count >= 1),
-    ).toBe(true);
+    expect(jobHealthBody.health.some((row) => row.status === 'pending' && row.count >= 1)).toBe(
+      true,
+    );
     expect(jobHealthBody.recent_runs.some((row) => row.id === jobRow?.id)).toBe(true);
   });
 
@@ -982,14 +1132,16 @@ describe('C08 web API to DB connectivity', () => {
 
     const knowledgeId = createBody.knowledge.id;
 
-    const [createdRow] = await sql<{
-      embedding_status: string;
-      question_embedding: unknown;
-      answer_embedding: unknown;
-      embedding: unknown;
-      embedding_generated_at: Date | null;
-      approved_at: Date | null;
-    }[]>`
+    const [createdRow] = await sql<
+      {
+        embedding_status: string;
+        question_embedding: unknown;
+        answer_embedding: unknown;
+        embedding: unknown;
+        embedding_generated_at: Date | null;
+        approved_at: Date | null;
+      }[]
+    >`
       SELECT
         embedding_status,
         question_embedding,
@@ -1028,14 +1180,16 @@ describe('C08 web API to DB connectivity', () => {
     };
     expect(patchBody.knowledge.id).toBe(knowledgeId);
 
-    const [patchedRow] = await sql<{
-      answer: string;
-      embedding_status: string;
-      question_embedding: unknown;
-      answer_embedding: unknown;
-      embedding_generated_at: Date | null;
-      approved_at: Date | null;
-    }[]>`
+    const [patchedRow] = await sql<
+      {
+        answer: string;
+        embedding_status: string;
+        question_embedding: unknown;
+        answer_embedding: unknown;
+        embedding_generated_at: Date | null;
+        approved_at: Date | null;
+      }[]
+    >`
       SELECT
         answer,
         embedding_status,
@@ -1206,10 +1360,12 @@ describe('C08 web API to DB connectivity', () => {
       WHERE clinic_id = ${SEED.CLINIC_ID}::uuid
       ORDER BY language_code
     `;
-    expect(languageRows.some((row) => row.language_code === 'english' && row.is_default)).toBe(true);
-    expect(
-      languageRows.some((row) => row.language_code === 'ta_tanglish' && row.enabled),
-    ).toBe(true);
+    expect(languageRows.some((row) => row.language_code === 'english' && row.is_default)).toBe(
+      true,
+    );
+    expect(languageRows.some((row) => row.language_code === 'ta_tanglish' && row.enabled)).toBe(
+      true,
+    );
 
     const supportedLanguagesResponse = await app.inject({
       method: 'GET',
@@ -1218,10 +1374,13 @@ describe('C08 web API to DB connectivity', () => {
     });
 
     expect(supportedLanguagesResponse.statusCode).toBe(200);
-    const supportedLanguagesBody = apiSuccessBodySchema.parse(supportedLanguagesResponse.json()).data as {
+    const supportedLanguagesBody = apiSuccessBodySchema.parse(supportedLanguagesResponse.json())
+      .data as {
       languages: Array<{ language_code: string }>;
     };
-    expect(supportedLanguagesBody.languages.some((row) => row.language_code === 'english')).toBe(true);
+    expect(supportedLanguagesBody.languages.some((row) => row.language_code === 'english')).toBe(
+      true,
+    );
 
     const plansResponse = await app.inject({
       method: 'GET',

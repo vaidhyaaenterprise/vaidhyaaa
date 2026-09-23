@@ -1,5 +1,7 @@
 import { apiGet, apiPatch } from '@/lib/api/client';
 
+import type { ClinicProfilePatchInput, ClinicProfileResponse } from '@vaidya/shared';
+
 export type ClinicSettingsResponse = {
   clinic_id: string;
   agent_enabled: boolean;
@@ -23,21 +25,16 @@ export async function fetchClinicSettings(clinicId: string) {
   return data.settings;
 }
 
-export type ClinicProfile = {
-  name: string;
-  clinic_unique_number: number;
-  primary_phone: string | null;
-  address_line1: string | null;
-  address_line2: string | null;
-  city: string | null;
-  state: string | null;
-  postal_code: string | null;
-  country: string | null;
-  timezone: string;
-};
+export type ClinicProfile = ClinicProfileResponse;
+export type ClinicProfilePatch = ClinicProfilePatchInput;
 
 export async function fetchClinicProfile(clinicId: string) {
   const data = await apiGet<{ clinic: ClinicProfile }>(`/v1/clinics/${clinicId}/profile`);
+  return data.clinic;
+}
+
+export async function patchClinicProfile(clinicId: string, patch: ClinicProfilePatch) {
+  const data = await apiPatch<{ clinic: ClinicProfile }>(`/v1/clinics/${clinicId}/profile`, patch);
   return data.clinic;
 }
 
