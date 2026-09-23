@@ -38,6 +38,24 @@ export type AppointmentActionRequestApiRow = {
   status: string;
 };
 
+export type AppointmentActivityApiRow = {
+  id: string;
+  appointment_id: string;
+  patient_name: string;
+  patient_phone: string | null;
+  doctor_id: string;
+  doctor_name: string;
+  clinic_service_id: string;
+  service_name: string;
+  reason_for_visit: string;
+  action_type: 'reschedule' | 'cancel';
+  occurred_at: string;
+  previous_appointment_start: string | null;
+  previous_appointment_end: string | null;
+  appointment_start: string;
+  appointment_end: string;
+};
+
 export type AppointmentAvailableSlotApiRow = {
   slot_id: string;
   doctor_id: string;
@@ -60,6 +78,13 @@ export async function fetchAppointmentActionRequests(clinicId: string) {
     `/v1/clinics/${clinicId}/appointments/action-requests`,
   );
   return data.action_requests;
+}
+
+export async function fetchAppointmentActivity(clinicId: string) {
+  const data = await apiGet<{ activities: AppointmentActivityApiRow[] }>(
+    `/v1/clinics/${clinicId}/appointments/activity`,
+  );
+  return data.activities;
 }
 
 export async function fetchAvailableAppointmentSlots(

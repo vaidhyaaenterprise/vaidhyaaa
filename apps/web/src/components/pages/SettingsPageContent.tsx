@@ -37,10 +37,7 @@ import type {
 function mapSettingsToAgent(settings: ClinicSettingsResponse): AgentSettingsType {
   return {
     agentEnabled: settings.agent_enabled,
-    answeringMode: settings.answering_mode as AgentSettingsType['answeringMode'],
     bookingMode: settings.booking_mode as AgentSettingsType['bookingMode'],
-    fallbackPhone: settings.fallback_phone ?? '',
-    overflowAfterRings: settings.overflow_after_rings ?? 4,
     onboardingComplete: true,
   };
 }
@@ -48,9 +45,6 @@ function mapSettingsToAgent(settings: ClinicSettingsResponse): AgentSettingsType
 function mapSettingsToNotification(settings: ClinicSettingsResponse): NotificationSettingsType {
   return {
     notifyStaffOnPendingAppointment: settings.notify_staff_on_pending_appointment,
-    pendingNotificationChannel:
-      (settings.pending_appointment_notification_channel as NotificationSettingsType['pendingNotificationChannel']) ??
-      'whatsapp',
     notificationContacts: [],
   };
 }
@@ -162,10 +156,7 @@ export function SettingsPageContent() {
     const next = { ...agentSettings, ...settings };
     const saved = await patchClinicSettings(clinicId, {
       agent_enabled: next.agentEnabled,
-      answering_mode: next.answeringMode,
       booking_mode: next.bookingMode,
-      fallback_phone: next.fallbackPhone,
-      overflow_after_rings: next.overflowAfterRings,
     });
     setAgentSettings(mapSettingsToAgent(saved));
   };
@@ -177,13 +168,8 @@ export function SettingsPageContent() {
     const next = { ...notificationSettings, ...settings };
     const saved = await patchClinicSettings(clinicId, {
       notify_staff_on_pending_appointment: next.notifyStaffOnPendingAppointment,
-      pending_appointment_notification_channel: next.pendingNotificationChannel,
     });
     setNotificationSettings(mapSettingsToNotification(saved));
-  };
-
-  const handleTestNotification = () => {
-    // Notification test API not yet exposed
   };
 
   const handleUpdateLanguageSettings = async (settings: Partial<LanguageSettingsType>) => {
@@ -272,7 +258,6 @@ export function SettingsPageContent() {
               settings={notificationSettings}
               notificationEvents={notificationEvents}
               onUpdateSettings={handleUpdateNotificationSettings}
-              onTestNotification={handleTestNotification}
             />
           </>
         )}

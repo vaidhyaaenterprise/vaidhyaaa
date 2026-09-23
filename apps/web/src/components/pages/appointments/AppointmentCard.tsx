@@ -7,32 +7,37 @@ import type { Appointment, BookingRules } from './types';
 interface AppointmentCardProps {
   appointment: Appointment;
   bookingRules: BookingRules;
+  minimumEditDate?: string | undefined;
   onConfirm?: (id: string) => void;
-  onEditTime?: (id: string, newTime: string) => Promise<void>;
+  onEditTime?: (id: string, newDate: string, newTime: string) => Promise<void>;
   onCancel?: (id: string) => void;
-  onMarkVisited?: (id: string, visitReason: string) => void;
+  onMarkVisited?: (id: string, visitReason: string) => Promise<void>;
   onViewHistory?: (patientPhone: string) => void;
 }
 
 export function AppointmentCard({
   appointment,
   bookingRules,
+  minimumEditDate,
   onConfirm,
   onEditTime,
   onCancel,
   onMarkVisited,
   onViewHistory,
 }: AppointmentCardProps) {
-  const { effectiveRole, me } = useAuth();
+  const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
-  const currentDoctorId = me?.clinics[0]?.doctor_id;
+  const currentDoctorId = clinicRole?.doctor_id;
   const isOwnAppointment = currentDoctorId ? currentDoctorId === appointment.doctorId : false;
   
   const [isEditingTime, setIsEditingTime] = useState(false);
+  const [editedDate, setEditedDate] = useState(appointment.appointmentDate);
   const [editedTime, setEditedTime] = useState(appointment.appointmentTime);
   const [isSavingTime, setIsSavingTime] = useState(false);
   const [editTimeError, setEditTimeError] = useState<string | null>(null);
   const [isMarkingVisited, setIsMarkingVisited] = useState(false);
+  const [isSavingVisit, setIsSavingVisit] = useState(false);
+  const [visitError, setVisitError] = useState<string | null>(null);
   const [visitReason, setVisitReason] = useState('');
 
   const canEdit = isAdmin || (isOwnAppointment && bookingRules.allowDoctorServiceEdit);
@@ -46,14 +51,14 @@ export function AppointmentCard({
   };
 
   const handleEditTimeSave = async () => {
-    if (!onEditTime || !canEdit || !editedTime || isSavingTime) {
+    if (!onEditTime || !canEdit || !editedDate || !editedTime || isSavingTime) {
       return;
     }
 
     setIsSavingTime(true);
     setEditTimeError(null);
     try {
-      await onEditTime(appointment.id, editedTime);
+      await onEditTime(appointment.id, editedDate, editedTime);
       setIsEditingTime(false);
     } catch (error) {
       setEditTimeError(
@@ -64,11 +69,24 @@ export function AppointmentCard({
     }
   };
 
-  const handleMarkVisitedSave = () => {
-    if (onMarkVisited && canMarkVisited && visitReason.trim()) {
-      onMarkVisited(appointment.id, visitReason);
+  const handleMarkVisitedSave = async () => {
+    const trimmedVisitReason = visitReason.trim();
+    if (!onMarkVisited || !canMarkVisited || !trimmedVisitReason || isSavingVisit) {
+      return;
+    }
+
+    setIsSavingVisit(true);
+    setVisitError(null);
+    try {
+      await onMarkVisited(appointment.id, trimmedVisitReason);
       setIsMarkingVisited(false);
       setVisitReason('');
+    } catch (error) {
+      setVisitError(
+        error instanceof Error ? error.message : 'Unable to mark the appointment as visited.',
+      );
+    } finally {
+      setIsSavingVisit(false);
     }
   };
 
@@ -166,7 +184,10 @@ export function AppointmentCard({
 
         {appointment.status === 'confirmed' && canMarkVisited && (
           <button
-            onClick={() => setIsMarkingVisited(true)}
+            onClick={() => {
+              setVisitError(null);
+              setIsMarkingVisited(true);
+            }}
             className="rounded-xl border-2 border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100"
           >
             ✓ Mark Visited
@@ -176,6 +197,7 @@ export function AppointmentCard({
         {appointment.status === 'confirmed' && canEdit && (
           <button
             onClick={() => {
+              setEditedDate(appointment.appointmentDate);
               setEditedTime(appointment.appointmentTime);
               setEditTimeError(null);
               setIsEditingTime(true);
@@ -198,20 +220,39 @@ export function AppointmentCard({
 
       {isEditingTime && (
         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Appointment date
+              <input
+                type="date"
+                min={minimumEditDate}
+                value={editedDate}
+                onChange={(e) => {
+                  setEditedDate(e.target.value);
+                  setEditTimeError(null);
+                }}
+                disabled={isSavingTime}
+                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-semibold normal-case tracking-normal text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+              />
+            </label>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Appointment time
+              <input
+                type="time"
+                value={editedTime}
+                onChange={(e) => {
+                  setEditedTime(e.target.value);
+                  setEditTimeError(null);
+                }}
+                disabled={isSavingTime}
+                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-semibold normal-case tracking-normal text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+              />
+            </label>
+          </div>
           <div className="mb-2 flex items-center gap-2">
-            <input
-              type="time"
-              value={editedTime}
-              onChange={(e) => {
-                setEditedTime(e.target.value);
-                setEditTimeError(null);
-              }}
-              disabled={isSavingTime}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-            />
             <button
               onClick={() => void handleEditTimeSave()}
-              disabled={isSavingTime || !editedTime}
+              disabled={isSavingTime || !editedDate || !editedTime}
               className="rounded-lg border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSavingTime ? 'Saving…' : 'Save'}
@@ -220,6 +261,7 @@ export function AppointmentCard({
               disabled={isSavingTime}
               onClick={() => {
                 setIsEditingTime(false);
+                setEditedDate(appointment.appointmentDate);
                 setEditedTime(appointment.appointmentTime);
                 setEditTimeError(null);
               }}
@@ -244,29 +286,47 @@ export function AppointmentCard({
         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <textarea
             value={visitReason}
-            onChange={(e) => setVisitReason(e.target.value)}
+            onChange={(e) => {
+              setVisitReason(e.target.value);
+              setVisitError(null);
+            }}
+            disabled={isSavingVisit}
+            aria-label="Visit reason"
+            aria-invalid={visitError ? true : undefined}
+            aria-describedby={visitError ? `visit-error-${appointment.id}` : undefined}
             placeholder="Enter visit reason (required)..."
             className="mb-2 w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
             rows={2}
           />
           <div className="flex gap-2">
             <button
-              onClick={handleMarkVisitedSave}
-              disabled={!visitReason.trim()}
+              onClick={() => void handleMarkVisitedSave()}
+              disabled={isSavingVisit || !visitReason.trim()}
               className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save Visit
+              {isSavingVisit ? 'Saving Visit…' : 'Save Visit'}
             </button>
             <button
+              disabled={isSavingVisit}
               onClick={() => {
                 setIsMarkingVisited(false);
                 setVisitReason('');
+                setVisitError(null);
               }}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
           </div>
+          {visitError && (
+            <p
+              id={`visit-error-${appointment.id}`}
+              role="alert"
+              className="mt-2 text-xs font-semibold text-red-600"
+            >
+              {visitError}
+            </p>
+          )}
         </div>
       )}
     </div>

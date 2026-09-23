@@ -9,7 +9,7 @@ interface PendingAppointmentsProps {
   emptyMessage?: string;
   bookingRules: BookingRules;
   onConfirm: (id: string) => void;
-  onEditTime: (id: string, newTime: string) => Promise<void>;
+  onEditTime: (id: string, newDate: string, newTime: string) => Promise<void>;
   onCancel: (id: string) => void;
   onViewHistory: (patientPhone: string) => void;
 }
@@ -23,9 +23,9 @@ export function PendingAppointments({
   onCancel,
   onViewHistory,
 }: PendingAppointmentsProps) {
-  const { effectiveRole, me } = useAuth();
+  const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
-  const currentDoctorId = me?.clinics[0]?.doctor_id;
+  const currentDoctorId = clinicRole?.doctor_id;
 
   // Filter appointments based on role
   const filteredAppointments = isAdmin

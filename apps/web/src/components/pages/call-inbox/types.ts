@@ -35,10 +35,5 @@ export interface Call {
 }
 
 export interface CallFilters {
-  dateRange?: { start: string; end: string };
   outcomes: CallOutcome[];
-  emergencyOnly?: boolean;
-  callbackOnly?: boolean;
-  appointmentRequestOnly?: boolean;
-  actionNeeded?: boolean;
 }

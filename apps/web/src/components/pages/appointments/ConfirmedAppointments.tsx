@@ -7,23 +7,25 @@ import type { Appointment, BookingRules } from './types';
 interface ConfirmedAppointmentsProps {
   appointments: Appointment[];
   bookingRules: BookingRules;
-  onEditTime: (id: string, newTime: string) => Promise<void>;
+  minimumEditDate?: string | undefined;
+  onEditTime: (id: string, newDate: string, newTime: string) => Promise<void>;
   onCancel: (id: string) => void;
-  onMarkVisited: (id: string, visitReason: string) => void;
+  onMarkVisited: (id: string, visitReason: string) => Promise<void>;
   onViewHistory: (patientPhone: string) => void;
 }
 
 export function ConfirmedAppointments({
   appointments,
   bookingRules,
+  minimumEditDate,
   onEditTime,
   onCancel,
   onMarkVisited,
   onViewHistory,
 }: ConfirmedAppointmentsProps) {
-  const { effectiveRole, me } = useAuth();
+  const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
-  const currentDoctorId = me?.clinics[0]?.doctor_id;
+  const currentDoctorId = clinicRole?.doctor_id;
 
   const filteredAppointments = isAdmin
     ? appointments
@@ -43,15 +45,17 @@ export function ConfirmedAppointments({
   if (filteredAppointments.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-4 text-lg font-bold text-slate-900">Confirmed today</h3>
-        <p className="text-sm text-slate-500">No confirmed appointments</p>
+        <h3 className="mb-1 text-lg font-bold text-slate-900">Confirmed appointments</h3>
+        <p className="mb-4 text-sm text-slate-500">Today and upcoming confirmed appointments.</p>
+        <p className="text-sm text-slate-500">No current or upcoming confirmed appointments</p>
       </div>
     );
   }
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h3 className="mb-4 text-lg font-bold text-slate-900">Confirmed today</h3>
+      <h3 className="mb-1 text-lg font-bold text-slate-900">Confirmed appointments</h3>
+      <p className="mb-4 text-sm text-slate-500">Today and upcoming confirmed appointments.</p>
       <div className="space-y-4">
         {Object.entries(groupedAppointments).map(([doctorId, group]) => (
           <div key={doctorId} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -64,6 +68,7 @@ export function ConfirmedAppointments({
                   key={appointment.id}
                   appointment={appointment}
                   bookingRules={bookingRules}
+                  minimumEditDate={minimumEditDate}
                   onEditTime={onEditTime}
                   onCancel={onCancel}
                   onMarkVisited={onMarkVisited}

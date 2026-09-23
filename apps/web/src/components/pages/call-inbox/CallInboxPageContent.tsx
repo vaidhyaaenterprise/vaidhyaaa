@@ -35,19 +35,6 @@ function mapOutcome(value: string | null): CallOutcome | null {
 }
 
 function matchesFilters(call: Call, filters: CallFilters): boolean {
-  if (filters.emergencyOnly && call.outcome !== 'emergency') return false;
-  if (filters.callbackOnly && call.outcome !== 'callback_requested') return false;
-  if (
-    filters.appointmentRequestOnly &&
-    ![
-      'appointment_booked',
-      'appointment_cancelled',
-      'appointment_rescheduled',
-    ].includes(call.outcome)
-  ) {
-    return false;
-  }
-  if (filters.actionNeeded && call.actionNeeded === 'none') return false;
   if (filters.outcomes.length > 0 && !filters.outcomes.includes(call.outcome)) return false;
   return true;
 }
@@ -74,11 +61,7 @@ export function CallInboxPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [calls, setCalls] = useState<Call[]>([]);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
-  const [filters, setFilters] = useState<CallFilters>({
-    outcomes: [],
-    emergencyOnly: false,
-    callbackOnly: false,
-  });
+  const [filters, setFilters] = useState<CallFilters>({ outcomes: [] });
   const [outcomeMenuOpen, setOutcomeMenuOpen] = useState(false);
   const outcomeMenuRef = useRef<HTMLDivElement>(null);
   const outcomeTriggerRef = useRef<HTMLButtonElement>(null);
@@ -211,7 +194,7 @@ export function CallInboxPageContent() {
       <>
         <PageHeader
           title="Call inbox"
-          description="Review call recordings and transcripts."
+          description="Review call outcomes and required actions."
         />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Call inbox is admin-only.</p>
@@ -225,7 +208,7 @@ export function CallInboxPageContent() {
       <>
         <PageHeader
           title="Call inbox"
-          description="Review call recordings and transcripts."
+          description="Review call outcomes and required actions."
         />
         <LoadingState title="Loading calls" description="Fetching call inbox from the API." />
       </>
@@ -237,7 +220,7 @@ export function CallInboxPageContent() {
       <>
         <PageHeader
           title="Call inbox"
-          description="Review call recordings and transcripts."
+          description="Review call outcomes and required actions."
         />
         <ErrorState title="Could not load calls" description={error}>
           <button
@@ -303,22 +286,6 @@ export function CallInboxPageContent() {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  const isRecordingExpired = (expiresAt?: string) => {
-    if (!expiresAt) return true;
-    return new Date(expiresAt) < new Date();
-  };
-
-  const isTranscriptExpired = (expiresAt?: string) => {
-    if (!expiresAt) return true;
-    return new Date(expiresAt) < new Date();
-  };
-
-  const handlePlayRecording = (call: Call) => {
-    if (call.recordingUrl) {
-      window.open(call.recordingUrl, '_blank', 'noopener,noreferrer');
-    }
-  };
-
   const filteredCalls = calls.filter((call) => matchesFilters(call, filters));
   const outcomeTriggerLabel =
     filters.outcomes.length === 0
@@ -341,11 +308,11 @@ export function CallInboxPageContent() {
     <>
       <PageHeader
         title="Call inbox"
-        description="Review call recordings and transcripts."
+        description="Review call outcomes and required actions."
       />
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3">
           <div ref={outcomeMenuRef} className="relative">
             <button
               ref={outcomeTriggerRef}
@@ -394,46 +361,6 @@ export function CallInboxPageContent() {
               </div>
             )}
           </div>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.emergencyOnly}
-              onChange={(e) => setFilters({ ...filters, emergencyOnly: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Emergency only</span>
-          </label>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.callbackOnly}
-              onChange={(e) => setFilters({ ...filters, callbackOnly: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Callback only</span>
-          </label>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.appointmentRequestOnly}
-              onChange={(e) => setFilters({ ...filters, appointmentRequestOnly: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Appointment requests only</span>
-          </label>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.actionNeeded}
-              onChange={(e) => setFilters({ ...filters, actionNeeded: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Action needed</span>
-          </label>
         </div>
       </div>
 
@@ -536,36 +463,6 @@ export function CallInboxPageContent() {
                 </div>
               )}
 
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Recording</h4>
-                {selectedCall.recordingUrl && !isRecordingExpired(selectedCall.recordingExpiresAt) ? (
-                  <div>
-                    <p className="mb-2 text-xs text-slate-500">Audio retained for 10 days</p>
-                    <button
-                      onClick={() => handlePlayRecording(selectedCall)}
-                      className="rounded-xl border-2 border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-700 hover:bg-teal-100"
-                    >
-                      ▶ Play recording
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Recording unavailable (expired or not available)</p>
-                )}
-              </div>
-
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Transcript</h4>
-                {selectedCall.transcript && !isTranscriptExpired(selectedCall.transcriptExpiresAt) ? (
-                  <div>
-                    <p className="mb-2 text-xs text-slate-500">Transcript retained for 30 days</p>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedCall.transcript}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Transcript unavailable (expired or not available)</p>
-                )}
-              </div>
             </div>
           </div>
         )}

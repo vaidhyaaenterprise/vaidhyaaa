@@ -84,58 +84,72 @@ export class AppointmentLifecycleService {
     appointmentId: string;
     actorUserId?: string;
   }) {
-    const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
-      input.clinicId,
-      input.appointmentId,
-    );
-    if (!appointment) {
-      throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
-    }
+    const result = await this.dbService.withTransaction(async (tx) => {
+      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentByIdForUpdate(
+        input.clinicId,
+        input.appointmentId,
+        tx,
+      );
+      if (!appointment) {
+        throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+      }
 
-    if (appointment.status === 'cancelled') {
-      return appointment;
-    }
+      if (appointment.status === 'cancelled') {
+        return { changed: false as const, appointment };
+      }
 
-    if (!ACTIVE_APPOINTMENT_STATUSES.includes(appointment.status as 'pending_confirmation' | 'confirmed')) {
-      throw new AppError('APPOINTMENT_NOT_CANCELLABLE', 'Appointment cannot be cancelled.', {
-        appointment_id: appointment.id,
-        status: appointment.status,
-      });
-    }
+      if (
+        !ACTIVE_APPOINTMENT_STATUSES.includes(
+          appointment.status as 'pending_confirmation' | 'confirmed',
+        )
+      ) {
+        throw new AppError('APPOINTMENT_NOT_CANCELLABLE', 'Appointment cannot be cancelled.', {
+          appointment_id: appointment.id,
+          status: appointment.status,
+        });
+      }
 
-    const [updated] = await this.repos.slots.updateAppointmentStatus(
-      input.clinicId,
-      appointment.id,
-      'cancelled',
-    );
-    if (!updated) {
-      throw new AppError('INTERNAL_ERROR', 'Failed to cancel appointment.');
-    }
+      const [updated] = await this.repos.slots.updateAppointmentStatus(
+        input.clinicId,
+        appointment.id,
+        'cancelled',
+        tx,
+      );
+      if (!updated) {
+        throw new AppError('INTERNAL_ERROR', 'Failed to cancel appointment.');
+      }
 
-    await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
-      input.clinicId,
-      appointment.id,
-    );
+      await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
+        input.clinicId,
+        appointment.id,
+        tx,
+      );
 
-    await this.repos.appointmentLifecycle.insertAppointmentEvent({
-      clinicId: input.clinicId,
-      appointmentRequestId: appointment.id,
-      eventType: 'appointment.cancelled',
-      actorType: 'clinic_admin',
-      ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
-      newValuesJson: { status: 'cancelled' },
-      oldValuesJson: { status: appointment.status },
+      await this.repos.appointmentLifecycle.insertAppointmentEvent(
+        {
+          clinicId: input.clinicId,
+          appointmentRequestId: appointment.id,
+          eventType: 'appointment.cancelled',
+          actorType: 'clinic_admin',
+          ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+          newValuesJson: { status: 'cancelled' },
+          oldValuesJson: { status: appointment.status },
+        },
+        tx,
+      );
+
+      return { changed: true as const, appointment: updated };
     });
 
-    if (appointment.patientPhone) {
+    if (result.changed && result.appointment.patientPhone) {
       await this.notificationOutbox.notifyPatientAppointmentCancelled({
         clinicId: input.clinicId,
-        appointmentId: appointment.id,
-        patientPhone: appointment.patientPhone,
+        appointmentId: result.appointment.id,
+        patientPhone: result.appointment.patientPhone,
       });
     }
 
-    return updated;
+    return result.appointment;
   }
 
   async rescheduleAppointmentTime(input: {

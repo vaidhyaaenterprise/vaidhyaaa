@@ -111,8 +111,12 @@ export class AppointmentLifecycleRepository {
     return this.db.insert(appointmentActionRequests).values(values).returning();
   }
 
-  rejectPendingActionRequestsForAppointment(clinicId: string, appointmentId: string) {
-    return this.db
+  rejectPendingActionRequestsForAppointment(
+    clinicId: string,
+    appointmentId: string,
+    db: Database = this.db,
+  ) {
+    return db
       .update(appointmentActionRequests)
       .set({
         status: 'rejected',
@@ -176,6 +180,61 @@ export class AppointmentLifecycleRepository {
       .from(appointmentRequests)
       .where(and(...filters))
       .orderBy(desc(appointmentRequests.appointmentStart));
+  }
+
+  listClinicAdminAppointmentActivities(clinicId: string) {
+    return this.db
+      .select({
+        id: appointmentEvents.id,
+        appointmentId: appointmentRequests.id,
+        patientName: appointmentRequests.patientName,
+        patientPhone: appointmentRequests.patientPhone,
+        doctorId: appointmentRequests.doctorId,
+        doctorName: doctors.name,
+        clinicServiceId: appointmentRequests.clinicServiceId,
+        serviceName: clinicServices.serviceName,
+        reasonForVisit: appointmentRequests.reasonForVisit,
+        eventType: appointmentEvents.eventType,
+        occurredAt: appointmentEvents.createdAt,
+        oldValuesJson: appointmentEvents.oldValuesJson,
+        newValuesJson: appointmentEvents.newValuesJson,
+        appointmentStart: appointmentRequests.appointmentStart,
+        appointmentEnd: appointmentRequests.appointmentEnd,
+      })
+      .from(appointmentEvents)
+      .innerJoin(
+        appointmentRequests,
+        and(
+          eq(appointmentRequests.clinicId, appointmentEvents.clinicId),
+          eq(appointmentRequests.id, appointmentEvents.appointmentRequestId),
+        ),
+      )
+      .innerJoin(
+        doctors,
+        and(
+          eq(doctors.clinicId, appointmentEvents.clinicId),
+          eq(doctors.id, appointmentRequests.doctorId),
+        ),
+      )
+      .innerJoin(
+        clinicServices,
+        and(
+          eq(clinicServices.clinicId, appointmentEvents.clinicId),
+          eq(clinicServices.id, appointmentRequests.clinicServiceId),
+        ),
+      )
+      .where(
+        and(
+          eq(appointmentEvents.clinicId, clinicId),
+          eq(appointmentEvents.actorType, 'clinic_admin'),
+          inArray(appointmentEvents.eventType, [
+            'appointment.rescheduled',
+            'appointment.cancelled',
+          ]),
+        ),
+      )
+      .orderBy(desc(appointmentEvents.createdAt))
+      .limit(100);
   }
 
   listPendingActionRequests(clinicId: string) {

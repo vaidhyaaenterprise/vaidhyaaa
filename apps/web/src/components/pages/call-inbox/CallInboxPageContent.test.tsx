@@ -83,6 +83,26 @@ describe('CallInboxPageContent', () => {
     expect(screen.getByText('Emergency summary')).toBeInTheDocument();
     expect(mockedFetchCallInbox).toHaveBeenCalledWith(CLINIC_ID, []);
     expect(mockedFetchCallInbox).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Emergency only')).not.toBeInTheDocument();
+    expect(screen.queryByText('Callback only')).not.toBeInTheDocument();
+    expect(screen.queryByText('Appointment requests only')).not.toBeInTheDocument();
+    expect(screen.queryByText('Action needed')).not.toBeInTheDocument();
+  });
+
+  it('does not show recording or transcript sections in call details', async () => {
+    render(<CallInboxPageContent />);
+
+    fireEvent.click(await screen.findByText('Booked summary'));
+
+    expect(screen.getByText('Call details')).toBeInTheDocument();
+    expect(screen.queryByText('Recording')).not.toBeInTheDocument();
+    expect(screen.queryByText('Transcript')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Recording unavailable (expired or not available)'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Transcript unavailable (expired or not available)'),
+    ).not.toBeInTheDocument();
   });
 
   it('supports checkbox multi-selection with OR semantics and All outcomes reset', async () => {

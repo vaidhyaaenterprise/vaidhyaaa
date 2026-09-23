@@ -6,6 +6,7 @@ import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { PendingAppointments } from '@/components/pages/appointments/PendingAppointments';
 import { ConfirmedAppointments } from '@/components/pages/appointments/ConfirmedAppointments';
+import { MissedAppointments } from '@/components/pages/appointments/MissedAppointments';
 import { VisitedPatients } from '@/components/pages/appointments/VisitedPatients';
 import { RescheduleCancelRequests } from '@/components/pages/appointments/RescheduleCancelRequests';
 import {
@@ -14,20 +15,29 @@ import {
 } from '@/components/pages/appointments/ManualAppointmentModal';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
-import { mapActionRequestRow, mapAppointmentRow } from '@/lib/api/appointment-mappers';
+import {
+  mapActionRequestRow,
+  mapAppointmentActivityRow,
+  mapAppointmentRow,
+} from '@/lib/api/appointment-mappers';
 import {
   cancelAppointment,
   confirmAppointment,
   createManualAppointment,
   fetchAvailableAppointmentSlots,
   fetchAppointmentActionRequests,
+  fetchAppointmentActivity,
   fetchAppointments,
   markAppointmentVisited,
   rescheduleAppointment,
   resolveAppointmentActionRequest,
 } from '@/lib/api/appointments';
 import { ApiRequestError } from '@/lib/api/client';
-import { filterCurrentAndFuturePendingAppointments } from '@/lib/appointment-filters';
+import {
+  filterCurrentAndFutureConfirmedAppointments,
+  filterCurrentAndFuturePendingAppointments,
+  filterMissedPendingAppointments,
+} from '@/lib/appointment-filters';
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { getClinicDate } from '@/lib/home-dashboard';
@@ -35,6 +45,7 @@ import { buildManualAppointmentPayload, DEFAULT_BOOKING_RULES } from '@/lib/manu
 import type {
   Appointment,
   AppointmentActionRequest,
+  AppointmentActivity,
   BookingRules,
 } from '@/components/pages/appointments/types';
 
@@ -60,6 +71,7 @@ export function AppointmentsPageContent() {
   const [confirmedAppointments, setConfirmedAppointments] = useState<Appointment[]>([]);
   const [visitedAppointments, setVisitedAppointments] = useState<Appointment[]>([]);
   const [actionRequests, setActionRequests] = useState<AppointmentActionRequest[]>([]);
+  const [appointmentActivities, setAppointmentActivities] = useState<AppointmentActivity[]>([]);
   const [doctorOptions, setDoctorOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [serviceOptions, setServiceOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [doctorServiceMappings, setDoctorServiceMappings] = useState<
@@ -78,9 +90,11 @@ export function AppointmentsPageContent() {
       }
       setError(null);
       try {
-        const [rows, requests, settings, doctors, services, doctorServices] = await Promise.all([
+        const [rows, requests, activities, settings, doctors, services, doctorServices] =
+          await Promise.all([
           fetchAppointments(clinicId),
           isAdmin ? fetchAppointmentActionRequests(clinicId) : Promise.resolve([]),
+          isAdmin ? fetchAppointmentActivity(clinicId) : Promise.resolve([]),
           includeReferenceData
             ? fetchClinicSettings(clinicId).catch(() => null)
             : Promise.resolve(null),
@@ -89,7 +103,7 @@ export function AppointmentsPageContent() {
           includeReferenceData
             ? fetchDoctorServices(clinicId).catch(() => [])
             : Promise.resolve(null),
-        ]);
+          ]);
 
         if (doctors && services && doctorServices) {
           setDoctorOptions(doctors.map((d) => ({ id: d.id, name: d.name })));
@@ -109,6 +123,7 @@ export function AppointmentsPageContent() {
         setConfirmedAppointments(mapped.filter((apt) => apt.status === 'confirmed'));
         setVisitedAppointments(mapped.filter((apt) => apt.status === 'visited'));
         setActionRequests(requests.map(mapActionRequestRow));
+        setAppointmentActivities(activities.map(mapAppointmentActivityRow));
 
         if (settings) {
           setBookingRules({
@@ -166,8 +181,22 @@ export function AppointmentsPageContent() {
     [clinicDate, pendingAppointments],
   );
 
+  const missedPending = useMemo(
+    () => (clinicDate ? filterMissedPendingAppointments(pendingAppointments, clinicDate) : []),
+    [clinicDate, pendingAppointments],
+  );
+
+  const currentAndFutureConfirmed = useMemo(
+    () =>
+      clinicDate
+        ? filterCurrentAndFutureConfirmedAppointments(confirmedAppointments, clinicDate)
+        : [],
+    [clinicDate, confirmedAppointments],
+  );
+
   const visiblePending = filterByDate(currentAndFuturePending, selectedDate);
-  const visibleConfirmed = filterByDate(confirmedAppointments, selectedDate);
+  const visibleMissed = filterByDate(missedPending, selectedDate);
+  const visibleConfirmed = filterByDate(currentAndFutureConfirmed, selectedDate);
   const visibleVisited = filterByDate(visitedAppointments, selectedDate);
 
   const pendingEmptyMessage =
@@ -185,7 +214,7 @@ export function AppointmentsPageContent() {
     await loadAppointments(false, false);
   };
 
-  const handleEditTime = async (id: string, newTime: string) => {
+  const handleEditTime = async (id: string, newDate: string, newTime: string) => {
     if (!clinicId) {
       throw new Error('Select a clinic before editing an appointment.');
     }
@@ -197,20 +226,23 @@ export function AppointmentsPageContent() {
       throw new Error('Appointment could not be found. Reload the page and try again.');
     }
 
-    if (newTime === appointment.appointmentTime) {
+    if (
+      newDate === appointment.appointmentDate &&
+      newTime === appointment.appointmentTime
+    ) {
       return;
     }
 
     const slots = await fetchAvailableAppointmentSlots(clinicId, {
       doctor_id: appointment.doctorId,
       clinic_service_id: appointment.serviceId,
-      date: appointment.appointmentDate,
+      date: newDate,
     });
     const targetSlot = slots.find((slot) => {
       const match = slot.appointment_start
         .trim()
-        .match(/^\d{4}-\d{2}-\d{2}[T\s](\d{2}:\d{2})/);
-      return match?.[1] === newTime && slot.available_count > 0;
+        .match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+      return match?.[1] === newDate && match[2] === newTime && slot.available_count > 0;
     });
 
     if (!targetSlot) {
@@ -255,14 +287,41 @@ export function AppointmentsPageContent() {
     await loadAppointments(false, false);
   };
 
-  const handleApproveReschedule = async (requestId: string, _newDate: string, _newTime: string) => {
+  const handleApproveReschedule = async (requestId: string, newDate: string, newTime: string) => {
     if (!clinicId) {
       return;
     }
     const request = actionRequests.find((r) => r.id === requestId);
+    if (!request) {
+      throw new Error('Appointment request could not be found. Reload the page and try again.');
+    }
+
+    let newSlotId = request.requestedNewSlotId ?? undefined;
+    if (
+      !newSlotId ||
+      newDate !== request.requestedDate ||
+      newTime !== request.requestedTime
+    ) {
+      const slots = await fetchAvailableAppointmentSlots(clinicId, {
+        doctor_id: request.doctorId,
+        clinic_service_id: request.serviceId,
+        date: newDate,
+      });
+      newSlotId = slots.find((slot) => {
+        const match = slot.appointment_start
+          .trim()
+          .match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+        return match?.[1] === newDate && match[2] === newTime && slot.available_count > 0;
+      })?.slot_id;
+    }
+
+    if (!newSlotId) {
+      throw new Error('Slot is full for that time. Choose another available time.');
+    }
+
     await resolveAppointmentActionRequest(clinicId, requestId, {
       status: 'approved',
-      ...(request?.requestedNewSlotId ? { new_slot_id: request.requestedNewSlotId } : {}),
+      new_slot_id: newSlotId,
     });
     await loadAppointments(false, false);
   };
@@ -367,11 +426,13 @@ export function AppointmentsPageContent() {
         <ConfirmedAppointments
           appointments={visibleConfirmed}
           bookingRules={bookingRules}
+          minimumEditDate={clinicDate ?? undefined}
           onEditTime={handleEditTime}
           onCancel={(id) => void handleCancel(id)}
           onMarkVisited={handleMarkVisited}
           onViewHistory={handleViewHistory}
         />
+        <MissedAppointments appointments={visibleMissed} />
         <VisitedPatients
           appointments={visibleVisited}
           bookingRules={bookingRules}
@@ -380,9 +441,10 @@ export function AppointmentsPageContent() {
         {isAdmin && (
           <RescheduleCancelRequests
             requests={actionRequests}
-            onApproveReschedule={(id, date, time) => void handleApproveReschedule(id, date, time)}
-            onRejectRequest={(id) => void handleRejectRequest(id)}
-            onCancelAppointment={(id) => void handleCancelAppointment(id)}
+            activities={appointmentActivities}
+            onApproveReschedule={handleApproveReschedule}
+            onRejectRequest={handleRejectRequest}
+            onCancelAppointment={handleCancelAppointment}
           />
         )}
       </div>

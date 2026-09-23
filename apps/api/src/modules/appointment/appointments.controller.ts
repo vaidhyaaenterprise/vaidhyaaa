@@ -53,6 +53,13 @@ export class AppointmentsController {
     return { action_requests };
   }
 
+  @Get('activity')
+  @Roles('clinic_admin')
+  async listAppointmentActivity(@Param('clinicId') clinicId: string) {
+    const activities = await this.appointmentsService.listAppointmentActivities(clinicId);
+    return { activities };
+  }
+
   @Get('available-slots')
   @Roles('clinic_admin', 'doctor')
   async listAvailableSlots(
@@ -145,10 +152,13 @@ export class AppointmentsController {
   async confirmAppointment(
     @Param('clinicId') clinicId: string,
     @Param('appointmentId') appointmentId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
+    const auth = getAuthContext(request);
     const appointment = await this.appointmentLifecycleService.confirmAppointment({
       clinicId,
       appointmentId,
+      actorUserId: auth.userId,
     });
     return { appointment };
   }
@@ -158,10 +168,13 @@ export class AppointmentsController {
   async cancelAppointment(
     @Param('clinicId') clinicId: string,
     @Param('appointmentId') appointmentId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
+    const auth = getAuthContext(request);
     const appointment = await this.appointmentLifecycleService.cancelAppointment({
       clinicId,
       appointmentId,
+      actorUserId: auth.userId,
     });
     return { appointment };
   }

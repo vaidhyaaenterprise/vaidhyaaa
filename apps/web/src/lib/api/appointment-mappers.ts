@@ -1,6 +1,11 @@
-import type { Appointment, AppointmentActionRequest } from '@/components/pages/appointments/types';
+import type {
+  Appointment,
+  AppointmentActionRequest,
+  AppointmentActivity,
+} from '@/components/pages/appointments/types';
 import type {
   AppointmentActionRequestApiRow,
+  AppointmentActivityApiRow,
   AppointmentApiRow,
 } from '@/lib/api/appointments';
 
@@ -55,5 +60,30 @@ export function mapActionRequestRow(row: AppointmentActionRequestApiRow): Appoin
     reason: row.reason ?? '',
     actionType: row.action_type,
     status: row.status as AppointmentActionRequest['status'],
+  };
+}
+
+export function mapAppointmentActivityRow(row: AppointmentActivityApiRow): AppointmentActivity {
+  const previous = row.previous_appointment_start
+    ? splitStart(row.previous_appointment_start)
+    : { date: '', time: '' };
+  const current = splitStart(row.appointment_start);
+
+  return {
+    id: row.id,
+    appointmentId: row.appointment_id,
+    patientName: row.patient_name,
+    patientPhone: row.patient_phone ?? '',
+    doctorId: row.doctor_id,
+    doctorName: row.doctor_name,
+    serviceId: row.clinic_service_id,
+    serviceName: row.service_name,
+    reasonForVisit: row.reason_for_visit,
+    actionType: row.action_type,
+    occurredAt: row.occurred_at,
+    previousAppointmentDate: previous.date,
+    previousAppointmentTime: previous.time,
+    appointmentDate: current.date,
+    appointmentTime: current.time,
   };
 }

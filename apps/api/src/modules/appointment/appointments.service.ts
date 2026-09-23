@@ -60,6 +60,33 @@ export type AppointmentAvailableSlotItem = {
   available_count: number;
 };
 
+export type AppointmentActivityItem = {
+  id: string;
+  appointment_id: string;
+  patient_name: string;
+  patient_phone: string | null;
+  doctor_id: string;
+  doctor_name: string;
+  clinic_service_id: string;
+  service_name: string;
+  reason_for_visit: string;
+  action_type: 'reschedule' | 'cancel';
+  occurred_at: string;
+  previous_appointment_start: string | null;
+  previous_appointment_end: string | null;
+  appointment_start: string;
+  appointment_end: string;
+};
+
+function readJsonString(value: unknown, key: string): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === 'string' ? candidate : null;
+}
+
 function slotDatePart(value: string): string {
   const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
   if (match) {
@@ -187,6 +214,35 @@ export class AppointmentsService {
       });
     }
     return results;
+  }
+
+  async listAppointmentActivities(clinicId: string): Promise<AppointmentActivityItem[]> {
+    const rows = await this.repos.appointmentLifecycle.listClinicAdminAppointmentActivities(
+      clinicId,
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      appointment_id: row.appointmentId,
+      patient_name: row.patientName,
+      patient_phone: row.patientPhone,
+      doctor_id: row.doctorId,
+      doctor_name: row.doctorName,
+      clinic_service_id: row.clinicServiceId,
+      service_name: row.serviceName,
+      reason_for_visit: row.reasonForVisit,
+      action_type: row.eventType === 'appointment.rescheduled' ? 'reschedule' : 'cancel',
+      occurred_at: row.occurredAt.toISOString(),
+      previous_appointment_start: readJsonString(
+        row.oldValuesJson,
+        'appointment_start',
+      ),
+      previous_appointment_end: readJsonString(row.oldValuesJson, 'appointment_end'),
+      appointment_start:
+        readJsonString(row.newValuesJson, 'appointment_start') ?? row.appointmentStart,
+      appointment_end:
+        readJsonString(row.newValuesJson, 'appointment_end') ?? row.appointmentEnd,
+    }));
   }
 
   async listAvailableSlots(input: {

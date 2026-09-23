@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { createRepositories, type Repositories } from '@vaidya/db';
+import { createRepositories, DatabaseService, type Repositories } from '@vaidya/db';
 import { AppError, type ManualAppointmentCreateInput, type ResolveAppointmentActionRequestInput } from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
@@ -26,6 +26,7 @@ export class AppointmentAdminService {
 
   constructor(
     @Inject(DATABASE_CONNECTION) connection: DatabaseConnection,
+    @Inject(DatabaseService) private readonly dbService: DatabaseService,
     @Inject(AppointmentLifecycleService)
     private readonly lifecycleService: AppointmentLifecycleService,
   ) {
@@ -287,70 +288,94 @@ export class AppointmentAdminService {
     actorUserId: string;
     actorClinicRole?: 'clinic_admin' | 'doctor';
   }) {
-    const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
-      input.clinicId,
-      input.appointmentId,
-    );
-    if (!appointment) {
-      throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
-    }
-    if (appointment.status !== 'confirmed') {
-      throw new AppError('VALIDATION_ERROR', 'Only confirmed appointments can be marked visited.');
-    }
+    return this.dbService.withTransaction(async (tx) => {
+      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentByIdForUpdate(
+        input.clinicId,
+        input.appointmentId,
+        tx,
+      );
+      if (!appointment) {
+        throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+      }
+      if (appointment.status !== 'confirmed') {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'Only confirmed appointments can be marked visited.',
+        );
+      }
 
-    let patientId = appointment.patientId;
-    if (!patientId && appointment.patientPhone) {
-      const normalizedPhone = normalizePhone(appointment.patientPhone);
-      const [patient] = await this.repos.patients.upsertByPhone({
-        clinicId: input.clinicId,
-        name: appointment.patientName,
-        phone: appointment.patientPhone,
-        normalizedPhone,
-      });
-      patientId = patient?.id ?? null;
-    }
-    if (!patientId) {
-      throw new AppError('VALIDATION_ERROR', 'Patient record is required to mark a visit.');
-    }
+      let patientId = appointment.patientId;
+      if (!patientId && appointment.patientPhone) {
+        const normalizedPhone = normalizePhone(appointment.patientPhone);
+        const [patient] = await this.repos.patients.upsertByPhone(
+          {
+            clinicId: input.clinicId,
+            name: appointment.patientName,
+            phone: appointment.patientPhone,
+            normalizedPhone,
+          },
+          tx,
+        );
+        patientId = patient?.id ?? null;
+      }
+      if (!patientId) {
+        throw new AppError('VALIDATION_ERROR', 'Patient record is required to mark a visit.');
+      }
 
-    const visitedAt = new Date();
-    const [visit] = await this.repos.patients.insertVisit({
-      clinicId: input.clinicId,
-      patientId,
-      appointmentRequestId: appointment.id,
-      doctorId: appointment.doctorId,
-      clinicServiceId: appointment.clinicServiceId,
-      reasonForVisit: input.visitReason,
-      examinationNotes: input.examinationNotes?.trim() || null,
-      diagnosis: input.diagnosis?.trim() || null,
-      advice: input.advice?.trim() || null,
-      normalizedReason: input.visitReason.toLowerCase(),
-      visitedAt,
+      const visitedAt = new Date();
+      const [visit] = await this.repos.patients.insertVisit(
+        {
+          clinicId: input.clinicId,
+          patientId,
+          appointmentRequestId: appointment.id,
+          doctorId: appointment.doctorId,
+          clinicServiceId: appointment.clinicServiceId,
+          reasonForVisit: input.visitReason,
+          examinationNotes: input.examinationNotes?.trim() || null,
+          diagnosis: input.diagnosis?.trim() || null,
+          advice: input.advice?.trim() || null,
+          normalizedReason: input.visitReason.toLowerCase(),
+          visitedAt,
+        },
+        tx,
+      );
+      if (!visit) {
+        throw new AppError('INTERNAL_ERROR', 'Failed to create patient visit.');
+      }
+
+      const [updated] = await this.repos.slots.updateAppointmentStatus(
+        input.clinicId,
+        appointment.id,
+        'visited',
+        tx,
+      );
+      if (!updated) {
+        throw new AppError('INTERNAL_ERROR', 'Failed to mark appointment as visited.');
+      }
+
+      await this.repos.appointmentLifecycle.insertAppointmentEvent(
+        {
+          clinicId: input.clinicId,
+          appointmentRequestId: appointment.id,
+          eventType: 'appointment.visited',
+          actorType: input.actorClinicRole === 'doctor' ? 'doctor' : 'clinic_admin',
+          actorUserId: input.actorUserId,
+          newValuesJson: {
+            status: 'visited',
+            visit_reason: input.visitReason,
+            ...(input.examinationNotes?.trim()
+              ? { examination_notes: input.examinationNotes.trim() }
+              : {}),
+            ...(input.diagnosis?.trim() ? { diagnosis: input.diagnosis.trim() } : {}),
+            ...(input.advice?.trim() ? { advice: input.advice.trim() } : {}),
+          },
+          oldValuesJson: { status: appointment.status },
+        },
+        tx,
+      );
+
+      return { appointment: updated, patient_visit: visit };
     });
-
-    const [updated] = await this.repos.slots.updateAppointmentStatus(
-      input.clinicId,
-      appointment.id,
-      'visited',
-    );
-
-    await this.repos.appointmentLifecycle.insertAppointmentEvent({
-      clinicId: input.clinicId,
-      appointmentRequestId: appointment.id,
-      eventType: 'appointment.visited',
-      actorType: input.actorClinicRole === 'doctor' ? 'doctor' : 'clinic_admin',
-      actorUserId: input.actorUserId,
-      newValuesJson: {
-        status: 'visited',
-        visit_reason: input.visitReason,
-        ...(input.examinationNotes?.trim() ? { examination_notes: input.examinationNotes.trim() } : {}),
-        ...(input.diagnosis?.trim() ? { diagnosis: input.diagnosis.trim() } : {}),
-        ...(input.advice?.trim() ? { advice: input.advice.trim() } : {}),
-      },
-      oldValuesJson: { status: appointment.status },
-    });
-
-    return { appointment: updated, patient_visit: visit };
   }
 
   async resolveActionRequest(input: {

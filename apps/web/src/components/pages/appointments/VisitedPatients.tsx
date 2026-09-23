@@ -15,9 +15,9 @@ export function VisitedPatients({
   bookingRules,
   onViewHistory,
 }: VisitedPatientsProps) {
-  const { effectiveRole, me } = useAuth();
+  const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
-  const currentDoctorId = me?.clinics[0]?.doctor_id;
+  const currentDoctorId = clinicRole?.doctor_id;
 
   const filteredAppointments = isAdmin
     ? appointments
@@ -38,7 +38,7 @@ export function VisitedPatients({
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Visited</h3>
-        <p className="mb-2 text-sm text-slate-500">Patients who completed their consultation today.</p>
+        <p className="mb-2 text-sm text-slate-500">Patients who completed their consultation.</p>
         <p className="text-sm text-slate-500">No visited patients yet.</p>
       </div>
     );
@@ -47,7 +47,7 @@ export function VisitedPatients({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="mb-4 text-lg font-bold text-slate-900">Visited</h3>
-      <p className="mb-4 text-sm text-slate-500">Patients who completed their consultation today.</p>
+      <p className="mb-4 text-sm text-slate-500">Patients who completed their consultation.</p>
       <div className="space-y-4">
         {Object.entries(groupedAppointments).map(([doctorId, group]) => (
           <div key={doctorId} className="rounded-xl border border-slate-200 bg-slate-50 p-4">

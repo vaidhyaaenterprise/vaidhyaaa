@@ -1,4 +1,3 @@
-export type AnsweringMode = 'off' | 'always_on' | 'after_hours_only' | 'overflow_after_n_rings' | 'holiday_only';
 export type BookingMode = 'pending_confirmation' | 'auto_confirm';
 export type NotificationChannel = 'whatsapp' | 'sms' | 'email' | 'none';
 export type Language = 'ta_tanglish' | 'english' | 'tamil';
@@ -6,16 +5,12 @@ export type SubscriptionStatus = 'trialing' | 'active' | 'manual_free' | 'expire
 
 export interface AgentSettings {
   agentEnabled: boolean;
-  answeringMode: AnsweringMode;
   bookingMode: BookingMode;
-  fallbackPhone: string;
-  overflowAfterRings: number;
   onboardingComplete: boolean;
 }
 
 export interface NotificationSettings {
   notifyStaffOnPendingAppointment: boolean;
-  pendingNotificationChannel: NotificationChannel;
   notificationContacts?: string[];
 }
 

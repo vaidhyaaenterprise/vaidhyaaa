@@ -38,6 +38,24 @@ export interface AppointmentActionRequest {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+export interface AppointmentActivity {
+  id: string;
+  appointmentId: string;
+  patientName: string;
+  patientPhone: string;
+  doctorId: string;
+  doctorName: string;
+  serviceId: string;
+  serviceName: string;
+  reasonForVisit: string;
+  actionType: 'reschedule' | 'cancel';
+  occurredAt: string;
+  previousAppointmentDate: string;
+  previousAppointmentTime: string;
+  appointmentDate: string;
+  appointmentTime: string;
+}
+
 export interface BookingRules {
   slotDurationMinutes: number;
   capacityPerSlot: number;
