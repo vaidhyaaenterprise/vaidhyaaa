@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { KnowledgeEntry, Category } from './types';
 
 interface ReviewQueueProps {
   entries: KnowledgeEntry[];
   categories: Category[];
   onApprove: (id: string) => void;
-  onBulkApprove: (ids: string[]) => void;
+  onBulkApprove: (ids: string[]) => Promise<{ approvedIds: string[]; skippedIds: string[] }>;
   onEdit: (id: string, entry: Partial<KnowledgeEntry>) => void;
   onDisable: (id: string) => void;
 }
@@ -23,6 +23,15 @@ export function ReviewQueue({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<KnowledgeEntry>>({});
+  const [isBulkApproving, setIsBulkApproving] = useState(false);
+
+  useEffect(() => {
+    const visibleIds = new Set(entries.map((entry) => entry.id));
+    setSelectedIds((current) => {
+      const visibleSelection = new Set(Array.from(current).filter((id) => visibleIds.has(id)));
+      return visibleSelection.size === current.size ? current : visibleSelection;
+    });
+  }, [entries]);
 
   const handleSelect = (id: string) => {
     const newSelected = new Set(selectedIds);
@@ -42,10 +51,26 @@ export function ReviewQueue({
     }
   };
 
-  const handleBulkApprove = () => {
-    if (selectedIds.size > 0) {
-      onBulkApprove(Array.from(selectedIds));
-      setSelectedIds(new Set());
+  const handleBulkApprove = async () => {
+    if (selectedIds.size === 0 || isBulkApproving) {
+      return;
+    }
+
+    const ids = Array.from(selectedIds);
+    setIsBulkApproving(true);
+    try {
+      const result = await onBulkApprove(ids);
+      const approvedIds = new Set(result.approvedIds);
+      setSelectedIds((current) => {
+        const remaining = new Set(current);
+        approvedIds.forEach((id) => remaining.delete(id));
+        return remaining;
+      });
+    } catch {
+      // The parent displays the API error. Keep unapproved entries selected so
+      // the admin can retry without rebuilding the selection.
+    } finally {
+      setIsBulkApproving(false);
     }
   };
 
@@ -100,14 +125,18 @@ export function ReviewQueue({
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
             <button
-              onClick={handleBulkApprove}
-              className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800"
+              onClick={() => void handleBulkApprove()}
+              disabled={isBulkApproving}
+              className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Approve selected ({selectedIds.size})
+              {isBulkApproving
+                ? `Approving ${selectedIds.size}...`
+                : `Approve selected (${selectedIds.size})`}
             </button>
           )}
           <button
             onClick={handleSelectAll}
+            disabled={isBulkApproving}
             className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
           >
             {selectedIds.size === entries.length ? 'Deselect all' : 'Select all'}
@@ -130,6 +159,7 @@ export function ReviewQueue({
                 type="checkbox"
                 checked={selectedIds.has(entry.id)}
                 onChange={() => handleSelect(entry.id)}
+                disabled={isBulkApproving}
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
               />
               <div className="flex-1">
@@ -199,13 +229,15 @@ export function ReviewQueue({
                 <>
                   <button
                     onClick={handleEditSave}
-                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800"
+                    disabled={isBulkApproving}
+                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Save
                   </button>
                   <button
                     onClick={handleEditCancel}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    disabled={isBulkApproving}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Cancel
                   </button>
@@ -214,19 +246,22 @@ export function ReviewQueue({
                 <>
                   <button
                     onClick={() => onApprove(entry.id)}
-                    className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100"
+                    disabled={isBulkApproving}
+                    className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Approve
                   </button>
                   <button
                     onClick={() => handleEditStart(entry)}
-                    className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
+                    disabled={isBulkApproving}
+                    className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => onDisable(entry.id)}
-                    className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
+                    disabled={isBulkApproving}
+                    className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Disable
                   </button>

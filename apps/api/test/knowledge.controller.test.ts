@@ -21,6 +21,7 @@ function requestWithAuth(auth: AuthContext) {
 describe('KnowledgeController clinic scoping', () => {
   let controller: KnowledgeController;
   let knowledgeAdmin: {
+    bulkApproveKnowledgeEntries: ReturnType<typeof vi.fn>;
     regenerateEmbeddings: ReturnType<typeof vi.fn>;
     retryEmbedding: ReturnType<typeof vi.fn>;
     patchKnowledgeEntry: ReturnType<typeof vi.fn>;
@@ -28,6 +29,17 @@ describe('KnowledgeController clinic scoping', () => {
 
   beforeEach(() => {
     knowledgeAdmin = {
+      bulkApproveKnowledgeEntries: vi.fn().mockResolvedValue({
+        requested: 1,
+        approved: 1,
+        skipped: 0,
+        knowledge_ids: [KNOWLEDGE_ID],
+        skipped_knowledge_ids: [],
+        embedding_jobs_queued: 1,
+        embedding_jobs_failed: 0,
+        embedding_job_failed_knowledge_ids: [],
+        embedding_failure_state_persisted: true,
+      }),
       regenerateEmbeddings: vi.fn().mockResolvedValue({ queued: 0 }),
       retryEmbedding: vi.fn().mockResolvedValue({ queued: true }),
       patchKnowledgeEntry: vi.fn().mockResolvedValue({ id: KNOWLEDGE_ID }),
@@ -51,6 +63,10 @@ describe('KnowledgeController clinic scoping', () => {
       clinic_id: OTHER_CLINIC_ID,
       question: 'Updated question',
     });
+    await controller.bulkApproveKnowledgeEntries(request, {
+      clinic_id: OTHER_CLINIC_ID,
+      knowledge_ids: [KNOWLEDGE_ID],
+    });
 
     expect(knowledgeAdmin.regenerateEmbeddings).toHaveBeenCalledWith({
       clinicId: AUTH_CLINIC_ID,
@@ -68,6 +84,11 @@ describe('KnowledgeController clinic scoping', () => {
       patch: expect.objectContaining({ question: 'Updated question' }),
       actorUserId: USER_ID,
     });
+    expect(knowledgeAdmin.bulkApproveKnowledgeEntries).toHaveBeenCalledWith({
+      clinicId: AUTH_CLINIC_ID,
+      knowledgeIds: [KNOWLEDGE_ID],
+      actorUserId: USER_ID,
+    });
   });
 
   it('rejects mutations when no clinic context is authenticated', async () => {
@@ -82,9 +103,35 @@ describe('KnowledgeController clinic scoping', () => {
     await expect(
       controller.patchKnowledgeEntry(request, KNOWLEDGE_ID, { question: 'Updated question' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      controller.bulkApproveKnowledgeEntries(request, { knowledge_ids: [KNOWLEDGE_ID] }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
 
     expect(knowledgeAdmin.regenerateEmbeddings).not.toHaveBeenCalled();
     expect(knowledgeAdmin.retryEmbedding).not.toHaveBeenCalled();
     expect(knowledgeAdmin.patchKnowledgeEntry).not.toHaveBeenCalled();
+    expect(knowledgeAdmin.bulkApproveKnowledgeEntries).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty, invalid, and over-limit bulk approval payloads', async () => {
+    const request = requestWithAuth({
+      userId: USER_ID,
+      clinicId: AUTH_CLINIC_ID,
+      clinicRole: 'clinic_admin',
+    });
+
+    await expect(
+      controller.bulkApproveKnowledgeEntries(request, { knowledge_ids: [] }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(
+      controller.bulkApproveKnowledgeEntries(request, { knowledge_ids: ['not-a-uuid'] }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await expect(
+      controller.bulkApproveKnowledgeEntries(request, {
+        knowledge_ids: Array.from({ length: 101 }, () => KNOWLEDGE_ID),
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    expect(knowledgeAdmin.bulkApproveKnowledgeEntries).not.toHaveBeenCalled();
   });
 });

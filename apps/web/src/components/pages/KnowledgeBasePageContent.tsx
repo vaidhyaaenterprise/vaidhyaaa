@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ManualQAForm } from '@/components/pages/knowledge-base/ManualQAForm';
@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
 import {
+  bulkApproveKnowledgeEntriesInChunks,
   fetchKnowledgeEmbeddingStatus,
   fetchKnowledgeEntries,
   patchKnowledgeEntry,
@@ -31,6 +32,8 @@ const categories: Category[] = [
   { id: 'reports', name: 'Reports', description: 'Report collection' },
   { id: 'general', name: 'General FAQ', description: 'General FAQs' },
 ];
+
+const REALTIME_RELOAD_DEBOUNCE_MS = 350;
 
 function mapEntry(row: KnowledgeEntryApiRow): KnowledgeEntry {
   const normalizedStatus =
@@ -81,6 +84,11 @@ export function KnowledgeBasePageContent() {
   const [pendingEntries, setPendingEntries] = useState<KnowledgeEntry[]>([]);
   const [approvedEntries, setApprovedEntries] = useState<KnowledgeEntry[]>([]);
   const [embeddingStatus, setEmbeddingStatus] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
+  const bulkUpdateInProgressRef = useRef(false);
+  const realtimeReloadPendingRef = useRef(false);
+  const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadEntries = useCallback(
     async (showLoading = true) => {
@@ -146,6 +154,22 @@ export function KnowledgeBasePageContent() {
     void loadEntries();
   }, [loadEntries]);
 
+  const scheduleRealtimeReload = useCallback(() => {
+    realtimeReloadPendingRef.current = true;
+    if (bulkUpdateInProgressRef.current) {
+      return;
+    }
+
+    if (realtimeReloadTimerRef.current) {
+      clearTimeout(realtimeReloadTimerRef.current);
+    }
+    realtimeReloadTimerRef.current = setTimeout(() => {
+      realtimeReloadTimerRef.current = null;
+      realtimeReloadPendingRef.current = false;
+      void loadEntries(false);
+    }, REALTIME_RELOAD_DEBOUNCE_MS);
+  }, [loadEntries]);
+
   useEffect(() => {
     if (!isAdmin || !clinicId) {
       return;
@@ -153,10 +177,19 @@ export function KnowledgeBasePageContent() {
 
     return (
       subscribeToClinicKnowledge(clinicId, () => {
-        void loadEntries(false);
+        scheduleRealtimeReload();
       }) ?? undefined
     );
-  }, [clinicId, isAdmin, loadEntries]);
+  }, [clinicId, isAdmin, scheduleRealtimeReload]);
+
+  useEffect(
+    () => () => {
+      if (realtimeReloadTimerRef.current) {
+        clearTimeout(realtimeReloadTimerRef.current);
+      }
+    },
+    [],
+  );
 
   if (!isAdmin) {
     return (
@@ -218,18 +251,101 @@ export function KnowledgeBasePageContent() {
 
   const handleBulkApprove = async (ids: string[]) => {
     if (!clinicId) {
-      return;
+      const clinicContextError = new Error('Clinic context is required for bulk approval.');
+      setActionError(clinicContextError.message);
+      throw clinicContextError;
     }
-    const updated = await Promise.all(
-      ids.map((id) =>
-        patchKnowledgeEntry(
-          id,
-          { status: 'approved', qa_approved: true, applicable: true },
-          clinicId,
-        ),
-      ),
+
+    setActionError(null);
+    setActionWarning(null);
+    bulkUpdateInProgressRef.current = true;
+    const requestedIds = new Set(ids);
+    const selectedEntries = new Map(
+      pendingEntries
+        .filter((entry) => requestedIds.has(entry.id))
+        .map((entry) => [entry.id, entry]),
     );
-    applyKnowledgeRows(updated);
+    let approvedCount = 0;
+    const approvedKnowledgeIds: string[] = [];
+    const skippedKnowledgeIds: string[] = [];
+    const embeddingFailedKnowledgeIds: string[] = [];
+    let embeddingFailureStatePersisted = true;
+
+    try {
+      await bulkApproveKnowledgeEntriesInChunks(ids, (result) => {
+        const approvedIds = new Set(result.knowledge_ids);
+        approvedCount += result.approved;
+        approvedKnowledgeIds.push(...result.knowledge_ids);
+        skippedKnowledgeIds.push(...result.skipped_knowledge_ids);
+        embeddingFailedKnowledgeIds.push(...result.embedding_job_failed_knowledge_ids);
+        embeddingFailureStatePersisted =
+          embeddingFailureStatePersisted && result.embedding_failure_state_persisted;
+
+        setPendingEntries((current) => current.filter((entry) => !approvedIds.has(entry.id)));
+        setApprovedEntries((current) => {
+          const currentIds = new Set(current.map((entry) => entry.id));
+          const newlyApproved = result.knowledge_ids
+            .map((id) => selectedEntries.get(id))
+            .filter((entry): entry is KnowledgeEntry => entry !== undefined)
+            .filter((entry) => !currentIds.has(entry.id))
+            .map((entry) => ({
+              ...entry,
+              status: 'approved' as const,
+              uiStatus: 'approved' as const,
+              applicable: true,
+              qaApproved: true,
+            }));
+          return [...current, ...newlyApproved];
+        });
+      });
+
+      const warnings: string[] = [];
+      if (skippedKnowledgeIds.length > 0) {
+        warnings.push(
+          `${skippedKnowledgeIds.length} selected ${skippedKnowledgeIds.length === 1 ? 'entry was' : 'entries were'} not approved because the data changed or was no longer eligible. Unapproved entries remain selected for review.`,
+        );
+      }
+      if (embeddingFailedKnowledgeIds.length > 0) {
+        warnings.push(
+          embeddingFailureStatePersisted
+            ? `${embeddingFailedKnowledgeIds.length} approved ${embeddingFailedKnowledgeIds.length === 1 ? 'entry needs' : 'entries need'} an embedding retry. The approval was saved and the retry state was recorded.`
+            : `${embeddingFailedKnowledgeIds.length} approved ${embeddingFailedKnowledgeIds.length === 1 ? 'entry needs' : 'entries need'} an embedding retry. The approval was saved, but the retry state could not be recorded; retry embeddings manually.`,
+        );
+      }
+      setActionWarning(warnings.length > 0 ? warnings.join(' ') : null);
+
+      return {
+        approvedIds: approvedKnowledgeIds,
+        skippedIds: skippedKnowledgeIds,
+      };
+    } catch (err) {
+      const message =
+        err instanceof ApiRequestError
+          ? err.apiError.message
+          : 'Bulk approval failed. Please try the remaining entries again.';
+      setActionError(
+        approvedCount > 0
+          ? `${approvedCount} entries were approved before the request failed. ${message}`
+          : message,
+      );
+      throw err;
+    } finally {
+      // All events emitted by completed chunks are covered by this refresh.
+      // If another event arrives while the refresh is in flight, schedule one
+      // final coalesced read after bulk mode is released.
+      realtimeReloadPendingRef.current = false;
+      await loadEntries(false);
+      bulkUpdateInProgressRef.current = false;
+      const needsFollowupReload = realtimeReloadPendingRef.current;
+      realtimeReloadPendingRef.current = false;
+      if (realtimeReloadTimerRef.current) {
+        clearTimeout(realtimeReloadTimerRef.current);
+        realtimeReloadTimerRef.current = null;
+      }
+      if (needsFollowupReload) {
+        scheduleRealtimeReload();
+      }
+    }
   };
 
   const handleDisable = async (id: string) => {
@@ -292,13 +408,31 @@ export function KnowledgeBasePageContent() {
         </button>
       </div>
 
+      {actionError && (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
+        >
+          {actionError}
+        </div>
+      )}
+
+      {actionWarning && (
+        <div
+          role="status"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800"
+        >
+          {actionWarning}
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <DocxUpload onUpload={handleUpload} uploadStatus={uploadStatus} />
         <ReviewQueue
           entries={pendingEntries}
           categories={categories}
           onApprove={(id) => void handleApprove(id)}
-          onBulkApprove={(ids) => void handleBulkApprove(ids)}
+          onBulkApprove={handleBulkApprove}
           onEdit={(id, data) => void handleEdit(id, data)}
           onDisable={(id) => void handleDisable(id)}
         />

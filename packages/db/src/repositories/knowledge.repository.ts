@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { and, desc, eq, inArray, sql as drizzleSql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql as drizzleSql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import { clinicKnowledgeBase } from '../schema';
@@ -27,6 +27,11 @@ export type KnowledgeEmbeddingStatusSummary = {
   failedCount: number;
   staleCount: number;
   notRequiredCount: number;
+};
+
+export type KnowledgeApprovalCandidate = {
+  id: string;
+  answer: string;
 };
 
 export class KnowledgeRepository {
@@ -98,6 +103,18 @@ export class KnowledgeRepository {
       .orderBy(desc(clinicKnowledgeBase.updatedAt));
   }
 
+  findKnowledgeEntriesByIds(clinicId: string, knowledgeIds: string[]) {
+    return this.db
+      .select()
+      .from(clinicKnowledgeBase)
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          inArray(clinicKnowledgeBase.id, knowledgeIds),
+        ),
+      );
+  }
+
   listKnowledgeForEmbeddingRegenerate(clinicId: string, onlyStatus: 'approved' | 'all' = 'approved') {
     const statusFilter =
       onlyStatus === 'approved'
@@ -123,6 +140,63 @@ export class KnowledgeRepository {
       .set({ ...values, updatedAt: new Date() })
       .where(and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.id, knowledgeId)))
       .returning();
+  }
+
+  bulkApproveKnowledgeEntries(
+    clinicId: string,
+    candidates: KnowledgeApprovalCandidate[],
+    approvedByUserId?: string,
+  ) {
+    const approvedAt = new Date();
+    const validatedCandidateFilter =
+      or(
+        ...candidates.map((candidate) =>
+          and(
+            eq(clinicKnowledgeBase.id, candidate.id),
+            eq(clinicKnowledgeBase.answer, candidate.answer),
+          ),
+        ),
+      ) ?? drizzleSql`false`;
+
+    return this.db
+      .update(clinicKnowledgeBase)
+      .set({
+        status: 'approved',
+        qaApproved: true,
+        embeddingStatus: 'pending',
+        embeddingError: null,
+        approvedAt,
+        ...(approvedByUserId ? { approvedByUserId } : {}),
+        updatedAt: approvedAt,
+      })
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          validatedCandidateFilter,
+          inArray(clinicKnowledgeBase.status, ['pending_review', 'needs_update']),
+          eq(clinicKnowledgeBase.applicable, true),
+          drizzleSql`btrim(${clinicKnowledgeBase.answer}) <> ''`,
+        ),
+      )
+      .returning({ id: clinicKnowledgeBase.id });
+  }
+
+  bulkMarkEmbeddingFailed(clinicId: string, knowledgeIds: string[], errorMessage: string) {
+    return this.db
+      .update(clinicKnowledgeBase)
+      .set({
+        embeddingStatus: 'failed',
+        embeddingError: errorMessage,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          inArray(clinicKnowledgeBase.id, knowledgeIds),
+          eq(clinicKnowledgeBase.embeddingStatus, 'pending'),
+        ),
+      )
+      .returning({ id: clinicKnowledgeBase.id });
   }
 
   async searchApprovedByVector(

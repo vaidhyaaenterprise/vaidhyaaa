@@ -3,6 +3,7 @@ import { FastifyRequest } from 'fastify';
 
 import {
   AppError,
+  bulkApproveKnowledgeEntriesSchema,
   createKnowledgeEntrySchema,
   patchKnowledgeEntrySchema,
   type AuthContext,
@@ -133,6 +134,33 @@ export class KnowledgeController {
       knowledgeId,
       requestedByUserId: auth.userId,
     });
+  }
+
+  @Post('bulk-approve')
+  @Roles('clinic_admin')
+  async bulkApproveKnowledgeEntries(
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+    @Body() body: unknown,
+  ) {
+    const auth = getAuthContext(request);
+    if (!auth.clinicId) {
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
+    }
+
+    const parsed = bulkApproveKnowledgeEntriesSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'knowledge_ids must contain between 1 and 100 valid knowledge entry IDs.',
+      );
+    }
+
+    const result = await this.knowledgeAdmin.bulkApproveKnowledgeEntries({
+      clinicId: auth.clinicId,
+      knowledgeIds: parsed.data.knowledge_ids,
+      actorUserId: auth.userId,
+    });
+    return { result };
   }
 
   @Patch(':knowledgeId')

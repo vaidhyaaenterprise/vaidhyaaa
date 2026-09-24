@@ -76,6 +76,20 @@ export type KnowledgeEmbeddingStatus = {
   not_required_count: number;
 };
 
+export const MAX_KNOWLEDGE_BULK_APPROVAL_SIZE = 100;
+
+export type BulkApproveKnowledgeResult = {
+  requested: number;
+  approved: number;
+  skipped: number;
+  knowledge_ids: string[];
+  skipped_knowledge_ids: string[];
+  embedding_jobs_queued: number;
+  embedding_jobs_failed: number;
+  embedding_job_failed_knowledge_ids: string[];
+  embedding_failure_state_persisted: boolean;
+};
+
 export async function fetchKnowledgeEntries() {
   const data = await apiGet<{ entries: KnowledgeEntryApiRow[] }>('/v1/knowledge/entries');
   return data.entries;
@@ -98,6 +112,41 @@ export async function patchKnowledgeEntry(
     clinic_id: clinicId,
   });
   return data.knowledge;
+}
+
+export async function bulkApproveKnowledgeEntries(knowledgeIds: string[]) {
+  if (knowledgeIds.length === 0 || knowledgeIds.length > MAX_KNOWLEDGE_BULK_APPROVAL_SIZE) {
+    throw new RangeError(
+      `Bulk knowledge approval requires between 1 and ${MAX_KNOWLEDGE_BULK_APPROVAL_SIZE} entries.`,
+    );
+  }
+
+  const data = await apiPost<{ result: BulkApproveKnowledgeResult }>(
+    '/v1/knowledge/bulk-approve',
+    { knowledge_ids: knowledgeIds },
+  );
+  return data.result;
+}
+
+export async function bulkApproveKnowledgeEntriesInChunks(
+  knowledgeIds: string[],
+  onChunkApproved?: (result: BulkApproveKnowledgeResult) => void,
+) {
+  const results: BulkApproveKnowledgeResult[] = [];
+
+  for (
+    let offset = 0;
+    offset < knowledgeIds.length;
+    offset += MAX_KNOWLEDGE_BULK_APPROVAL_SIZE
+  ) {
+    const result = await bulkApproveKnowledgeEntries(
+      knowledgeIds.slice(offset, offset + MAX_KNOWLEDGE_BULK_APPROVAL_SIZE),
+    );
+    results.push(result);
+    onChunkApproved?.(result);
+  }
+
+  return results;
 }
 
 export async function fetchManualKnowledgeTemplate() {

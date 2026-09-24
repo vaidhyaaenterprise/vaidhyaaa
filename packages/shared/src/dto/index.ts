@@ -205,11 +205,13 @@ export {
 } from './conversation-message';
 
 export {
+  bulkApproveKnowledgeEntriesSchema,
   createKnowledgeEntrySchema,
   knowledgeEntryResponseSchema,
   knowledgeFileResponseSchema,
   knowledgeTranslationResponseSchema,
   patchKnowledgeEntrySchema,
+  type BulkApproveKnowledgeEntriesInput,
   type CreateKnowledgeEntryInput,
   type KnowledgeEntryResponse,
   type KnowledgeFileResponse,

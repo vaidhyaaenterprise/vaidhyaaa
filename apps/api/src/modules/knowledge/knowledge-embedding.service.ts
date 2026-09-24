@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { type ApiEnv } from '@vaidya/config';
 import {
@@ -23,8 +23,14 @@ import { createEmbeddingProvider } from './embedding-provider.factory';
 
 export type EmbeddingJobReason = 'approved' | 'edited' | 'bulk_regenerate' | 'manual_retry';
 
+export type BulkEmbeddingEnqueueResult = {
+  queuedKnowledgeIds: string[];
+  failedKnowledgeIds: string[];
+};
+
 @Injectable()
 export class KnowledgeEmbeddingService {
+  private readonly logger = new Logger(KnowledgeEmbeddingService.name);
   private readonly repos: Repositories;
   private readonly embeddingProvider;
 
@@ -68,6 +74,71 @@ export class KnowledgeEmbeddingService {
       },
       source: 'knowledge_embedding_service',
     });
+  }
+
+  async enqueueEmbeddingJobs(input: {
+    clinicId: string;
+    knowledgeEntryIds: string[];
+    requestedByUserId?: string;
+    reason?: EmbeddingJobReason;
+  }): Promise<BulkEmbeddingEnqueueResult> {
+    const knowledgeEntryIds = Array.from(new Set(input.knowledgeEntryIds));
+    if (knowledgeEntryIds.length === 0) {
+      return { queuedKnowledgeIds: [], failedKnowledgeIds: [] };
+    }
+
+    const reason = input.reason ?? 'approved';
+
+    try {
+      await this.queueService.enqueueBulk(
+        knowledgeEntryIds.map((knowledgeEntryId) => ({
+          queue: JOB_QUEUE_MAP[JOB_TYPES.GENERATE_KNOWLEDGE_EMBEDDING],
+          jobType: JOB_TYPES.GENERATE_KNOWLEDGE_EMBEDDING,
+          clinicId: input.clinicId,
+          payload: {
+            clinic_id: input.clinicId,
+            knowledge_entry_id: knowledgeEntryId,
+            ...(input.requestedByUserId
+              ? { requested_by_user_id: input.requestedByUserId }
+              : {}),
+            reason,
+          },
+        })),
+      );
+    } catch {
+      // BullMQ addBulk is a single operation for this queue, so a backend failure
+      // cannot be attributed to one item. Report every ID in the failed batch.
+      return { queuedKnowledgeIds: [], failedKnowledgeIds: knowledgeEntryIds };
+    }
+
+    try {
+      await this.dbService.insertAuditLog({
+        clinicId: input.clinicId,
+        actorType: 'system',
+        eventType: 'knowledge_embedding_jobs_bulk_queued',
+        entityType: 'clinic_knowledge_base',
+        eventData: {
+          knowledge_entry_ids: knowledgeEntryIds,
+          knowledge_entry_count: knowledgeEntryIds.length,
+          reason,
+          requested_by_user_id: input.requestedByUserId ?? null,
+        },
+        source: 'knowledge_embedding_service',
+      });
+    } catch (error) {
+      // The jobs are already queued. Audit logging is best-effort here so an
+      // audit write failure cannot incorrectly mark successfully queued jobs as failed.
+      this.logger.warn(
+        JSON.stringify({
+          event: 'knowledge_embedding_bulk_queue_audit_failed',
+          clinic_id: input.clinicId,
+          knowledge_entry_count: knowledgeEntryIds.length,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+
+    return { queuedKnowledgeIds: knowledgeEntryIds, failedKnowledgeIds: [] };
   }
 
   async generateEmbedding(clinicId: string, knowledgeEntryId: string, jobId?: string | null) {

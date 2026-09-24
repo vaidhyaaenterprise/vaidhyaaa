@@ -512,6 +512,76 @@ export class KnowledgeAdminService {
     return this.embeddingService.bulkRegenerateEmbeddings(input);
   }
 
+  async bulkApproveKnowledgeEntries(input: {
+    clinicId: string;
+    knowledgeIds: string[];
+    actorUserId?: string;
+  }) {
+    const knowledgeIds = Array.from(new Set(input.knowledgeIds));
+    const selectedRows = await this.repos.knowledge.findKnowledgeEntriesByIds(
+      input.clinicId,
+      knowledgeIds,
+    );
+    const eligibleRows = selectedRows.filter(
+      (row) =>
+        (row.status === 'pending_review' || row.status === 'needs_update') &&
+        row.applicable &&
+        row.answer.trim().length > 0,
+    );
+
+    for (const row of eligibleRows) {
+      this.ensureNonMedicalAnswer(row.answer);
+    }
+
+    const approvedRows =
+      eligibleRows.length > 0
+        ? await this.repos.knowledge.bulkApproveKnowledgeEntries(
+            input.clinicId,
+            eligibleRows.map((row) => ({ id: row.id, answer: row.answer })),
+            input.actorUserId,
+          )
+        : [];
+
+    const embeddingEnqueueResult = await this.embeddingService.enqueueEmbeddingJobs({
+      clinicId: input.clinicId,
+      knowledgeEntryIds: approvedRows.map((row) => row.id),
+      ...(input.actorUserId ? { requestedByUserId: input.actorUserId } : {}),
+      reason: 'approved',
+    });
+    const embeddingJobsQueued = embeddingEnqueueResult.queuedKnowledgeIds.length;
+    const embeddingJobFailedKnowledgeIds = embeddingEnqueueResult.failedKnowledgeIds;
+
+    let embeddingFailureStatePersisted = embeddingJobFailedKnowledgeIds.length === 0;
+    if (embeddingJobFailedKnowledgeIds.length > 0) {
+      try {
+        await this.repos.knowledge.bulkMarkEmbeddingFailed(
+          input.clinicId,
+          embeddingJobFailedKnowledgeIds,
+          'embedding_job_enqueue_failed',
+        );
+        embeddingFailureStatePersisted = true;
+      } catch {
+        embeddingFailureStatePersisted = false;
+      }
+    }
+
+    const approvedKnowledgeIds = approvedRows.map((row) => row.id);
+    const approvedKnowledgeIdSet = new Set(approvedKnowledgeIds);
+    const skippedKnowledgeIds = knowledgeIds.filter((id) => !approvedKnowledgeIdSet.has(id));
+
+    return {
+      requested: knowledgeIds.length,
+      approved: approvedRows.length,
+      skipped: skippedKnowledgeIds.length,
+      knowledge_ids: approvedKnowledgeIds,
+      skipped_knowledge_ids: skippedKnowledgeIds,
+      embedding_jobs_queued: embeddingJobsQueued,
+      embedding_jobs_failed: embeddingJobFailedKnowledgeIds.length,
+      embedding_job_failed_knowledge_ids: embeddingJobFailedKnowledgeIds,
+      embedding_failure_state_persisted: embeddingFailureStatePersisted,
+    };
+  }
+
   async patchKnowledgeEntry(input: {
     clinicId: string;
     knowledgeId: string;

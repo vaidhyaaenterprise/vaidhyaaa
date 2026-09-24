@@ -64,6 +64,10 @@ export const patchKnowledgeEntrySchema = createKnowledgeEntrySchema.partial().ex
   status: knowledgeStatusSchema.optional(),
 });
 
+export const bulkApproveKnowledgeEntriesSchema = z.object({
+  knowledge_ids: z.array(uuidSchema).min(1).max(100),
+});
+
 export const knowledgeTranslationResponseSchema = z
   .object({
     id: uuidSchema,
@@ -93,5 +97,6 @@ export const knowledgeFileResponseSchema = z
 export type KnowledgeEntryResponse = z.infer<typeof knowledgeEntryResponseSchema>;
 export type CreateKnowledgeEntryInput = z.infer<typeof createKnowledgeEntrySchema>;
 export type PatchKnowledgeEntryInput = z.infer<typeof patchKnowledgeEntrySchema>;
+export type BulkApproveKnowledgeEntriesInput = z.infer<typeof bulkApproveKnowledgeEntriesSchema>;
 export type KnowledgeTranslationResponse = z.infer<typeof knowledgeTranslationResponseSchema>;
 export type KnowledgeFileResponse = z.infer<typeof knowledgeFileResponseSchema>;

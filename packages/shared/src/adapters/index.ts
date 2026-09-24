@@ -20,6 +20,11 @@ export interface QueueJobPayload {
 
 export interface QueueService {
   enqueue(job: EnqueueJobInput): Promise<string>;
+  /**
+   * Enqueue multiple jobs with the minimum number of backend round trips.
+   * Returned job IDs follow the same order as the supplied jobs.
+   */
+  enqueueBulk(jobs: EnqueueJobInput[]): Promise<string[]>;
 }
 
 export interface LockService {
