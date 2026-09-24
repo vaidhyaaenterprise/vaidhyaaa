@@ -8,6 +8,7 @@ import { DocxUpload } from '@/components/pages/knowledge-base/DocxUpload';
 import { ReviewQueue } from '@/components/pages/knowledge-base/ReviewQueue';
 import { ApprovedQA } from '@/components/pages/knowledge-base/ApprovedQA';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { KNOWLEDGE_CATEGORIES } from '@/components/pages/knowledge-base/knowledge-categories';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
 import {
@@ -19,20 +20,7 @@ import {
   type KnowledgeEntryApiRow,
 } from '@/lib/api/knowledge';
 import { subscribeToClinicKnowledge } from '@/lib/supabase-realtime';
-import type {
-  KnowledgeEntry,
-  KnowledgeFile,
-  Category,
-} from '@/components/pages/knowledge-base/types';
-
-const categories: Category[] = [
-  { id: 'facility_info', name: 'Parking', description: 'Parking information' },
-  { id: 'pre_visit_instruction', name: 'First Visit', description: 'First visit documents' },
-  { id: 'pre_visit_instruction', name: 'Scan/Test Preparation', description: 'Scan preparation' },
-  { id: 'insurance', name: 'Insurance', description: 'Insurance information' },
-  { id: 'reports', name: 'Reports', description: 'Report collection' },
-  { id: 'general', name: 'General FAQ', description: 'General FAQs' },
-];
+import type { KnowledgeEntry, KnowledgeFile } from '@/components/pages/knowledge-base/types';
 
 const REALTIME_RELOAD_DEBOUNCE_MS = 350;
 
@@ -468,7 +456,7 @@ export function KnowledgeBasePageContent() {
         <DocxUpload onUpload={handleUpload} uploadStatus={uploadStatus} />
         <ReviewQueue
           entries={pendingEntries}
-          categories={categories}
+          categories={KNOWLEDGE_CATEGORIES}
           onApprove={(id) => void handleApprove(id)}
           onBulkApprove={handleBulkApprove}
           onEdit={(id, data) => void handleEdit(id, data)}
@@ -476,7 +464,7 @@ export function KnowledgeBasePageContent() {
         />
         <ApprovedQA
           entries={approvedEntries}
-          categories={categories}
+          categories={KNOWLEDGE_CATEGORIES}
           onEdit={(id, data) => void handleEdit(id, data)}
           onDisable={(id) => void handleDisable(id)}
         />
@@ -485,7 +473,7 @@ export function KnowledgeBasePageContent() {
       <ManualQAForm
         isOpen={isManualFormOpen}
         onClose={() => setIsManualFormOpen(false)}
-        categories={categories}
+        categories={KNOWLEDGE_CATEGORIES}
         onSaved={() => {
           void loadEntries(false);
         }}

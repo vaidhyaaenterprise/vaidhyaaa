@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  formatKnowledgeCategoryName,
+  getKnowledgeCategoryDisplayName,
+} from './knowledge-categories';
 import type { KnowledgeEntry, Category } from './types';
 
 interface ReviewQueueProps {
@@ -114,10 +118,6 @@ export function ReviewQueue({
     setEditForm({});
   };
 
-  const getCategoryName = (categoryId: string) => {
-    return categories.find(c => c.id === categoryId)?.name || categoryId;
-  };
-
   const getLanguageBadge = (language: string) => {
     return (
       <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
@@ -229,8 +229,16 @@ export function ReviewQueue({
                         className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                       >
                         {categories.map((cat) => (
-                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
                         ))}
+                        {editForm.category &&
+                          !categories.some((category) => category.id === editForm.category) && (
+                            <option value={editForm.category}>
+                              {formatKnowledgeCategoryName(editForm.category)}
+                            </option>
+                          )}
                       </select>
                     </div>
                   </div>
@@ -252,7 +260,9 @@ export function ReviewQueue({
                       </p>
                     )}
                     <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                      <span className="font-semibold">{getCategoryName(entry.category)}</span>
+                      <span className="font-semibold">
+                        {getKnowledgeCategoryDisplayName(entry, categories)}
+                      </span>
                       {entry.source === 'upload' && <span>• Uploaded from DOCX</span>}
                     </div>
                     {entry.alternativePhrases.length > 0 && (

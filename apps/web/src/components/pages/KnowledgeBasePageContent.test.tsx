@@ -77,6 +77,34 @@ afterEach(() => {
 });
 
 describe('KnowledgeBasePageContent bulk refresh behavior', () => {
+  it('shows the manual-template category names in the review queue', async () => {
+    const visitPolicy = {
+      ...knowledgeRow('00000000-0000-0000-0000-000000000201'),
+      question: 'Do I need an appointment, or can I walk in?',
+      category: 'visit_policy',
+      template_key:
+        'visit_appointments::Do I need an appointment, or can I walk in?',
+      section_key: 'visit_appointments',
+    };
+    const scanPreparation = {
+      ...knowledgeRow('00000000-0000-0000-0000-000000000202'),
+      question: 'For scan / ultrasound, is fasting required?',
+      category: 'scan_preparation',
+      template_key:
+        'tests_reports::For scan / ultrasound, is fasting required?',
+      section_key: 'tests_reports',
+    };
+    mockedFetchEntries.mockResolvedValue([visitPolicy, scanPreparation]);
+
+    render(<KnowledgeBasePageContent />);
+
+    expect(await screen.findByText(visitPolicy.question)).toBeInTheDocument();
+    expect(screen.getByText('Visit & Appointments')).toBeInTheDocument();
+    expect(screen.getByText('Tests & Reports')).toBeInTheDocument();
+    expect(screen.queryByText('visit_policy')).not.toBeInTheDocument();
+    expect(screen.queryByText('scan_preparation')).not.toBeInTheDocument();
+  });
+
   it('coalesces a burst of realtime row changes into one knowledge reload', async () => {
     render(<KnowledgeBasePageContent />);
 

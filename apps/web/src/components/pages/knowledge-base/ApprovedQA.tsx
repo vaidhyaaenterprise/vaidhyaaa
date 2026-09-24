@@ -1,6 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  formatKnowledgeCategoryName,
+  getKnowledgeCategoryDisplayName,
+} from './knowledge-categories';
 import type { KnowledgeEntry, Category } from './types';
 
 interface ApprovedQAProps {
@@ -40,10 +44,6 @@ export function ApprovedQA({
   const handleEditCancel = () => {
     setEditingId(null);
     setEditForm({});
-  };
-
-  const getCategoryName = (categoryId: string) => {
-    return categories.find(c => c.id === categoryId)?.name || categoryId;
   };
 
   const getLanguageBadge = (language: string) => {
@@ -121,8 +121,16 @@ export function ApprovedQA({
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                     >
                       {categories.map((cat) => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        <option key={cat.id} value={cat.id}>
+                          {cat.name}
+                        </option>
                       ))}
+                      {editForm.category &&
+                        !categories.some((category) => category.id === editForm.category) && (
+                          <option value={editForm.category}>
+                            {formatKnowledgeCategoryName(editForm.category)}
+                          </option>
+                        )}
                     </select>
                   </div>
                 </div>
@@ -135,7 +143,9 @@ export function ApprovedQA({
                   </div>
                   <p className="text-sm text-slate-600">{entry.answer}</p>
                   <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                    <span className="font-semibold">{getCategoryName(entry.category)}</span>
+                    <span className="font-semibold">
+                      {getKnowledgeCategoryDisplayName(entry, categories)}
+                    </span>
                     <span>•</span>
                     <span>Updated {new Date(entry.updatedAt).toLocaleDateString()}</span>
                   </div>
