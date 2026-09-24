@@ -15,6 +15,7 @@ import {
   fetchKnowledgeEmbeddingStatus,
   fetchKnowledgeEntries,
   patchKnowledgeEntry,
+  type BulkKnowledgeApprovalSkippedEntry,
   type KnowledgeEntryApiRow,
 } from '@/lib/api/knowledge';
 import { subscribeToClinicKnowledge } from '@/lib/supabase-realtime';
@@ -268,6 +269,7 @@ export function KnowledgeBasePageContent() {
     let approvedCount = 0;
     const approvedKnowledgeIds: string[] = [];
     const skippedKnowledgeIds: string[] = [];
+    const skippedEntries: BulkKnowledgeApprovalSkippedEntry[] = [];
     const embeddingFailedKnowledgeIds: string[] = [];
     let embeddingFailureStatePersisted = true;
 
@@ -277,6 +279,7 @@ export function KnowledgeBasePageContent() {
         approvedCount += result.approved;
         approvedKnowledgeIds.push(...result.knowledge_ids);
         skippedKnowledgeIds.push(...result.skipped_knowledge_ids);
+        skippedEntries.push(...(result.skipped_entries ?? []));
         embeddingFailedKnowledgeIds.push(...result.embedding_job_failed_knowledge_ids);
         embeddingFailureStatePersisted =
           embeddingFailureStatePersisted && result.embedding_failure_state_persisted;
@@ -301,9 +304,44 @@ export function KnowledgeBasePageContent() {
 
       const warnings: string[] = [];
       if (skippedKnowledgeIds.length > 0) {
-        warnings.push(
-          `${skippedKnowledgeIds.length} selected ${skippedKnowledgeIds.length === 1 ? 'entry was' : 'entries were'} not approved because the data changed or was no longer eligible. Unapproved entries remain selected for review.`,
-        );
+        const countReason = (reason: BulkKnowledgeApprovalSkippedEntry['reason']) =>
+          skippedEntries.filter((entry) => entry.reason === reason).length;
+        const answerRequired = countReason('answer_required');
+        const notApplicable = countReason('not_applicable');
+        const statusNotReviewable = countReason('status_not_reviewable');
+        const notFound = countReason('not_found_or_inaccessible');
+        const changed = countReason('changed_during_approval');
+
+        if (answerRequired > 0) {
+          warnings.push(
+            `${answerRequired} ${answerRequired === 1 ? 'entry needs an answer' : 'entries need answers'} before approval. Complete the answers and try again.`,
+          );
+        }
+        if (notApplicable > 0) {
+          warnings.push(
+            `${notApplicable} inactive ${notApplicable === 1 ? 'entry was' : 'entries were'} not approved.`,
+          );
+        }
+        if (statusNotReviewable > 0) {
+          warnings.push(
+            `${statusNotReviewable} ${statusNotReviewable === 1 ? 'entry is' : 'entries are'} no longer awaiting review.`,
+          );
+        }
+        if (notFound > 0) {
+          warnings.push(
+            `${notFound} ${notFound === 1 ? 'entry was' : 'entries were'} not available for this clinic.`,
+          );
+        }
+        if (changed > 0) {
+          warnings.push(
+            `${changed} ${changed === 1 ? 'entry changed' : 'entries changed'} during approval and must be reviewed again.`,
+          );
+        }
+        if (skippedEntries.length === 0) {
+          warnings.push(
+            `${skippedKnowledgeIds.length} selected ${skippedKnowledgeIds.length === 1 ? 'entry was' : 'entries were'} not approved because the data changed or was no longer eligible. Unapproved entries remain selected for review.`,
+          );
+        }
       }
       if (embeddingFailedKnowledgeIds.length > 0) {
         warnings.push(

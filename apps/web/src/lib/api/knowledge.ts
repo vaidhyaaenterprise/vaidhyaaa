@@ -78,12 +78,26 @@ export type KnowledgeEmbeddingStatus = {
 
 export const MAX_KNOWLEDGE_BULK_APPROVAL_SIZE = 100;
 
+export type BulkKnowledgeApprovalSkipReason =
+  | 'answer_required'
+  | 'not_applicable'
+  | 'status_not_reviewable'
+  | 'not_found_or_inaccessible'
+  | 'changed_during_approval';
+
+export type BulkKnowledgeApprovalSkippedEntry = {
+  knowledge_id: string;
+  reason: BulkKnowledgeApprovalSkipReason;
+};
+
 export type BulkApproveKnowledgeResult = {
   requested: number;
   approved: number;
   skipped: number;
   knowledge_ids: string[];
   skipped_knowledge_ids: string[];
+  // Optional while API and web deployments roll out independently.
+  skipped_entries?: BulkKnowledgeApprovalSkippedEntry[];
   embedding_jobs_queued: number;
   embedding_jobs_failed: number;
   embedding_job_failed_knowledge_ids: string[];

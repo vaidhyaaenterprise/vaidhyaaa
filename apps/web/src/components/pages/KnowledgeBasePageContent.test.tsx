@@ -114,6 +114,12 @@ describe('KnowledgeBasePageContent bulk refresh behavior', () => {
         skipped: 1,
         knowledge_ids: [approved.id],
         skipped_knowledge_ids: [skipped.id],
+        skipped_entries: [
+          {
+            knowledge_id: skipped.id,
+            reason: 'changed_during_approval' as const,
+          },
+        ],
         embedding_jobs_queued: 0,
         embedding_jobs_failed: 1,
         embedding_job_failed_knowledge_ids: [approved.id],
@@ -130,7 +136,7 @@ describe('KnowledgeBasePageContent bulk refresh behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve selected (2)' }));
 
     expect(
-      await screen.findByText(/1 selected entry was not approved because the data changed/),
+      await screen.findByText(/1 entry changed during approval and must be reviewed again/),
     ).toBeInTheDocument();
     expect(screen.getByText(/1 approved entry needs an embedding retry/)).toBeInTheDocument();
     await waitFor(() => {

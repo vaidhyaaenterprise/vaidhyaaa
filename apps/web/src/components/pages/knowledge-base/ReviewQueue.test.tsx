@@ -118,4 +118,39 @@ describe('ReviewQueue bulk approval', () => {
     });
     expect(screen.getByRole('checkbox')).toBeChecked();
   });
+
+  it('selects only completed, applicable entries for bulk approval', async () => {
+    const onBulkApprove = vi.fn().mockResolvedValue({
+      approvedIds: ['ready'],
+      skippedIds: [],
+    });
+
+    render(
+      <ReviewQueue
+        entries={[
+          { ...entry('ready'), applicable: true },
+          { ...entry('unanswered'), answer: '', applicable: true },
+          { ...entry('inactive'), applicable: false },
+        ]}
+        categories={categories}
+        onApprove={vi.fn()}
+        onBulkApprove={onBulkApprove}
+        onEdit={vi.fn()}
+        onDisable={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes[0]).toBeChecked();
+    expect(checkboxes[0]).toBeEnabled();
+    expect(checkboxes[1]).not.toBeChecked();
+    expect(checkboxes[1]).toBeDisabled();
+    expect(checkboxes[2]).not.toBeChecked();
+    expect(checkboxes[2]).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve selected (1)' }));
+    await waitFor(() => expect(onBulkApprove).toHaveBeenCalledWith(['ready']));
+  });
 });

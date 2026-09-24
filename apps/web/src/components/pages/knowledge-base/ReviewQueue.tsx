@@ -12,6 +12,10 @@ interface ReviewQueueProps {
   onDisable: (id: string) => void;
 }
 
+function isEntryApprovable(entry: KnowledgeEntry) {
+  return entry.applicable !== false && entry.answer.trim().length > 0;
+}
+
 export function ReviewQueue({
   entries,
   categories,
@@ -26,14 +30,21 @@ export function ReviewQueue({
   const [isBulkApproving, setIsBulkApproving] = useState(false);
 
   useEffect(() => {
-    const visibleIds = new Set(entries.map((entry) => entry.id));
+    const selectableIds = new Set(
+      entries.filter((entry) => isEntryApprovable(entry)).map((entry) => entry.id),
+    );
     setSelectedIds((current) => {
-      const visibleSelection = new Set(Array.from(current).filter((id) => visibleIds.has(id)));
+      const visibleSelection = new Set(Array.from(current).filter((id) => selectableIds.has(id)));
       return visibleSelection.size === current.size ? current : visibleSelection;
     });
   }, [entries]);
 
   const handleSelect = (id: string) => {
+    const entry = entries.find((candidate) => candidate.id === id);
+    if (!entry || !isEntryApprovable(entry)) {
+      return;
+    }
+
     const newSelected = new Set(selectedIds);
     if (newSelected.has(id)) {
       newSelected.delete(id);
@@ -44,10 +55,16 @@ export function ReviewQueue({
   };
 
   const handleSelectAll = () => {
-    if (selectedIds.size === entries.length) {
+    const selectableIds = entries
+      .filter((entry) => isEntryApprovable(entry))
+      .map((entry) => entry.id);
+    const allSelectableEntriesSelected =
+      selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+
+    if (allSelectableEntriesSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(entries.map(e => e.id)));
+      setSelectedIds(new Set(selectableIds));
     }
   };
 
@@ -118,10 +135,25 @@ export function ReviewQueue({
     );
   }
 
+  const selectableEntries = entries.filter((entry) => isEntryApprovable(entry));
+  const incompleteEntriesCount = entries.length - selectableEntries.length;
+  const allSelectableEntriesSelected =
+    selectableEntries.length > 0 &&
+    selectableEntries.every((entry) => selectedIds.has(entry.id));
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-bold text-slate-900">Review queue</h3>
+        <div>
+          <h3 className="text-lg font-bold text-slate-900">Review queue</h3>
+          {incompleteEntriesCount > 0 && (
+            <p className="mt-1 text-xs font-semibold text-amber-700">
+              {incompleteEntriesCount}{' '}
+              {incompleteEntriesCount === 1 ? 'entry needs' : 'entries need'} completion before
+              approval
+            </p>
+          )}
+        </div>
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
             <button
@@ -136,10 +168,10 @@ export function ReviewQueue({
           )}
           <button
             onClick={handleSelectAll}
-            disabled={isBulkApproving}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+            disabled={isBulkApproving || selectableEntries.length === 0}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {selectedIds.size === entries.length ? 'Deselect all' : 'Select all'}
+            {allSelectableEntriesSelected ? 'Deselect all' : 'Select all'}
           </button>
         </div>
       </div>
@@ -159,7 +191,7 @@ export function ReviewQueue({
                 type="checkbox"
                 checked={selectedIds.has(entry.id)}
                 onChange={() => handleSelect(entry.id)}
-                disabled={isBulkApproving}
+                disabled={isBulkApproving || !isEntryApprovable(entry)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
               />
               <div className="flex-1">
@@ -209,6 +241,16 @@ export function ReviewQueue({
                       {getLanguageBadge(entry.language)}
                     </div>
                     <p className="text-sm text-slate-600">{entry.answer}</p>
+                    {entry.answer.trim().length === 0 && (
+                      <p className="mt-1 text-xs font-semibold text-amber-700">
+                        Answer required before approval
+                      </p>
+                    )}
+                    {entry.applicable === false && (
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        Not applicable — enable this entry before approval
+                      </p>
+                    )}
                     <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
                       <span className="font-semibold">{getCategoryName(entry.category)}</span>
                       {entry.source === 'upload' && <span>• Uploaded from DOCX</span>}
@@ -246,7 +288,7 @@ export function ReviewQueue({
                 <>
                   <button
                     onClick={() => onApprove(entry.id)}
-                    disabled={isBulkApproving}
+                    disabled={isBulkApproving || !isEntryApprovable(entry)}
                     className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Approve

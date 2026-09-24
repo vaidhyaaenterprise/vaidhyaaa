@@ -32,6 +32,13 @@ type ManualTemplateSectionResponse = {
   questions: ManualTemplateQuestionResponse[];
 };
 
+type BulkKnowledgeApprovalSkipReason =
+  | 'answer_required'
+  | 'not_applicable'
+  | 'status_not_reviewable'
+  | 'not_found_or_inaccessible'
+  | 'changed_during_approval';
+
 @Injectable()
 export class KnowledgeAdminService {
   private readonly repos: Repositories;
@@ -522,12 +529,24 @@ export class KnowledgeAdminService {
       input.clinicId,
       knowledgeIds,
     );
-    const eligibleRows = selectedRows.filter(
-      (row) =>
-        (row.status === 'pending_review' || row.status === 'needs_update') &&
-        row.applicable &&
-        row.answer.trim().length > 0,
-    );
+    const selectedRowsById = new Map(selectedRows.map((row) => [row.id, row]));
+    const skipReasons = new Map<string, BulkKnowledgeApprovalSkipReason>();
+    const eligibleRows: KnowledgeEntryRow[] = [];
+
+    for (const knowledgeId of knowledgeIds) {
+      const row = selectedRowsById.get(knowledgeId);
+      if (!row) {
+        skipReasons.set(knowledgeId, 'not_found_or_inaccessible');
+      } else if (row.status !== 'pending_review' && row.status !== 'needs_update') {
+        skipReasons.set(knowledgeId, 'status_not_reviewable');
+      } else if (!row.applicable) {
+        skipReasons.set(knowledgeId, 'not_applicable');
+      } else if (row.answer.trim().length === 0) {
+        skipReasons.set(knowledgeId, 'answer_required');
+      } else {
+        eligibleRows.push(row);
+      }
+    }
 
     for (const row of eligibleRows) {
       this.ensureNonMedicalAnswer(row.answer);
@@ -568,6 +587,10 @@ export class KnowledgeAdminService {
     const approvedKnowledgeIds = approvedRows.map((row) => row.id);
     const approvedKnowledgeIdSet = new Set(approvedKnowledgeIds);
     const skippedKnowledgeIds = knowledgeIds.filter((id) => !approvedKnowledgeIdSet.has(id));
+    const skippedEntries = skippedKnowledgeIds.map((knowledgeId) => ({
+      knowledge_id: knowledgeId,
+      reason: skipReasons.get(knowledgeId) ?? 'changed_during_approval',
+    }));
 
     return {
       requested: knowledgeIds.length,
@@ -575,6 +598,7 @@ export class KnowledgeAdminService {
       skipped: skippedKnowledgeIds.length,
       knowledge_ids: approvedKnowledgeIds,
       skipped_knowledge_ids: skippedKnowledgeIds,
+      skipped_entries: skippedEntries,
       embedding_jobs_queued: embeddingJobsQueued,
       embedding_jobs_failed: embeddingJobFailedKnowledgeIds.length,
       embedding_job_failed_knowledge_ids: embeddingJobFailedKnowledgeIds,

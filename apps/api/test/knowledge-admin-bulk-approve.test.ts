@@ -93,6 +93,7 @@ describe('KnowledgeAdminService bulk approval', () => {
       skipped: 0,
       knowledge_ids: [KNOWLEDGE_ID_1, KNOWLEDGE_ID_2],
       skipped_knowledge_ids: [],
+      skipped_entries: [],
       embedding_jobs_queued: 2,
       embedding_jobs_failed: 0,
       embedding_job_failed_knowledge_ids: [],
@@ -172,5 +173,81 @@ describe('KnowledgeAdminService bulk approval', () => {
     expect(result.approved).toBe(1);
     expect(result.skipped).toBe(1);
     expect(result.skipped_knowledge_ids).toEqual([KNOWLEDGE_ID_2]);
+    expect(result.skipped_entries).toEqual([
+      {
+        knowledge_id: KNOWLEDGE_ID_2,
+        reason: 'not_found_or_inaccessible',
+      },
+    ]);
+  });
+
+  it('skips incomplete review rows while approving completed answers in the same batch', async () => {
+    const { service, findKnowledgeEntriesByIds, bulkApproveKnowledgeEntries } = createService();
+    findKnowledgeEntriesByIds.mockResolvedValue([
+      {
+        id: KNOWLEDGE_ID_1,
+        status: 'pending_review',
+        applicable: true,
+        qaApproved: false,
+        answer: 'Parking is available near the clinic.',
+      },
+      {
+        id: KNOWLEDGE_ID_2,
+        status: 'needs_update',
+        applicable: true,
+        qaApproved: false,
+        answer: '',
+      },
+    ]);
+    bulkApproveKnowledgeEntries.mockResolvedValue([{ id: KNOWLEDGE_ID_1 }]);
+
+    const result = await service.bulkApproveKnowledgeEntries({
+      clinicId: CLINIC_ID,
+      knowledgeIds: [KNOWLEDGE_ID_1, KNOWLEDGE_ID_2],
+      actorUserId: USER_ID,
+    });
+
+    expect(bulkApproveKnowledgeEntries).toHaveBeenCalledWith(
+      CLINIC_ID,
+      [{ id: KNOWLEDGE_ID_1, answer: 'Parking is available near the clinic.' }],
+      USER_ID,
+    );
+    expect(result).toMatchObject({
+      requested: 2,
+      approved: 1,
+      skipped: 1,
+      knowledge_ids: [KNOWLEDGE_ID_1],
+      skipped_knowledge_ids: [KNOWLEDGE_ID_2],
+      skipped_entries: [{ knowledge_id: KNOWLEDGE_ID_2, reason: 'answer_required' }],
+    });
+  });
+
+  it('does not reactivate an intentionally disabled entry', async () => {
+    const { service, findKnowledgeEntriesByIds, bulkApproveKnowledgeEntries } = createService();
+    findKnowledgeEntriesByIds.mockResolvedValue([
+      {
+        id: KNOWLEDGE_ID_1,
+        status: 'disabled',
+        applicable: false,
+        qaApproved: false,
+        answer: 'This answer was intentionally disabled.',
+      },
+    ]);
+
+    const result = await service.bulkApproveKnowledgeEntries({
+      clinicId: CLINIC_ID,
+      knowledgeIds: [KNOWLEDGE_ID_1],
+      actorUserId: USER_ID,
+    });
+
+    expect(bulkApproveKnowledgeEntries).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      requested: 1,
+      approved: 0,
+      skipped: 1,
+      knowledge_ids: [],
+      skipped_knowledge_ids: [KNOWLEDGE_ID_1],
+      skipped_entries: [{ knowledge_id: KNOWLEDGE_ID_1, reason: 'status_not_reviewable' }],
+    });
   });
 });

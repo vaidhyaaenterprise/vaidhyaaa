@@ -35,6 +35,7 @@ describe('KnowledgeController clinic scoping', () => {
         skipped: 0,
         knowledge_ids: [KNOWLEDGE_ID],
         skipped_knowledge_ids: [],
+        skipped_entries: [],
         embedding_jobs_queued: 1,
         embedding_jobs_failed: 0,
         embedding_job_failed_knowledge_ids: [],
