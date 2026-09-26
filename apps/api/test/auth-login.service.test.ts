@@ -78,4 +78,47 @@ describe('AuthService password login', () => {
     expect(touchUserLastLogin).toHaveBeenCalledOnce();
     expect(listActiveClinicMemberships).toHaveBeenCalledOnce();
   });
+
+  it('rejects an explicitly requested clinic outside the user memberships', async () => {
+    const now = new Date('2026-09-20T12:00:00.000Z');
+    const userId = '00000000-0000-4000-8000-000000000101';
+    const user = {
+      id: userId,
+      platformRole: null,
+      active: true,
+    };
+    const membership = {
+      id: '00000000-0000-4000-8000-000000000201',
+      clinicId: '00000000-0000-4000-8000-000000000301',
+      userId,
+      role: 'clinic_admin',
+      doctorId: null,
+      active: true,
+      invitedByUserId: null,
+      deletedAt: null,
+      deletedByUserId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const service = new AuthService(
+      { db: {} } as unknown as DatabaseConnection,
+      {} as DatabaseService,
+      { JWT_SECRET: 'test-secret' } as ApiEnv,
+      {} as EmailService,
+    );
+    (service as unknown as { repos: Repositories }).repos = {
+      auth: {
+        findUserById: vi.fn().mockResolvedValue([user]),
+        listActiveClinicMemberships: vi.fn().mockResolvedValue([membership]),
+      },
+    } as unknown as Repositories;
+
+    await expect(
+      service.resolveAuthContext({
+        userId,
+        clinicId: '00000000-0000-4000-8000-000000000999',
+      }),
+    ).rejects.toThrow('Requested clinic membership was not found.');
+  });
 });

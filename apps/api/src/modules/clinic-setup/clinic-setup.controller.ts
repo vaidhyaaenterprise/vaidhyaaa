@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import {
@@ -8,12 +8,15 @@ import {
   type AuthContext,
 } from '@vaidya/shared';
 
-import { DEV_AUTH_HEADERS } from '../../common/constants/auth.constants';
 import { deriveLoginNumber } from '../../common/crypto/password';
 import { ClinicAdmin } from '../../common/decorators/platform-admin.decorator';
 import { ClinicScoped } from '../../common/decorators/clinic-scoped.decorator';
 import { AUTH_CONTEXT_KEY, getAuthContext } from '../../common/guards/auth.guard';
-import { inviteClinicUserSchema, createClinicUserLoginSchema } from '../platform/platform.schemas';
+import {
+  createClinicUserLoginSchema,
+  inviteClinicUserSchema,
+  updateClinicUserLoginSchema,
+} from '../platform/platform.schemas';
 
 import { ClinicSettingsService } from './clinic-settings.service';
 import { ClinicUsersService } from './clinic-users.service';
@@ -90,10 +93,11 @@ function resolveClinicIdFromLegacyRequest(
   request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
 ): string {
   const auth = getAuthContext(request);
-  const headerClinicId = request.headers[DEV_AUTH_HEADERS.CLINIC_ID];
-  if (typeof headerClinicId === 'string' && headerClinicId.length > 0) {
-    return headerClinicId;
-  }
+
+  // Legacy routes have no :clinicId parameter for RBAC to compare. Trust only
+  // the clinic context already resolved by authentication; never read a raw
+  // request header here. Platform operators without a resolved clinic must use
+  // the canonical /clinics/:clinicId/users routes.
   if (auth.clinicId) {
     return auth.clinicId;
   }
@@ -184,7 +188,7 @@ export class ClinicUsersController {
     const result = await this.clinicUsersService.listUsers(clinicId);
     return {
       users: mapClinicUserRows(result.users),
-      clinic_login_number: result.clinicLoginNumber ?? deriveLoginNumber(clinicId),
+      clinic_login_number: String(result.clinicLoginNumber ?? deriveLoginNumber(clinicId)),
     };
   }
 
@@ -230,6 +234,56 @@ export class ClinicUsersController {
         active: result.user.active,
       },
       membership: result.membership,
+    };
+  }
+
+  @Patch(':clinicUserId')
+  @ClinicAdmin()
+  async updateLogin(
+    @Param('clinicId') clinicId: string,
+    @Param('clinicUserId') clinicUserId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = updateClinicUserLoginSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid clinic user credential payload.', {
+        fields: parsed.error.issues,
+      });
+    }
+
+    const auth = getAuthContext(request);
+    const result = await this.clinicUsersService.updateLogin(
+      clinicId,
+      clinicUserId,
+      parsed.data,
+      auth.userId,
+    );
+    return {
+      user: {
+        id: result.user.id,
+        name: result.user.name,
+        username: result.user.username,
+        active: result.user.active,
+      },
+      membership: result.membership,
+    };
+  }
+
+  @Delete(':clinicUserId')
+  @ClinicAdmin()
+  async revokeLogin(
+    @Param('clinicId') clinicId: string,
+    @Param('clinicUserId') clinicUserId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const auth = getAuthContext(request);
+    const result = await this.clinicUsersService.revokeLogin(clinicId, clinicUserId, auth.userId);
+    return {
+      deleted: true,
+      revoked: true,
+      clinic_user_id: result.membership.id,
+      credentials_revoked: result.credentialsRevoked,
     };
   }
 
@@ -283,7 +337,7 @@ export class ClinicUsersLegacyController {
     const result = await this.clinicUsersService.listUsers(clinicId);
     return {
       users: mapClinicUserRows(result.users),
-      clinic_login_number: result.clinicLoginNumber ?? deriveLoginNumber(clinicId),
+      clinic_login_number: String(result.clinicLoginNumber ?? deriveLoginNumber(clinicId)),
     };
   }
 

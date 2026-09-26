@@ -74,4 +74,4 @@ export {
 
 export { assertResetAllowed, resolveDatabaseUrl } from './cli/env';
 
-export { and, eq, gt, sql } from 'drizzle-orm';
+export { and, eq, gt, isNull, sql } from 'drizzle-orm';

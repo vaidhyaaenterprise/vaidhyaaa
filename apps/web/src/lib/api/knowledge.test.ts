@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { apiPost } from '@/lib/api/client';
+import { apiPatch, apiPost } from '@/lib/api/client';
 import {
   bulkApproveKnowledgeEntries,
   bulkApproveKnowledgeEntriesInChunks,
   MAX_KNOWLEDGE_BULK_APPROVAL_SIZE,
+  patchKnowledgeEntry,
 } from '@/lib/api/knowledge';
 
 vi.mock('@/lib/api/client', () => ({
@@ -14,9 +15,69 @@ vi.mock('@/lib/api/client', () => ({
 }));
 
 const mockedApiPost = vi.mocked(apiPost);
+const mockedApiPatch = vi.mocked(apiPatch);
 
 beforeEach(() => {
   mockedApiPost.mockReset();
+  mockedApiPatch.mockReset();
+});
+
+describe('knowledge mutation response normalization', () => {
+  it('normalizes the camelCase knowledge row returned by the API', async () => {
+    mockedApiPatch.mockResolvedValue({
+      knowledge: {
+        id: '039aac2c-3b21-474c-963d-8d602cd802fa',
+        clinicId: '8f64a579-f674-4afc-932a-ab5b54f6b3ec',
+        question: 'Can I share photos or documents before visit?',
+        answer: 'yes u can share photos',
+        category: 'communication',
+        alternativePhrasesJson: [],
+        sourceFileId: null,
+        sourceFile: 'Vaidya Clinic Knowledge Base Q&A Template',
+        sourcePage: null,
+        templateKey: 'communication::Can I share photos or documents before visit?',
+        sectionKey: 'communication',
+        sourceNotes: 'Do not give diagnosis advice.',
+        serviceName: null,
+        applicable: true,
+        qaApproved: true,
+        status: 'needs_update',
+        searchText:
+          'Category: communication Question: Can I share photos or documents before visit? Answer: yes u can share photos',
+        embeddingModel: null,
+        embeddingDimensions: null,
+        embeddingStatus: 'failed',
+        embeddingGeneratedAt: null,
+        embeddingError: 'expected 768 dimensions, not 1024',
+        embeddingSourceHash: null,
+        lastEmbeddingJobId: null,
+        approvedByUserId: null,
+        approvedAt: null,
+        createdAt: '2026-09-24T13:39:31.186Z',
+        updatedAt: '2026-09-24T17:46:11.997Z',
+      },
+    });
+
+    const result = await patchKnowledgeEntry(
+      '039aac2c-3b21-474c-963d-8d602cd802fa',
+      { answer: 'yes u can share photos' },
+      '8f64a579-f674-4afc-932a-ab5b54f6b3ec',
+    );
+
+    expect(result).toMatchObject({
+      id: '039aac2c-3b21-474c-963d-8d602cd802fa',
+      clinic_id: '8f64a579-f674-4afc-932a-ab5b54f6b3ec',
+      alternative_phrases_json: [],
+      template_key: 'communication::Can I share photos or documents before visit?',
+      section_key: 'communication',
+      source_notes: 'Do not give diagnosis advice.',
+      qa_approved: true,
+      embedding_status: 'failed',
+      created_at: '2026-09-24T13:39:31.186Z',
+      updated_at: '2026-09-24T17:46:11.997Z',
+    });
+    expect(result.alternative_phrases_json).toHaveLength(0);
+  });
 });
 
 describe('knowledge bulk approval API', () => {

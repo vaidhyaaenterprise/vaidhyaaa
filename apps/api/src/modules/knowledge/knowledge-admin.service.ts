@@ -73,30 +73,7 @@ export class KnowledgeAdminService {
 
   async listEntries(clinicId: string) {
     const rows = await this.repos.knowledge.listKnowledgeEntries(clinicId);
-    return rows.map((row) => ({
-      id: row.id,
-      clinic_id: row.clinicId,
-      question: row.question,
-      answer: row.answer,
-      category: row.category,
-      alternative_phrases_json: (row.alternativePhrasesJson as string[] | null) ?? [],
-      template_key: row.templateKey,
-      section_key: row.sectionKey,
-      source_notes: row.sourceNotes,
-      service_name: row.serviceName,
-      applicable: row.applicable,
-      qa_approved: row.qaApproved,
-      status: row.status,
-      embedding_status: row.embeddingStatus,
-      embedding_model: row.embeddingModel,
-      embedding_generated_at: row.embeddingGeneratedAt,
-      search_text: row.searchText,
-      source_file: row.sourceFile,
-      source_page: row.sourcePage,
-      approved_at: row.approvedAt,
-      created_at: row.createdAt,
-      updated_at: row.updatedAt,
-    }));
+    return rows.map((row) => this.buildManualEntryResponse(row));
   }
 
   private ensureNonMedicalAnswer(answer: string) {
@@ -161,6 +138,7 @@ export class KnowledgeAdminService {
       answer: row.answer,
       category: row.category,
       alternative_phrases_json: (row.alternativePhrasesJson as string[] | null) ?? [],
+      source_file_id: row.sourceFileId,
       template_key: row.templateKey,
       section_key: row.sectionKey,
       source_notes: row.sourceNotes,
@@ -170,10 +148,15 @@ export class KnowledgeAdminService {
       status: row.status,
       embedding_status: row.embeddingStatus,
       embedding_model: row.embeddingModel,
+      embedding_dimensions: row.embeddingDimensions,
       embedding_generated_at: row.embeddingGeneratedAt,
+      embedding_error: row.embeddingError,
+      embedding_source_hash: row.embeddingSourceHash,
+      last_embedding_job_id: row.lastEmbeddingJobId,
       search_text: row.searchText,
       source_file: row.sourceFile,
       source_page: row.sourcePage,
+      approved_by_user_id: row.approvedByUserId,
       approved_at: row.approvedAt,
       created_at: row.createdAt,
       updated_at: row.updatedAt,
@@ -251,6 +234,7 @@ export class KnowledgeAdminService {
               answer: '',
               category: preset.category,
               alternative_phrases_json: [],
+              source_file_id: null,
               template_key: templateKey,
               section_key: preset.sectionKey,
               source_notes: preset.sourceNotes ?? null,
@@ -260,10 +244,15 @@ export class KnowledgeAdminService {
               status: 'needs_update',
               embedding_status: 'not_required',
               embedding_model: null,
+              embedding_dimensions: null,
               embedding_generated_at: null,
+              embedding_error: null,
+              embedding_source_hash: null,
+              last_embedding_job_id: null,
               search_text: null,
               source_file: VAIDYA_MANUAL_TEMPLATE_SOURCE,
               source_page: null,
+              approved_by_user_id: null,
               approved_at: null,
               created_at: now,
               updated_at: now,
@@ -746,14 +735,18 @@ export class KnowledgeAdminService {
       updates,
     );
 
-    if (shouldGenerateEmbedding && updated && updated.embeddingStatus === 'pending') {
+    if (!updated) {
+      throw new AppError('INTERNAL_ERROR', 'Failed to update knowledge entry.');
+    }
+
+    if (shouldGenerateEmbedding && updated.embeddingStatus === 'pending') {
       if (isManualTemplateEntry) {
         await this.embeddingService.generateEmbedding(input.clinicId, input.knowledgeId);
         const [refreshed] = await this.repos.knowledge.findKnowledgeEntry(
           input.clinicId,
           input.knowledgeId,
         );
-        return refreshed ?? updated;
+        return this.buildManualEntryResponse(refreshed ?? updated);
       }
 
       await this.embeddingService.enqueueEmbeddingJob({
@@ -764,6 +757,6 @@ export class KnowledgeAdminService {
       });
     }
 
-    return updated;
+    return this.buildManualEntryResponse(updated);
   }
 }

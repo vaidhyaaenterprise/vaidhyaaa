@@ -58,13 +58,16 @@ export {
 
 export {
   clinicUserResponseSchema,
+  clinicLoginNameSchema,
   createClinicUserLoginSchema,
   inviteClinicUserSchema,
   loginWithUsernamePasswordSchema,
+  updateClinicUserLoginSchema,
   type ClinicUserResponse,
   type CreateClinicUserLoginInput,
   type InviteClinicUserInput,
   type LoginWithUsernamePasswordInput,
+  type UpdateClinicUserLoginInput,
 } from './clinic-users';
 
 export {

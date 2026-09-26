@@ -7,6 +7,7 @@ export type KnowledgeEntryApiRow = {
   answer: string;
   category: string | null;
   alternative_phrases_json: string[];
+  source_file_id?: string | null;
   template_key: string | null;
   section_key: string | null;
   source_notes: string | null;
@@ -18,12 +19,83 @@ export type KnowledgeEntryApiRow = {
   source_page: number | null;
   embedding_status: string;
   embedding_model: string | null;
+  embedding_dimensions?: number | null;
   embedding_generated_at: string | null;
+  embedding_error?: string | null;
+  embedding_source_hash?: string | null;
+  last_embedding_job_id?: string | null;
   search_text: string | null;
+  approved_by_user_id?: string | null;
   approved_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+type CamelCaseKnowledgeEntryApiRow = {
+  clinicId?: string;
+  alternativePhrasesJson?: unknown;
+  sourceFileId?: string | null;
+  templateKey?: string | null;
+  sectionKey?: string | null;
+  sourceNotes?: string | null;
+  serviceName?: string | null;
+  qaApproved?: boolean;
+  sourceFile?: string | null;
+  sourcePage?: number | null;
+  embeddingStatus?: string;
+  embeddingModel?: string | null;
+  embeddingDimensions?: number | null;
+  embeddingGeneratedAt?: string | null;
+  embeddingError?: string | null;
+  embeddingSourceHash?: string | null;
+  lastEmbeddingJobId?: string | null;
+  searchText?: string | null;
+  approvedByUserId?: string | null;
+  approvedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type KnowledgeEntryWireRow = Partial<KnowledgeEntryApiRow> &
+  CamelCaseKnowledgeEntryApiRow &
+  Pick<KnowledgeEntryApiRow, 'id' | 'question' | 'answer' | 'status'>;
+
+export function normalizeKnowledgeEntryApiRow(row: KnowledgeEntryWireRow): KnowledgeEntryApiRow {
+  const alternativePhrases = row.alternative_phrases_json ?? row.alternativePhrasesJson;
+
+  return {
+    id: row.id,
+    clinic_id: row.clinic_id ?? row.clinicId ?? '',
+    question: row.question,
+    answer: row.answer,
+    category: row.category ?? null,
+    alternative_phrases_json: Array.isArray(alternativePhrases)
+      ? alternativePhrases.filter((phrase): phrase is string => typeof phrase === 'string')
+      : [],
+    source_file_id: row.source_file_id ?? row.sourceFileId ?? null,
+    template_key: row.template_key ?? row.templateKey ?? null,
+    section_key: row.section_key ?? row.sectionKey ?? null,
+    source_notes: row.source_notes ?? row.sourceNotes ?? null,
+    service_name: row.service_name ?? row.serviceName ?? null,
+    applicable: row.applicable ?? true,
+    qa_approved: row.qa_approved ?? row.qaApproved ?? false,
+    status: row.status,
+    source_file: row.source_file ?? row.sourceFile ?? null,
+    source_page: row.source_page ?? row.sourcePage ?? null,
+    embedding_status: row.embedding_status ?? row.embeddingStatus ?? 'not_required',
+    embedding_model: row.embedding_model ?? row.embeddingModel ?? null,
+    embedding_dimensions: row.embedding_dimensions ?? row.embeddingDimensions ?? null,
+    embedding_generated_at: row.embedding_generated_at ?? row.embeddingGeneratedAt ?? null,
+    embedding_error: row.embedding_error ?? row.embeddingError ?? null,
+    embedding_source_hash: row.embedding_source_hash ?? row.embeddingSourceHash ?? null,
+    last_embedding_job_id: row.last_embedding_job_id ?? row.lastEmbeddingJobId ?? null,
+    search_text: row.search_text ?? row.searchText ?? null,
+    approved_by_user_id: row.approved_by_user_id ?? row.approvedByUserId ?? null,
+    approved_at: row.approved_at ?? row.approvedAt ?? null,
+    created_at: row.created_at ?? row.createdAt ?? '',
+    updated_at: row.updated_at ?? row.updatedAt ?? '',
+  };
+}
 
 export type TemplateUiStatus = 'draft' | 'approved' | 'inactive';
 
@@ -105,8 +177,8 @@ export type BulkApproveKnowledgeResult = {
 };
 
 export async function fetchKnowledgeEntries() {
-  const data = await apiGet<{ entries: KnowledgeEntryApiRow[] }>('/v1/knowledge/entries');
-  return data.entries;
+  const data = await apiGet<{ entries: KnowledgeEntryWireRow[] }>('/v1/knowledge/entries');
+  return data.entries.map(normalizeKnowledgeEntryApiRow);
 }
 
 export async function fetchKnowledgeEmbeddingStatus() {
@@ -121,11 +193,11 @@ export async function patchKnowledgeEntry(
   patch: Record<string, unknown>,
   clinicId: string,
 ) {
-  const data = await apiPatch<{ knowledge: KnowledgeEntryApiRow }>(`/v1/knowledge/${knowledgeId}`, {
+  const data = await apiPatch<{ knowledge: KnowledgeEntryWireRow }>(`/v1/knowledge/${knowledgeId}`, {
     ...patch,
     clinic_id: clinicId,
   });
-  return data.knowledge;
+  return normalizeKnowledgeEntryApiRow(data.knowledge);
 }
 
 export async function bulkApproveKnowledgeEntries(knowledgeIds: string[]) {
@@ -178,8 +250,8 @@ export async function importManualKnowledgeTemplate() {
 }
 
 export async function createManualKnowledgeEntry(payload: CreateManualKnowledgeEntryPayload) {
-  const data = await apiPost<{ knowledge: KnowledgeEntryApiRow }>('/v1/knowledge/manual', payload);
-  return data.knowledge;
+  const data = await apiPost<{ knowledge: KnowledgeEntryWireRow }>('/v1/knowledge/manual', payload);
+  return normalizeKnowledgeEntryApiRow(data.knowledge);
 }
 
 export async function regenerateKnowledgeEmbeddings(clinicId: string) {

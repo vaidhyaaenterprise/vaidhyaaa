@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import { clinicUsers, otpChallenges, users } from '../schema';
@@ -27,36 +27,53 @@ export class AuthRepository {
   }
 
   findUserByUsername(username: string) {
-    return this.db.select().from(users).where(eq(users.username, username)).limit(1);
-  }
-
-  findUserByUsernameOrEmail(identifier: string) {
+    const normalized = username.trim().toLowerCase();
     return this.db
       .select()
       .from(users)
-      .where(or(eq(users.username, identifier), eq(users.email, identifier)))
+      .where(sql<boolean>`lower(${users.username}) = ${normalized}`)
+      .limit(1);
+  }
+
+  findUserByUsernameOrEmail(identifier: string) {
+    const normalized = identifier.trim().toLowerCase();
+    return this.db
+      .select()
+      .from(users)
+      .where(
+        or(sql<boolean>`lower(${users.username}) = ${normalized}`, eq(users.email, normalized)),
+      )
       .limit(1);
   }
 
   touchUserLastLogin(userId: string) {
-    return this.db
-      .update(users)
-      .set({ lastLoginAt: new Date() })
-      .where(eq(users.id, userId));
+    return this.db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
   }
 
   listActiveClinicMemberships(userId: string) {
     return this.db
       .select()
       .from(clinicUsers)
-      .where(and(eq(clinicUsers.userId, userId), eq(clinicUsers.active, true)));
+      .where(
+        and(
+          eq(clinicUsers.userId, userId),
+          eq(clinicUsers.active, true),
+          isNull(clinicUsers.deletedAt),
+        ),
+      );
   }
 
   findClinicMembership(userId: string, clinicId: string) {
     return this.db
       .select()
       .from(clinicUsers)
-      .where(and(eq(clinicUsers.userId, userId), eq(clinicUsers.clinicId, clinicId)))
+      .where(
+        and(
+          eq(clinicUsers.userId, userId),
+          eq(clinicUsers.clinicId, clinicId),
+          isNull(clinicUsers.deletedAt),
+        ),
+      )
       .limit(1);
   }
 
@@ -67,8 +84,14 @@ export class AuthRepository {
   updateClinicMembershipActive(clinicId: string, membershipId: string, active: boolean) {
     return this.db
       .update(clinicUsers)
-      .set({ active })
-      .where(and(eq(clinicUsers.clinicId, clinicId), eq(clinicUsers.id, membershipId)))
+      .set({ active, updatedAt: new Date() })
+      .where(
+        and(
+          eq(clinicUsers.clinicId, clinicId),
+          eq(clinicUsers.id, membershipId),
+          isNull(clinicUsers.deletedAt),
+        ),
+      )
       .returning();
   }
 
@@ -80,22 +103,25 @@ export class AuthRepository {
       })
       .from(clinicUsers)
       .innerJoin(users, eq(clinicUsers.userId, users.id))
-      .where(eq(clinicUsers.clinicId, clinicId));
+      .where(and(eq(clinicUsers.clinicId, clinicId), isNull(clinicUsers.deletedAt)))
+      .orderBy(asc(clinicUsers.role), asc(clinicUsers.createdAt));
   }
 
   findClinicMembershipById(clinicId: string, membershipId: string) {
     return this.db
       .select()
       .from(clinicUsers)
-      .where(and(eq(clinicUsers.clinicId, clinicId), eq(clinicUsers.id, membershipId)))
+      .where(
+        and(
+          eq(clinicUsers.clinicId, clinicId),
+          eq(clinicUsers.id, membershipId),
+          isNull(clinicUsers.deletedAt),
+        ),
+      )
       .limit(1);
   }
 
-  createOtpChallenge(input: {
-    identifier: string;
-    otpHash: string;
-    expiresAt: Date;
-  }) {
+  createOtpChallenge(input: { identifier: string; otpHash: string; expiresAt: Date }) {
     return this.db
       .insert(otpChallenges)
       .values({

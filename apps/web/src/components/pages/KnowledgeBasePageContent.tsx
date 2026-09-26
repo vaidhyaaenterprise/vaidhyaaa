@@ -38,7 +38,7 @@ function mapEntry(row: KnowledgeEntryApiRow): KnowledgeEntry {
     question: row.question,
     answer: row.answer,
     category: row.category ?? 'general',
-    alternativePhrases: row.alternative_phrases_json,
+    alternativePhrases: row.alternative_phrases_json ?? [],
     status: normalizedStatus,
     uiStatus:
       row.applicable === false

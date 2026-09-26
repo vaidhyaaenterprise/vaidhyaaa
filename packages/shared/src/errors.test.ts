@@ -29,6 +29,7 @@ describe('statusCodeForErrorCode', () => {
   it('maps slot conflicts to 409 per LLD', () => {
     expect(statusCodeForErrorCode('SLOT_NOT_AVAILABLE')).toBe(409);
     expect(statusCodeForErrorCode('SLOT_HOLD_EXPIRED')).toBe(409);
+    expect(statusCodeForErrorCode('CONFLICT')).toBe(409);
   });
 });
 

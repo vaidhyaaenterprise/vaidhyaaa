@@ -37,6 +37,8 @@ export const clinicUsers = pgTable(
     doctorId: uuid('doctor_id'),
     active: boolean('active').notNull().default(true),
     invitedByUserId: uuid('invited_by_user_id'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedByUserId: uuid('deleted_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

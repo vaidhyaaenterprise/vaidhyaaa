@@ -130,12 +130,14 @@ export class AuthService {
       throw new AppError('FORBIDDEN', 'User has no active clinic membership.');
     }
 
-    const membership =
-      (hint.clinicId
-        ? memberships.find((row) => row.clinicId === hint.clinicId)
-        : memberships[0]) ?? memberships[0];
+    const membership = hint.clinicId
+      ? memberships.find((row) => row.clinicId === hint.clinicId)
+      : memberships[0];
 
-    if (!membership?.active) {
+    if (!membership) {
+      throw new AppError('FORBIDDEN', 'Requested clinic membership was not found.');
+    }
+    if (!membership.active) {
       throw new AppError('FORBIDDEN', 'Clinic membership is inactive.');
     }
 

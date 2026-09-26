@@ -7,7 +7,13 @@ import { ClinicAdmin } from '../../common/decorators/platform-admin.decorator';
 import { ClinicScoped } from '../../common/decorators/clinic-scoped.decorator';
 import { AUTH_CONTEXT_KEY, getAuthContext } from '../../common/guards/auth.guard';
 
-import { createDoctorSchema, linkDoctorLoginSchema, updateDoctorSchema, updateMembershipSchema } from '../platform/platform.schemas';
+import {
+  createDoctorSchema,
+  linkDoctorLoginSchema,
+  updateDoctorSchema,
+  updateMembershipSchema,
+} from '../platform/platform.schemas';
+import { ClinicUsersService } from '../clinic-setup/clinic-users.service';
 import { DoctorsService } from './doctors.service';
 
 @Controller('clinics/:clinicId/doctors')
@@ -77,7 +83,9 @@ export class DoctorsController {
 @Controller('clinics/:clinicId/members')
 @ClinicScoped()
 export class ClinicMembersController {
-  constructor(@Inject(DoctorsService) private readonly doctorsService: DoctorsService) {}
+  constructor(
+    @Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService,
+  ) {}
 
   @Patch(':membershipId')
   @ClinicAdmin()
@@ -93,7 +101,7 @@ export class ClinicMembersController {
     }
 
     const auth = getAuthContext(request);
-    const membership = await this.doctorsService.updateMembership(
+    const membership = await this.clinicUsersService.setMembershipActive(
       clinicId,
       membershipId,
       parsed.data.active,
