@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useIsPlatformAdmin } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import {
   activatePlatformClinic,
   fetchPlatformClinics,
@@ -47,28 +47,68 @@ export function PlatformClinicsList() {
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
   const [checklist, setChecklist] = useState<OnboardingChecklist | null>(null);
   const [isOnboardingDetailOpen, setIsOnboardingDetailOpen] = useState(false);
+  const mountedRef = useRef(false);
+  const clinicsLoadControllerRef = useRef<AbortController | null>(null);
+  const clinicsLoadSequenceRef = useRef(0);
+  const onboardingLoadControllerRef = useRef<AbortController | null>(null);
+  const onboardingLoadSequenceRef = useRef(0);
 
   const loadClinics = useCallback(async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    clinicsLoadControllerRef.current?.abort();
+    clinicsLoadControllerRef.current = null;
+    const sequence = ++clinicsLoadSequenceRef.current;
+
     if (!isPlatformAdmin) {
       setLoading(false);
       return;
     }
+
+    const controller = new AbortController();
+    clinicsLoadControllerRef.current = controller;
+    const isCurrentLoad = () =>
+      mountedRef.current &&
+      !controller.signal.aborted &&
+      clinicsLoadSequenceRef.current === sequence;
+
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchPlatformClinics();
+      const rows = await fetchPlatformClinics(controller.signal);
+      if (!isCurrentLoad()) {
+        return;
+      }
       setClinics(rows.map(mapClinic));
     } catch (err) {
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load platform clinics.',
       );
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+        clinicsLoadControllerRef.current = null;
+      }
     }
   }, [isPlatformAdmin]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadClinics();
+    return () => {
+      mountedRef.current = false;
+      clinicsLoadSequenceRef.current += 1;
+      onboardingLoadSequenceRef.current += 1;
+      clinicsLoadControllerRef.current?.abort();
+      onboardingLoadControllerRef.current?.abort();
+      clinicsLoadControllerRef.current = null;
+      onboardingLoadControllerRef.current = null;
+    };
   }, [loadClinics]);
 
   if (!isPlatformAdmin) {
@@ -121,24 +161,51 @@ export function PlatformClinicsList() {
   };
 
   const handleViewOnboarding = async (clinic: Clinic) => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    onboardingLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    onboardingLoadControllerRef.current = controller;
+    const sequence = ++onboardingLoadSequenceRef.current;
+    const isCurrentLoad = () =>
+      mountedRef.current &&
+      !controller.signal.aborted &&
+      onboardingLoadSequenceRef.current === sequence;
+
     setSelectedClinic(clinic);
-    const onboarding = await fetchPlatformOnboarding(clinic.id);
-    const raw = onboarding.checklist ?? {};
-    setChecklist({
-      clinicDetails: Boolean(raw.clinic_details_done),
-      adminUser: Boolean(raw.admin_user_done),
-      clinicHours: Boolean(raw.clinic_hours_done),
-      doctors: Boolean(raw.doctors_done),
-      services: Boolean(raw.services_done),
-      doctorServiceMapping: Boolean(raw.doctor_service_mapping_done),
-      schedules: Boolean(raw.doctor_schedules_done),
-      bookingRules: Boolean(raw.booking_rules_done),
-      knowledgeBase: Boolean(raw.knowledge_base_done),
-      telephonySetup: Boolean(raw.telephony_setup_done),
-      testConversation: Boolean(raw.test_conversation_done),
-      readyForAgent: Boolean(raw.ready_for_agent),
-    });
-    setIsOnboardingDetailOpen(true);
+    try {
+      const onboarding = await fetchPlatformOnboarding(clinic.id, controller.signal);
+      if (!isCurrentLoad()) {
+        return;
+      }
+      const raw = onboarding.checklist ?? {};
+      setChecklist({
+        clinicDetails: Boolean(raw.clinic_details_done),
+        adminUser: Boolean(raw.admin_user_done),
+        clinicHours: Boolean(raw.clinic_hours_done),
+        doctors: Boolean(raw.doctors_done),
+        services: Boolean(raw.services_done),
+        doctorServiceMapping: Boolean(raw.doctor_service_mapping_done),
+        schedules: Boolean(raw.doctor_schedules_done),
+        bookingRules: Boolean(raw.booking_rules_done),
+        knowledgeBase: Boolean(raw.knowledge_base_done),
+        telephonySetup: Boolean(raw.telephony_setup_done),
+        testConversation: Boolean(raw.test_conversation_done),
+        readyForAgent: Boolean(raw.ready_for_agent),
+      });
+      setIsOnboardingDetailOpen(true);
+    } catch (err) {
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
+      throw err;
+    } finally {
+      if (isCurrentLoad()) {
+        onboardingLoadControllerRef.current = null;
+      }
+    }
   };
 
   return (

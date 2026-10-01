@@ -65,24 +65,31 @@ export type AppointmentAvailableSlotApiRow = {
   available_count: number;
 };
 
-export async function fetchAppointments(clinicId: string, status?: string[]) {
+export async function fetchAppointments(
+  clinicId: string,
+  status?: readonly string[],
+  signal?: AbortSignal,
+) {
   const query = status?.length ? `?status=${status.join(',')}` : '';
   const data = await apiGet<{ appointments: AppointmentApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments${query}`,
+    signal,
   );
   return data.appointments;
 }
 
-export async function fetchAppointmentActionRequests(clinicId: string) {
+export async function fetchAppointmentActionRequests(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ action_requests: AppointmentActionRequestApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments/action-requests`,
+    signal,
   );
   return data.action_requests;
 }
 
-export async function fetchAppointmentActivity(clinicId: string) {
+export async function fetchAppointmentActivity(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ activities: AppointmentActivityApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments/activity`,
+    signal,
   );
   return data.activities;
 }
@@ -94,6 +101,7 @@ export async function fetchAvailableAppointmentSlots(
     clinic_service_id: string;
     date: string;
   },
+  signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({
     doctor_id: query.doctor_id,
@@ -103,6 +111,7 @@ export async function fetchAvailableAppointmentSlots(
 
   const data = await apiGet<{ slots: AppointmentAvailableSlotApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments/available-slots?${params.toString()}`,
+    signal,
   );
   return data.slots;
 }

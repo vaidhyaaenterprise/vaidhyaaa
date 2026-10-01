@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -9,6 +9,7 @@ import {
   type PatientHistoryItemApiRow,
   searchPatientHistory,
 } from '@/lib/api/clinic-clinical';
+import { isAbortError } from '@/lib/api/client';
 
 type HistoryFilter = {
   phone: string;
@@ -53,6 +54,7 @@ export function DoctorPatientHistory() {
   const [patients, setPatients] = useState<PatientHistoryApiRow[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<PatientHistoryApiRow | null>(null);
+  const activeSearchControllerRef = useRef<AbortController | null>(null);
 
   const isSearchDisabled = useMemo(() => {
     return !filter.phone.trim() && !filter.name.trim() && !filter.age.trim();
@@ -73,6 +75,21 @@ export function DoctorPatientHistory() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedPatient]);
 
+  useEffect(() => {
+    activeSearchControllerRef.current?.abort();
+    activeSearchControllerRef.current = null;
+    setLoading(false);
+    setError(null);
+    setPatients([]);
+    setHasSearched(false);
+    setSelectedPatient(null);
+
+    return () => {
+      activeSearchControllerRef.current?.abort();
+      activeSearchControllerRef.current = null;
+    };
+  }, [clinicId]);
+
   async function onSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -81,6 +98,9 @@ export function DoctorPatientHistory() {
       return;
     }
 
+    activeSearchControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeSearchControllerRef.current = controller;
     setLoading(true);
     setError(null);
 
@@ -98,18 +118,28 @@ export function DoctorPatientHistory() {
         ...(filter.phone.trim() ? { phone: filter.phone.trim() } : {}),
         ...(filter.name.trim() ? { name: filter.name.trim() } : {}),
         ...(age !== undefined ? { age } : {}),
-      });
+      }, controller.signal);
+
+      if (controller.signal.aborted || activeSearchControllerRef.current !== controller) {
+        return;
+      }
 
       setPatients(rows);
       setSelectedPatient(null);
       setHasSearched(true);
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) {
+        return;
+      }
       setPatients([]);
       setSelectedPatient(null);
       setHasSearched(true);
       setError(err instanceof Error ? err.message : 'Unable to fetch patient history.');
     } finally {
-      setLoading(false);
+      if (activeSearchControllerRef.current === controller) {
+        activeSearchControllerRef.current = null;
+        setLoading(false);
+      }
     }
   }
 

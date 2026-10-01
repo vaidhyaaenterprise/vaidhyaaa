@@ -5,10 +5,12 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchCallInbox, type CallInboxApiRow } from '@/lib/api/clinic-clinical';
 
 import type { Call, CallAction, CallFilters, CallOutcome } from './types';
+
+const OUTCOME_FILTER_DEBOUNCE_MS = 250;
 
 const OUTCOME_OPTIONS: ReadonlyArray<{ value: CallOutcome; label: string }> = [
   { value: 'appointment_booked', label: 'Appointment booked' },
@@ -39,6 +41,10 @@ function matchesFilters(call: Call, filters: CallFilters): boolean {
   return true;
 }
 
+function outcomesMatch(left: readonly CallOutcome[], right: readonly CallOutcome[]): boolean {
+  return left.length === right.length && left.every((outcome, index) => outcome === right[index]);
+}
+
 function mapAction(outcome: CallOutcome): CallAction {
   switch (outcome) {
     case 'appointment_booked':
@@ -62,10 +68,12 @@ export function CallInboxPageContent() {
   const [calls, setCalls] = useState<Call[]>([]);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [filters, setFilters] = useState<CallFilters>({ outcomes: [] });
+  const [requestedOutcomes, setRequestedOutcomes] = useState<CallOutcome[]>([]);
   const [outcomeMenuOpen, setOutcomeMenuOpen] = useState(false);
   const outcomeMenuRef = useRef<HTMLDivElement>(null);
   const outcomeTriggerRef = useRef<HTMLButtonElement>(null);
   const requestSequence = useRef(0);
+  const activeLoadControllerRef = useRef<AbortController | null>(null);
   const loadedClinicRef = useRef<string | null>(null);
 
   const mapCallRows = (rows: unknown): Call[] => {
@@ -74,7 +82,9 @@ export function CallInboxPageContent() {
     }
 
     return rows
-      .filter((row): row is CallInboxApiRow => Boolean(row && typeof row === 'object' && 'id' in row))
+      .filter((row): row is CallInboxApiRow =>
+        Boolean(row && typeof row === 'object' && 'id' in row),
+      )
       .flatMap((row) => {
         const outcome = mapOutcome(row.outcome);
         if (!outcome) return [];
@@ -118,6 +128,8 @@ export function CallInboxPageContent() {
 
   const loadCalls = useCallback(async () => {
     const requestId = ++requestSequence.current;
+    activeLoadControllerRef.current?.abort();
+    activeLoadControllerRef.current = null;
     if (!isAdmin || !clinicId) {
       setCalls([]);
       setSelectedCall(null);
@@ -127,6 +139,8 @@ export function CallInboxPageContent() {
       setLoading(false);
       return;
     }
+    const controller = new AbortController();
+    activeLoadControllerRef.current = controller;
     if (loadedClinicRef.current !== clinicId) {
       setCalls([]);
       setSelectedCall(null);
@@ -134,8 +148,8 @@ export function CallInboxPageContent() {
     }
     setError(null);
     try {
-      const rows = await fetchCallInbox(clinicId, filters.outcomes);
-      if (requestId !== requestSequence.current) return;
+      const rows = await fetchCallInbox(clinicId, requestedOutcomes, controller.signal);
+      if (controller.signal.aborted || requestId !== requestSequence.current) return;
       const mapped = mapCallRows(rows);
       loadedClinicRef.current = clinicId;
       setCalls(mapped);
@@ -143,6 +157,7 @@ export function CallInboxPageContent() {
         current ? (mapped.find((call) => call.id === current.id) ?? null) : null,
       );
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
       if (requestId !== requestSequence.current) return;
       setError(
         err instanceof ApiRequestError
@@ -155,11 +170,31 @@ export function CallInboxPageContent() {
       if (requestId === requestSequence.current) {
         setLoading(false);
       }
+      if (activeLoadControllerRef.current === controller) {
+        activeLoadControllerRef.current = null;
+      }
     }
-  }, [isAdmin, clinicId, filters.outcomes]);
+  }, [isAdmin, clinicId, requestedOutcomes]);
+
+  useEffect(() => {
+    if (outcomesMatch(filters.outcomes, requestedOutcomes)) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRequestedOutcomes(filters.outcomes);
+    }, OUTCOME_FILTER_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [filters.outcomes, requestedOutcomes]);
 
   useEffect(() => {
     void loadCalls();
+    return () => {
+      requestSequence.current += 1;
+      activeLoadControllerRef.current?.abort();
+      activeLoadControllerRef.current = null;
+    };
   }, [loadCalls]);
 
   useEffect(() => {
@@ -192,10 +227,7 @@ export function CallInboxPageContent() {
   if (!isAdmin) {
     return (
       <>
-        <PageHeader
-          title="Call inbox"
-          description="Review call outcomes and required actions."
-        />
+        <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Call inbox is admin-only.</p>
         </div>
@@ -206,10 +238,7 @@ export function CallInboxPageContent() {
   if (loading) {
     return (
       <>
-        <PageHeader
-          title="Call inbox"
-          description="Review call outcomes and required actions."
-        />
+        <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
         <LoadingState title="Loading calls" description="Fetching call inbox from the API." />
       </>
     );
@@ -218,10 +247,7 @@ export function CallInboxPageContent() {
   if (error) {
     return (
       <>
-        <PageHeader
-          title="Call inbox"
-          description="Review call outcomes and required actions."
-        />
+        <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
         <ErrorState title="Could not load calls" description={error}>
           <button
             type="button"
@@ -238,19 +264,47 @@ export function CallInboxPageContent() {
   const getOutcomeBadge = (outcome: string, sourceStatus?: string) => {
     switch (outcome) {
       case 'appointment_booked':
-        return <span className="rounded-full border-2 border-green-300 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">Booked</span>;
+        return (
+          <span className="rounded-full border-2 border-green-300 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+            Booked
+          </span>
+        );
       case 'appointment_cancelled':
-        return <span className="rounded-full border-2 border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">{sourceStatus === 'pending' ? 'Cancellation requested' : 'Cancelled'}</span>;
+        return (
+          <span className="rounded-full border-2 border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
+            {sourceStatus === 'pending' ? 'Cancellation requested' : 'Cancelled'}
+          </span>
+        );
       case 'appointment_rescheduled':
-        return <span className="rounded-full border-2 border-violet-300 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">{sourceStatus === 'pending' ? 'Reschedule requested' : 'Rescheduled'}</span>;
+        return (
+          <span className="rounded-full border-2 border-violet-300 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">
+            {sourceStatus === 'pending' ? 'Reschedule requested' : 'Rescheduled'}
+          </span>
+        );
       case 'callback_requested':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Callback</span>;
+        return (
+          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+            Callback
+          </span>
+        );
       case 'emergency':
-        return <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">Emergency</span>;
+        return (
+          <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+            Emergency
+          </span>
+        );
       case 'general_inquiry':
-        return <span className="rounded-full border-2 border-blue-300 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">Inquiry</span>;
+        return (
+          <span className="rounded-full border-2 border-blue-300 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+            Inquiry
+          </span>
+        );
       default:
-        return <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">{outcome}</span>;
+        return (
+          <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">
+            {outcome}
+          </span>
+        );
     }
   };
 
@@ -258,15 +312,35 @@ export function CallInboxPageContent() {
     if (action === 'none') return null;
     switch (action) {
       case 'confirmation_needed':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Confirm</span>;
+        return (
+          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+            Confirm
+          </span>
+        );
       case 'appointment_action_needed':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Review</span>;
+        return (
+          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+            Review
+          </span>
+        );
       case 'callback_needed':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Callback</span>;
+        return (
+          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+            Callback
+          </span>
+        );
       case 'emergency_response':
-        return <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">Emergency</span>;
+        return (
+          <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+            Emergency
+          </span>
+        );
       default:
-        return <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">{action}</span>;
+        return (
+          <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">
+            {action}
+          </span>
+        );
     }
   };
 
@@ -291,8 +365,8 @@ export function CallInboxPageContent() {
     filters.outcomes.length === 0
       ? 'All outcomes'
       : filters.outcomes.length === 1
-        ? OUTCOME_OPTIONS.find((option) => option.value === filters.outcomes[0])?.label ??
-          '1 outcome selected'
+        ? (OUTCOME_OPTIONS.find((option) => option.value === filters.outcomes[0])?.label ??
+          '1 outcome selected')
         : `${filters.outcomes.length} outcomes selected`;
 
   const toggleOutcome = (outcome: CallOutcome) => {
@@ -306,10 +380,7 @@ export function CallInboxPageContent() {
 
   return (
     <>
-      <PageHeader
-        title="Call inbox"
-        description="Review call outcomes and required actions."
-      />
+      <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap gap-3">
@@ -324,7 +395,9 @@ export function CallInboxPageContent() {
               className="flex min-w-48 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
             >
               <span>{outcomeTriggerLabel}</span>
-              <span aria-hidden="true" className="text-slate-500">⌄</span>
+              <span aria-hidden="true" className="text-slate-500">
+                ⌄
+              </span>
             </button>
 
             {outcomeMenuOpen && (
@@ -367,7 +440,7 @@ export function CallInboxPageContent() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="mb-4 text-lg font-bold text-slate-900">Call list</h3>
-          
+
           {filteredCalls.length === 0 ? (
             <p className="text-sm text-slate-500">No calls match the current filters</p>
           ) : (
@@ -385,9 +458,13 @@ export function CallInboxPageContent() {
                   <div className="mb-2 flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="mb-1 flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold text-slate-900">{formatTime(call.callTime)}</span>
+                        <span className="text-sm font-bold text-slate-900">
+                          {formatTime(call.callTime)}
+                        </span>
                         <span className="text-xs text-slate-500">{formatDate(call.callTime)}</span>
-                        <span className="text-xs text-slate-500">{formatDuration(call.duration)}</span>
+                        <span className="text-xs text-slate-500">
+                          {formatDuration(call.duration)}
+                        </span>
                       </div>
                       <p className="text-sm text-slate-600">{call.callerPhone}</p>
                       {call.patientName && (
@@ -409,60 +486,81 @@ export function CallInboxPageContent() {
         {selectedCall && (
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 className="mb-4 text-lg font-bold text-slate-900">Call details</h3>
-            
+
             <div className="space-y-4">
               <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Patient information</h4>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Patient information
+                </h4>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-900">{selectedCall.patientName || 'Unknown'}</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {selectedCall.patientName || 'Unknown'}
+                  </p>
                   <p className="text-sm text-slate-600">{selectedCall.callerPhone}</p>
                 </div>
               </div>
 
               <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Summary</h4>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Summary
+                </h4>
                 <p className="text-sm text-slate-700">{selectedCall.summary}</p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Outcome</h4>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Outcome
+                  </h4>
                   {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
                 </div>
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Action needed</h4>
-                  {getActionBadge(selectedCall.actionNeeded) || <span className="text-sm text-slate-500">None</span>}
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Action needed
+                  </h4>
+                  {getActionBadge(selectedCall.actionNeeded) || (
+                    <span className="text-sm text-slate-500">None</span>
+                  )}
                 </div>
               </div>
 
               {selectedCall.linkedAppointmentId && (
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Linked appointment</h4>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Linked appointment
+                  </h4>
                   <p className="text-sm text-slate-700">{selectedCall.linkedAppointmentId}</p>
                 </div>
               )}
 
               {selectedCall.linkedCallbackId && (
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Linked callback</h4>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Linked callback
+                  </h4>
                   <p className="text-sm text-slate-700">{selectedCall.linkedCallbackId}</p>
                 </div>
               )}
 
               {selectedCall.linkedEmergencyId && (
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Linked emergency</h4>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Linked emergency
+                  </h4>
                   <p className="text-sm text-slate-700">{selectedCall.linkedEmergencyId}</p>
                 </div>
               )}
 
               {selectedCall.intent && (
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Intent/Source</h4>
-                  <p className="text-sm text-slate-700">{selectedCall.intent} · {selectedCall.source}</p>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                    Intent/Source
+                  </h4>
+                  <p className="text-sm text-slate-700">
+                    {selectedCall.intent} · {selectedCall.source}
+                  </p>
                 </div>
               )}
-
             </div>
           </div>
         )}

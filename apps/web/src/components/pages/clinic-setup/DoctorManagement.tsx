@@ -1,9 +1,6 @@
 'use client';
 
-import {
-  PREDEFINED_CLINIC_SERVICES,
-  findPredefinedClinicService,
-} from '@vaidya/shared';
+import { PREDEFINED_CLINIC_SERVICES, findPredefinedClinicService } from '@vaidya/shared';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -21,6 +18,7 @@ import {
   patchDoctorService,
   patchService,
 } from '@/lib/api/clinic-clinical';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 
 type Doctor = {
   id: string;
@@ -67,15 +65,23 @@ export function DoctorManagement() {
   const [tempDoctors, setTempDoctors] = useState<Doctor[]>([]);
   const [deletedDoctorIds, setDeletedDoctorIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const loadData = useCallback(
     async (showLoading = true) => {
+      const request = beginLoad();
+      if (!request) {
+        return;
+      }
+
       if (!isAdmin || !clinicId) {
-        setDoctors([]);
-        setServices([]);
-        setDoctorServiceMappings([]);
-        setTempDoctors([]);
-        setLoading(false);
+        if (request.isCurrent()) {
+          setDoctors([]);
+          setServices([]);
+          setDoctorServiceMappings([]);
+          setTempDoctors([]);
+          setLoading(false);
+        }
         return;
       }
 
@@ -86,10 +92,13 @@ export function DoctorManagement() {
 
       try {
         const [doctorRows, serviceRows, mappingRows] = await Promise.all([
-          fetchDoctors(clinicId),
-          fetchServices(clinicId),
-          fetchDoctorServices(clinicId),
+          fetchDoctors(clinicId, request.signal),
+          fetchServices(clinicId, request.signal),
+          fetchDoctorServices(clinicId, request.signal),
         ]);
+        if (!request.isCurrent()) {
+          return;
+        }
 
         const mappedServices = serviceRows.map((row) => ({
           id: row.id,
@@ -133,23 +142,31 @@ export function DoctorManagement() {
         setTempDoctors(mappedDoctors);
         setDeletedDoctorIds([]);
       } catch (err) {
+        if (!request.isCurrent() || isAbortError(err)) {
+          return;
+        }
         setError(
           err instanceof ApiRequestError
             ? err.apiError.message
             : 'Failed to load doctors and services.',
         );
       } finally {
-        if (showLoading) {
+        if (showLoading && request.isCurrent()) {
           setLoading(false);
         }
       }
     },
-    [clinicId, isAdmin],
+    [beginLoad, clinicId, isAdmin],
   );
 
   useEffect(() => {
+    setIsEditing(false);
+    setDeletedDoctorIds([]);
+    setError(null);
+    setSaving(false);
     void loadData();
-  }, [loadData]);
+    return cancelLoad;
+  }, [cancelLoad, loadData]);
 
   const handleEdit = () => {
     setTempDoctors(doctors.map((doctor) => ({ ...doctor })));
@@ -166,7 +183,7 @@ export function DoctorManagement() {
   };
 
   const handleSave = async () => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
 
@@ -195,7 +212,13 @@ export function DoctorManagement() {
       }
 
       for (const doctorId of deletedDoctorIds) {
+        if (!isActive()) {
+          return;
+        }
         await deleteDoctor(clinicId, doctorId);
+        if (!isActive()) {
+          return;
+        }
       }
 
       const serviceIdByKey = new Map(services.map((service) => [service.key, service.id]));
@@ -215,7 +238,13 @@ export function DoctorManagement() {
           }
           serviceIdByKey.set(serviceKey, existingService.id);
           if (existingService.active !== shouldBeActive) {
+            if (!isActive()) {
+              return;
+            }
             await patchService(clinicId, existingService.id, { active: shouldBeActive });
+            if (!isActive()) {
+              return;
+            }
           }
           continue;
         }
@@ -226,19 +255,31 @@ export function DoctorManagement() {
             existingService.name !== predefinedService.service_name ||
             existingService.active !== shouldBeActive
           ) {
+            if (!isActive()) {
+              return;
+            }
             await patchService(clinicId, existingService.id, {
               service_name: predefinedService.service_name,
               active: shouldBeActive,
             });
+            if (!isActive()) {
+              return;
+            }
           }
           continue;
         }
 
+        if (!isActive()) {
+          return;
+        }
         const createdService = await createService(clinicId, {
           service_key: predefinedService.service_key,
           service_name: predefinedService.service_name,
           active: shouldBeActive,
         });
+        if (!isActive()) {
+          return;
+        }
         serviceIdByKey.set(serviceKey, createdService.id);
       }
 
@@ -252,12 +293,18 @@ export function DoctorManagement() {
         const consultationFeeAmount = Number.isFinite(doctor.fee) ? doctor.fee : 0;
 
         if (doctor.id.startsWith('new-')) {
+          if (!isActive()) {
+            return;
+          }
           const createdDoctor = await createDoctor(clinicId, {
             name: doctorName,
             ...(doctor.specialization.trim()
               ? { qualification: doctor.specialization.trim() }
               : {}),
           });
+          if (!isActive()) {
+            return;
+          }
 
           await createDoctorService(clinicId, {
             doctor_id: createdDoctor.id,
@@ -265,6 +312,9 @@ export function DoctorManagement() {
             consultation_fee_amount: consultationFeeAmount,
             active: doctor.active,
           });
+          if (!isActive()) {
+            return;
+          }
           continue;
         }
 
@@ -280,38 +330,68 @@ export function DoctorManagement() {
             targetMapping.active !== doctor.active ||
             targetMapping.fee !== consultationFeeAmount
           ) {
+            if (!isActive()) {
+              return;
+            }
             await patchDoctorService(clinicId, targetMapping.id, {
               consultation_fee_amount: consultationFeeAmount,
               active: doctor.active,
             });
+            if (!isActive()) {
+              return;
+            }
           }
         } else {
+          if (!isActive()) {
+            return;
+          }
           await createDoctorService(clinicId, {
             doctor_id: doctor.id,
             clinic_service_id: resolvedServiceId,
             consultation_fee_amount: consultationFeeAmount,
             active: doctor.active,
           });
+          if (!isActive()) {
+            return;
+          }
         }
 
         const mappingsToDisable = doctorMappings.filter(
           (mapping) => mapping.active && mapping.serviceId !== resolvedServiceId,
         );
         for (const mapping of mappingsToDisable) {
+          if (!isActive()) {
+            return;
+          }
           await patchDoctorService(clinicId, mapping.id, { active: false });
+          if (!isActive()) {
+            return;
+          }
         }
       }
 
       const selectedServiceKeySet = new Set(selectedServiceKeys);
       for (const service of services) {
         if (!selectedServiceKeySet.has(service.key) && service.active) {
+          if (!isActive()) {
+            return;
+          }
           await patchService(clinicId, service.id, { active: false });
+          if (!isActive()) {
+            return;
+          }
         }
       }
 
+      if (!isActive()) {
+        return;
+      }
       setIsEditing(false);
       await loadData(false);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError
           ? err.apiError.message
@@ -320,7 +400,9 @@ export function DoctorManagement() {
             : 'Failed to save doctors and services.',
       );
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
   };
 
@@ -355,7 +437,7 @@ export function DoctorManagement() {
   };
 
   const toggleDoctorActive = async (id: string) => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
 
@@ -369,17 +451,24 @@ export function DoctorManagement() {
 
     const nextActive = !doctor.active;
     await patchDoctorService(clinicId, currentMapping.id, { active: nextActive });
+    if (!isActive()) {
+      return;
+    }
 
     const service = services.find((entry) => entry.id === currentMapping.serviceId);
     const hasOtherActiveDoctor = doctorServiceMappings.some(
       (mapping) =>
-        mapping.doctorId !== id &&
-        mapping.serviceId === currentMapping.serviceId &&
-        mapping.active,
+        mapping.doctorId !== id && mapping.serviceId === currentMapping.serviceId && mapping.active,
     );
     const shouldBeActive = nextActive || hasOtherActiveDoctor;
     if (service && service.active !== shouldBeActive) {
       await patchService(clinicId, service.id, { active: shouldBeActive });
+      if (!isActive()) {
+        return;
+      }
+    }
+    if (!isActive()) {
+      return;
     }
     await loadData();
   };
@@ -447,9 +536,7 @@ export function DoctorManagement() {
                 <div
                   key={doctor.id}
                   className={`flex items-center justify-between rounded-lg border p-3 ${
-                    doctor.active
-                      ? 'border-slate-200 bg-white'
-                      : 'border-red-200 bg-red-50'
+                    doctor.active ? 'border-slate-200 bg-white' : 'border-red-200 bg-red-50'
                   }`}
                 >
                   <div>
@@ -467,9 +554,7 @@ export function DoctorManagement() {
                       type="button"
                       onClick={() => void toggleDoctorActive(doctor.id)}
                       className={`rounded-lg px-2 py-1 text-xs font-bold ${
-                        doctor.active
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
+                        doctor.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
                       {doctor.active ? 'Active' : 'Disabled'}
@@ -513,8 +598,7 @@ export function DoctorManagement() {
             <div className="space-y-3">
               {tempDoctors.map((doctor) => {
                 const isLegacyService =
-                  doctor.serviceKey.length > 0 &&
-                  !findPredefinedClinicService(doctor.serviceKey);
+                  doctor.serviceKey.length > 0 && !findPredefinedClinicService(doctor.serviceKey);
 
                 return (
                   <div

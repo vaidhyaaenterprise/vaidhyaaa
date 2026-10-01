@@ -305,6 +305,8 @@ describe('ClinicProfileProvider', () => {
     );
 
     expect(await screen.findByText('High on love')).toBeInTheDocument();
+    const firstRequestSignal = clinicApiMock.fetchClinicProfile.mock.calls[0]?.[1];
+    expect(firstRequestSignal).toBeInstanceOf(AbortSignal);
 
     authMock.clinicId = '00000000-0000-0000-0000-000000000222';
     rerender(
@@ -315,6 +317,7 @@ describe('ClinicProfileProvider', () => {
 
     expect(screen.queryByText('High on love')).not.toBeInTheDocument();
     expect(screen.getByText('loading')).toBeInTheDocument();
+    expect(firstRequestSignal?.aborted).toBe(true);
 
     await act(async () => {
       nextClinicRequest.resolve(nextClinic);

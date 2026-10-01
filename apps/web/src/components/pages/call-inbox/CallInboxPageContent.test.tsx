@@ -62,9 +62,11 @@ const ROWS: CallInboxApiRow[] = [
 ];
 
 beforeEach(() => {
-  mockedFetchCallInbox.mockReset().mockImplementation(async (_clinicId, outcomes = []) =>
-    outcomes.length > 0 ? ROWS.filter((row) => outcomes.includes(row.outcome)) : ROWS,
-  );
+  mockedFetchCallInbox
+    .mockReset()
+    .mockImplementation(async (_clinicId, outcomes = []) =>
+      outcomes.length > 0 ? ROWS.filter((row) => outcomes.includes(row.outcome)) : ROWS,
+    );
 });
 
 afterEach(() => {
@@ -81,7 +83,11 @@ describe('CallInboxPageContent', () => {
     expect(screen.getByText('Inquiry summary')).toBeInTheDocument();
     expect(screen.getByText('Callback summary')).toBeInTheDocument();
     expect(screen.getByText('Emergency summary')).toBeInTheDocument();
-    expect(mockedFetchCallInbox).toHaveBeenCalledWith(CLINIC_ID, []);
+    expect(mockedFetchCallInbox).toHaveBeenCalledWith(
+      CLINIC_ID,
+      [],
+      expect.any(AbortSignal),
+    );
     expect(mockedFetchCallInbox).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Emergency only')).not.toBeInTheDocument();
     expect(screen.queryByText('Callback only')).not.toBeInTheDocument();
@@ -113,7 +119,9 @@ describe('CallInboxPageContent', () => {
     expect(screen.getByRole('dialog', { name: 'Filter by outcomes' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Cancelled Appointment' }));
-    expect(await screen.findByRole('button', { name: 'Cancelled Appointment' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Cancelled Appointment' }),
+    ).toBeInTheDocument();
     expect(await screen.findByText('Cancelled summary')).toBeInTheDocument();
     expect(screen.queryByText('Booked summary')).not.toBeInTheDocument();
 
@@ -128,6 +136,29 @@ describe('CallInboxPageContent', () => {
       expect(screen.getByText('Booked summary')).toBeInTheDocument();
       expect(screen.getByText('Inquiry summary')).toBeInTheDocument();
     });
+  });
+
+  it('debounces rapid outcome selections into one final filtered request', async () => {
+    render(<CallInboxPageContent />);
+    await screen.findByText('Booked summary');
+
+    expect(mockedFetchCallInbox).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'All outcomes' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Cancelled Appointment' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Appointment Rescheduled' }));
+
+    // The existing rows are filtered immediately while the server request is
+    // delayed long enough to collapse a rapid multi-selection into one fetch.
+    expect(screen.getByText('Cancelled summary')).toBeInTheDocument();
+    expect(screen.getByText('Rescheduled summary')).toBeInTheDocument();
+    expect(screen.queryByText('Booked summary')).not.toBeInTheDocument();
+    expect(mockedFetchCallInbox).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(mockedFetchCallInbox).toHaveBeenCalledTimes(2));
+    expect(mockedFetchCallInbox).toHaveBeenLastCalledWith(CLINIC_ID, [
+      'appointment_cancelled',
+      'appointment_rescheduled',
+    ], expect.any(AbortSignal));
   });
 
   it('closes the outcome menu with Escape', async () => {

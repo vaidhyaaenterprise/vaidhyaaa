@@ -16,8 +16,12 @@ interface ReviewQueueProps {
   onDisable: (id: string) => void;
 }
 
+function hasAnsweredReviewEntry(entry: KnowledgeEntry) {
+  return typeof entry.answer === 'string' && entry.answer.trim().length > 0;
+}
+
 function isEntryApprovable(entry: KnowledgeEntry) {
-  return entry.applicable !== false && entry.answer.trim().length > 0;
+  return entry.applicable !== false && hasAnsweredReviewEntry(entry);
 }
 
 export function ReviewQueue({
@@ -126,7 +130,12 @@ export function ReviewQueue({
     );
   };
 
-  if (entries.length === 0) {
+  // Template/import rows are created before the clinic supplies an answer. They
+  // belong in the editing workflow, not the approval queue. Keep this filter at
+  // the rendering boundary as a defensive guard even if the API returns them.
+  const visibleEntries = entries.filter((entry) => hasAnsweredReviewEntry(entry));
+
+  if (visibleEntries.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Review queue</h3>
@@ -135,8 +144,7 @@ export function ReviewQueue({
     );
   }
 
-  const selectableEntries = entries.filter((entry) => isEntryApprovable(entry));
-  const incompleteEntriesCount = entries.length - selectableEntries.length;
+  const selectableEntries = visibleEntries.filter((entry) => isEntryApprovable(entry));
   const allSelectableEntriesSelected =
     selectableEntries.length > 0 &&
     selectableEntries.every((entry) => selectedIds.has(entry.id));
@@ -144,16 +152,7 @@ export function ReviewQueue({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-bold text-slate-900">Review queue</h3>
-          {incompleteEntriesCount > 0 && (
-            <p className="mt-1 text-xs font-semibold text-amber-700">
-              {incompleteEntriesCount}{' '}
-              {incompleteEntriesCount === 1 ? 'entry needs' : 'entries need'} completion before
-              approval
-            </p>
-          )}
-        </div>
+        <h3 className="text-lg font-bold text-slate-900">Review queue</h3>
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
             <button
@@ -177,7 +176,7 @@ export function ReviewQueue({
       </div>
 
       <div className="space-y-3">
-        {entries.map((entry) => (
+        {visibleEntries.map((entry) => (
           <div
             key={entry.id}
             className={`rounded-xl border p-4 ${
@@ -249,11 +248,6 @@ export function ReviewQueue({
                       {getLanguageBadge(entry.language)}
                     </div>
                     <p className="text-sm text-slate-600">{entry.answer}</p>
-                    {entry.answer.trim().length === 0 && (
-                      <p className="mt-1 text-xs font-semibold text-amber-700">
-                        Answer required before approval
-                      </p>
-                    )}
                     {entry.applicable === false && (
                       <p className="mt-1 text-xs font-semibold text-slate-500">
                         Not applicable — enable this entry before approval

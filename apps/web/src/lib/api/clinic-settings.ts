@@ -18,9 +18,10 @@ export type ClinicSettingsResponse = {
   allow_patient_auto_cancel: boolean;
 };
 
-export async function fetchClinicSettings(clinicId: string) {
+export async function fetchClinicSettings(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ settings: ClinicSettingsResponse }>(
     `/v1/clinics/${clinicId}/settings`,
+    signal,
   );
   return data.settings;
 }
@@ -28,8 +29,11 @@ export async function fetchClinicSettings(clinicId: string) {
 export type ClinicProfile = ClinicProfileResponse;
 export type ClinicProfilePatch = ClinicProfilePatchInput;
 
-export async function fetchClinicProfile(clinicId: string) {
-  const data = await apiGet<{ clinic: ClinicProfile }>(`/v1/clinics/${clinicId}/profile`);
+export async function fetchClinicProfile(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ clinic: ClinicProfile }>(
+    `/v1/clinics/${clinicId}/profile`,
+    signal,
+  );
   return data.clinic;
 }
 

@@ -82,7 +82,10 @@ describe('knowledge mutation response normalization', () => {
 
 describe('knowledge bulk approval API', () => {
   it('sends one bulk request for up to 100 knowledge entries', async () => {
-    const ids = Array.from({ length: MAX_KNOWLEDGE_BULK_APPROVAL_SIZE }, (_, index) => `qa-${index}`);
+    const ids = Array.from(
+      { length: MAX_KNOWLEDGE_BULK_APPROVAL_SIZE },
+      (_, index) => `qa-${index}`,
+    );
     mockedApiPost.mockResolvedValue({
       result: {
         requested: ids.length,
@@ -140,13 +143,47 @@ describe('knowledge bulk approval API', () => {
 
     expect(mockedApiPost).toHaveBeenCalledTimes(3);
     expect(
-      mockedApiPost.mock.calls.map(([, body]) =>
-        (body as { knowledge_ids: string[] }).knowledge_ids.length,
+      mockedApiPost.mock.calls.map(
+        ([, body]) => (body as { knowledge_ids: string[] }).knowledge_ids.length,
       ),
     ).toEqual([100, 100, 5]);
     expect(results).toHaveLength(3);
     expect(completedChunks.flat()).toEqual(ids);
     expect(maximumConcurrentRequests).toBe(1);
+  });
+
+  it('does not submit another chunk or publish a completed chunk after its context expires', async () => {
+    const ids = Array.from({ length: 205 }, (_, index) => `qa-${index}`);
+    let activeContext = true;
+    const onChunkApproved = vi.fn();
+
+    mockedApiPost.mockImplementation(async (_path, body) => {
+      const chunkIds = (body as { knowledge_ids: string[] }).knowledge_ids;
+      activeContext = false;
+      return {
+        result: {
+          requested: chunkIds.length,
+          approved: chunkIds.length,
+          skipped: 0,
+          knowledge_ids: chunkIds,
+          skipped_knowledge_ids: [],
+          embedding_jobs_queued: chunkIds.length,
+          embedding_jobs_failed: 0,
+          embedding_job_failed_knowledge_ids: [],
+          embedding_failure_state_persisted: true,
+        },
+      };
+    });
+
+    const results = await bulkApproveKnowledgeEntriesInChunks(
+      ids,
+      onChunkApproved,
+      () => activeContext,
+    );
+
+    expect(mockedApiPost).toHaveBeenCalledOnce();
+    expect(results).toHaveLength(1);
+    expect(onChunkApproved).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid direct bulk request before calling the API', async () => {

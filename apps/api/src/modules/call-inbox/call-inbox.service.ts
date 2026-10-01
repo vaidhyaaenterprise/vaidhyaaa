@@ -72,7 +72,10 @@ function iso(value: Date | null | undefined): string | null {
   return value?.toISOString() ?? null;
 }
 
-function actionFor(outcome: CallInboxOutcome, sourceStatus?: string | null): CallInboxItem['action_needed'] {
+function actionFor(
+  outcome: CallInboxOutcome,
+  sourceStatus?: string | null,
+): CallInboxItem['action_needed'] {
   if (outcome === 'appointment_booked' && sourceStatus === 'pending_confirmation') {
     return 'confirmation_needed';
   }
@@ -183,11 +186,7 @@ export class CallInboxService {
     };
 
     for (const booking of bookings) {
-      const call = callFor(
-        null,
-        booking.sourceSessionId,
-        callByAppointmentRequest.get(booking.id),
-      );
+      const call = callFor(null, booking.sourceSessionId, callByAppointmentRequest.get(booking.id));
       markRepresented(call, booking.sourceSessionId);
       const occurredAt = call?.startedAt ?? booking.createdAt;
       items.push({

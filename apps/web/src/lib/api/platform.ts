@@ -19,13 +19,19 @@ export type PlatformOnboardingResponse = {
   subscription: unknown;
 };
 
-export async function fetchPlatformClinics() {
-  const data = await apiGet<{ clinics: PlatformClinicRow[] }>('/internal/platform/clinics');
+export async function fetchPlatformClinics(signal?: AbortSignal) {
+  const data = await apiGet<{ clinics: PlatformClinicRow[] }>(
+    '/internal/platform/clinics',
+    signal,
+  );
   return data.clinics;
 }
 
-export async function fetchPlatformOnboarding(clinicId: string) {
-  return apiGet<PlatformOnboardingResponse>(`/internal/platform/clinics/${clinicId}/onboarding`);
+export async function fetchPlatformOnboarding(clinicId: string, signal?: AbortSignal) {
+  return apiGet<PlatformOnboardingResponse>(
+    `/internal/platform/clinics/${clinicId}/onboarding`,
+    signal,
+  );
 }
 
 export async function suspendPlatformClinic(clinicId: string) {

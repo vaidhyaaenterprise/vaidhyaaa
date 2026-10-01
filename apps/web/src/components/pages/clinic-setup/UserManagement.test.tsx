@@ -141,8 +141,8 @@ describe('UserManagement', () => {
     expect(screen.getByText('merp.1003')).toBeInTheDocument();
     expect(screen.getByText('existing.1003')).toBeInTheDocument();
     expect(screen.getByText('#1003')).toBeInTheDocument();
-    expect(mockedFetchClinicUsers).toHaveBeenCalledWith(CLINIC_ID);
-    expect(mockedFetchDoctors).toHaveBeenCalledWith(CLINIC_ID);
+    expect(mockedFetchClinicUsers).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
+    expect(mockedFetchDoctors).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
   });
 
   it('creates a doctor login with an editable prefix, locked clinic suffix, and confirmation', async () => {

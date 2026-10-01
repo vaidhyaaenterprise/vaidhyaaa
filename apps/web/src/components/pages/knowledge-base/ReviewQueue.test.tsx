@@ -119,7 +119,7 @@ describe('ReviewQueue bulk approval', () => {
     expect(screen.getByRole('checkbox')).toBeChecked();
   });
 
-  it('selects only completed, applicable entries for bulk approval', async () => {
+  it('hides unanswered entries and selects only answered, applicable entries', async () => {
     const onBulkApprove = vi.fn().mockResolvedValue({
       approvedIds: ['ready'],
       skippedIds: [],
@@ -130,6 +130,7 @@ describe('ReviewQueue bulk approval', () => {
         entries={[
           { ...entry('ready'), applicable: true },
           { ...entry('unanswered'), answer: '', applicable: true },
+          { ...entry('whitespace'), answer: '   \n\t', applicable: true },
           { ...entry('inactive'), applicable: false },
         ]}
         categories={categories}
@@ -143,14 +144,38 @@ describe('ReviewQueue bulk approval', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
 
     const checkboxes = screen.getAllByRole('checkbox');
+    expect(screen.queryByText('Question unanswered')).not.toBeInTheDocument();
+    expect(screen.queryByText('Question whitespace')).not.toBeInTheDocument();
+    expect(screen.getByText('Question ready')).toBeInTheDocument();
+    expect(screen.getByText('Question inactive')).toBeInTheDocument();
+    expect(checkboxes).toHaveLength(2);
     expect(checkboxes[0]).toBeChecked();
     expect(checkboxes[0]).toBeEnabled();
     expect(checkboxes[1]).not.toBeChecked();
     expect(checkboxes[1]).toBeDisabled();
-    expect(checkboxes[2]).not.toBeChecked();
-    expect(checkboxes[2]).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve selected (1)' }));
     await waitFor(() => expect(onBulkApprove).toHaveBeenCalledWith(['ready']));
+  });
+
+  it('shows an empty review queue when every entry is unanswered', () => {
+    render(
+      <ReviewQueue
+        entries={[
+          { ...entry('empty'), answer: '' },
+          { ...entry('whitespace'), answer: '   ' },
+          { ...entry('missing'), answer: undefined as unknown as string },
+        ]}
+        categories={categories}
+        onApprove={vi.fn()}
+        onBulkApprove={vi.fn()}
+        onEdit={vi.fn()}
+        onDisable={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('No pending entries to review')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select all' })).not.toBeInTheDocument();
   });
 });

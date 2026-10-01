@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -13,6 +13,7 @@ import {
 } from '@/lib/api/clinic-clinical';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 import { dayLabel, dayNumber } from '@/lib/clinic-scheduling';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 
 type DoctorScheduleSlot = {
   id: string;
@@ -49,26 +50,47 @@ export function DoctorSchedule() {
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const authenticatedDoctorId = me?.clinics[0]?.doctor_id ?? null;
+  const authenticatedDoctorId = useMemo(
+    () =>
+      me?.clinics.find(
+        (clinic) => clinic.clinic_id === clinicId && clinic.role === 'doctor' && clinic.active,
+      )?.doctor_id ?? null,
+    [clinicId, me],
+  );
   const currentDoctorId = isAdmin ? selectedDoctorId : authenticatedDoctorId;
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(
+    JSON.stringify([clinicId, isAdmin, authenticatedDoctorId]),
+  );
 
   const loadSchedules = useCallback(async () => {
+    const request = beginLoad();
+    if (!request) {
+      return;
+    }
     if (!clinicId) {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setDoctors([]);
+        setSchedules([]);
+        setTempSchedules([]);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const scheduleRequest = isAdmin
-        ? fetchAllDoctorSchedules(clinicId)
+        ? fetchAllDoctorSchedules(clinicId, request.signal)
         : authenticatedDoctorId
-          ? fetchDoctorSchedules(clinicId, authenticatedDoctorId)
+          ? fetchDoctorSchedules(clinicId, authenticatedDoctorId, request.signal)
           : Promise.resolve([]);
       const [doctorRows, scheduleRows] = await Promise.all([
-        fetchDoctors(clinicId),
+        fetchDoctors(clinicId, request.signal),
         scheduleRequest,
       ]);
+      if (!request.isCurrent()) {
+        return;
+      }
       const doctorOptions = doctorRows
         .filter((row) => row.active)
         .map((row) => ({ id: row.id, name: row.name }));
@@ -85,17 +107,28 @@ export function DoctorSchedule() {
       setSchedules(mapped);
       setTempSchedules(mapped);
     } catch (err) {
+      if (!request.isCurrent() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load doctor schedules.',
       );
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [authenticatedDoctorId, clinicId, isAdmin]);
+  }, [authenticatedDoctorId, beginLoad, clinicId, isAdmin]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setSelectedDoctorId('all');
+    setConflicts([]);
+    setError(null);
+    setSaving(false);
     void loadSchedules();
-  }, [loadSchedules]);
+    return cancelLoad;
+  }, [cancelLoad, loadSchedules]);
 
   const handleEdit = () => {
     setTempSchedules(schedules);
@@ -110,7 +143,7 @@ export function DoctorSchedule() {
   };
 
   const handleSave = async () => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
     const doctorId =
@@ -132,6 +165,9 @@ export function DoctorSchedule() {
     setError(null);
     try {
       const updatedRows = await replaceDoctorSchedules(clinicId, doctorId, windows);
+      if (!isActive()) {
+        return;
+      }
       const updated = updatedRows.map((row) => ({
         id: row.id,
         doctorId: row.doctor_id,
@@ -146,6 +182,9 @@ export function DoctorSchedule() {
       setIsEditing(false);
       setConflicts([]);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -155,7 +194,9 @@ export function DoctorSchedule() {
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to save doctor schedules.',
       );
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
   };
 

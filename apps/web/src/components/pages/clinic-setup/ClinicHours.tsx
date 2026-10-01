@@ -8,6 +8,7 @@ import { fetchClinicHours, replaceClinicHours } from '@/lib/api/clinic-clinical'
 import { ApiRequestError } from '@/lib/api/client';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 import { dayLabel, dayNumber } from '@/lib/clinic-scheduling';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 
 type TimeSlot = {
   id: string;
@@ -41,31 +42,53 @@ export function ClinicHours() {
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(clinicId ?? '');
 
   const loadHours = useCallback(async () => {
+    const request = beginLoad();
+    if (!request) {
+      return;
+    }
     if (!clinicId) {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setClinicHours([]);
+        setTempHours([]);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchClinicHours(clinicId);
+      const rows = await fetchClinicHours(clinicId, request.signal);
+      if (!request.isCurrent()) {
+        return;
+      }
       const mapped = mapClinicHours(rows);
       setClinicHours(mapped);
       setTempHours(mapped);
     } catch (err) {
+      if (!request.isCurrent() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load clinic hours.',
       );
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [clinicId]);
+  }, [beginLoad, clinicId]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setConflicts([]);
+    setError(null);
+    setSaving(false);
     void loadHours();
-  }, [loadHours]);
+    return cancelLoad;
+  }, [cancelLoad, loadHours]);
 
   const handleEdit = () => {
     setTempHours(clinicHours);
@@ -80,7 +103,7 @@ export function ClinicHours() {
   };
 
   const handleSave = async () => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
 
@@ -97,10 +120,18 @@ export function ClinicHours() {
     setError(null);
     try {
       const savedRows = await replaceClinicHours(clinicId, windows);
+      if (!isActive()) {
+        return;
+      }
       const saved = mapClinicHours(savedRows);
       setClinicHours(saved);
       setTempHours(saved);
+      setIsEditing(false);
+      setConflicts([]);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -111,11 +142,10 @@ export function ClinicHours() {
       );
       return;
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
-
-    setIsEditing(false);
-    setConflicts([]);
   };
 
   const addTimeSlot = (day: string) => {

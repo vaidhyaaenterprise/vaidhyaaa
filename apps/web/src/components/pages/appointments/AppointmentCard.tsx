@@ -40,8 +40,10 @@ export function AppointmentCard({
   const [visitError, setVisitError] = useState<string | null>(null);
   const [visitReason, setVisitReason] = useState('');
 
-  const canEdit = isAdmin || (isOwnAppointment && bookingRules.allowDoctorServiceEdit);
-  const canConfirm = isAdmin || isOwnAppointment;
+  const canEdit = isAdmin;
+  // The confirmation and reschedule lifecycle endpoints are clinic-admin-only.
+  // Doctors can still mark their own confirmed appointments as visited.
+  const canConfirm = isAdmin;
   const canMarkVisited = isAdmin || isOwnAppointment;
 
   const handleConfirm = () => {

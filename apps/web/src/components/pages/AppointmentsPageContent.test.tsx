@@ -5,18 +5,24 @@ import { AppointmentsPageContent } from '@/components/pages/AppointmentsPageCont
 import type { AppointmentActivityApiRow, AppointmentApiRow } from '@/lib/api/appointments';
 import {
   fetchAppointments,
+  fetchAppointmentActionRequests,
   fetchAppointmentActivity,
   fetchAvailableAppointmentSlots,
   markAppointmentVisited,
   rescheduleAppointment,
 } from '@/lib/api/appointments';
+import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
+import { fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { getClinicDate } from '@/lib/home-dashboard';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+const SECOND_CLINIC_ID = '00000000-0000-0000-0000-000000000002';
+let effectiveRole: 'admin' | 'doctor' = 'admin';
+let activeClinicId = CLINIC_ID;
 
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({
-    effectiveRole: 'admin',
+    effectiveRole,
   }),
 }));
 
@@ -28,7 +34,7 @@ vi.mock('@/components/clinic/ClinicProfileProvider', () => ({
 }));
 
 vi.mock('@/hooks/useActiveClinicId', () => ({
-  useActiveClinicId: () => CLINIC_ID,
+  useActiveClinicId: () => activeClinicId,
 }));
 
 vi.mock('@/lib/api/appointments', () => ({
@@ -113,7 +119,21 @@ vi.mock('@/components/pages/appointments/RescheduleCancelRequests', () => ({
 }));
 
 vi.mock('@/components/pages/appointments/ManualAppointmentModal', () => ({
-  ManualAppointmentModal: () => null,
+  ManualAppointmentModal: ({
+    isOpen,
+    onClose,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+  }) =>
+    isOpen ? (
+      <div role="dialog" aria-label="New manual appointment">
+        Manual appointment modal
+        <button type="button" onClick={onClose}>
+          Close manual appointment
+        </button>
+      </div>
+    ) : null,
 }));
 
 function shiftDate(date: string, days: number): string {
@@ -176,18 +196,59 @@ function appointmentActivityRow(
 }
 
 const mockedFetchAppointments = vi.mocked(fetchAppointments);
+const mockedFetchAppointmentActionRequests = vi.mocked(fetchAppointmentActionRequests);
 const mockedFetchAppointmentActivity = vi.mocked(fetchAppointmentActivity);
 const mockedFetchAvailableAppointmentSlots = vi.mocked(fetchAvailableAppointmentSlots);
 const mockedMarkAppointmentVisited = vi.mocked(markAppointmentVisited);
 const mockedRescheduleAppointment = vi.mocked(rescheduleAppointment);
+const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
+const mockedFetchDoctors = vi.mocked(fetchDoctors);
+const mockedFetchServices = vi.mocked(fetchServices);
+const mockedFetchDoctorServices = vi.mocked(fetchDoctorServices);
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 beforeEach(() => {
+  effectiveRole = 'admin';
+  activeClinicId = CLINIC_ID;
   mockedFetchAppointments.mockReset();
+  mockedFetchAppointmentActionRequests.mockReset();
+  mockedFetchAppointmentActionRequests.mockResolvedValue([]);
   mockedFetchAppointmentActivity.mockReset();
   mockedFetchAppointmentActivity.mockResolvedValue([]);
   mockedFetchAvailableAppointmentSlots.mockReset();
   mockedMarkAppointmentVisited.mockReset();
   mockedRescheduleAppointment.mockReset();
+  mockedFetchClinicSettings.mockReset();
+  mockedFetchClinicSettings.mockResolvedValue({
+    clinic_id: CLINIC_ID,
+    agent_enabled: false,
+    answering_mode: 'always',
+    fallback_phone: null,
+    overflow_after_rings: null,
+    booking_mode: 'request',
+    max_concurrent_calls: 1,
+    recording_retention_days: 30,
+    transcript_retention_days: 30,
+    notify_staff_on_pending_appointment: false,
+    pending_appointment_notification_channel: null,
+    allow_doctor_service_edit: false,
+    allow_patient_auto_cancel: false,
+  });
+  mockedFetchDoctors.mockReset();
+  mockedFetchDoctors.mockResolvedValue([]);
+  mockedFetchServices.mockReset();
+  mockedFetchServices.mockResolvedValue([]);
+  mockedFetchDoctorServices.mockReset();
+  mockedFetchDoctorServices.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -342,11 +403,15 @@ describe('AppointmentsPageContent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(CLINIC_ID, {
-        doctor_id: '00000000-0000-0000-0000-000000000201',
-        clinic_service_id: '00000000-0000-0000-0000-000000000301',
-        date: clinicToday,
-      });
+      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(
+        CLINIC_ID,
+        {
+          doctor_id: '00000000-0000-0000-0000-000000000201',
+          clinic_service_id: '00000000-0000-0000-0000-000000000301',
+          date: clinicToday,
+        },
+        expect.any(AbortSignal),
+      );
       expect(mockedRescheduleAppointment).toHaveBeenCalledWith(
         CLINIC_ID,
         'confirmed-1',
@@ -415,11 +480,15 @@ describe('AppointmentsPageContent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(CLINIC_ID, {
-        doctor_id: '00000000-0000-0000-0000-000000000201',
-        clinic_service_id: '00000000-0000-0000-0000-000000000301',
-        date: newDate,
-      });
+      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(
+        CLINIC_ID,
+        {
+          doctor_id: '00000000-0000-0000-0000-000000000201',
+          clinic_service_id: '00000000-0000-0000-0000-000000000301',
+          date: newDate,
+        },
+        expect.any(AbortSignal),
+      );
       expect(mockedRescheduleAppointment).toHaveBeenCalledWith(
         CLINIC_ID,
         'confirmed-1',
@@ -445,5 +514,188 @@ describe('AppointmentsPageContent', () => {
 
     const activityBlock = await screen.findByRole('region', { name: 'Appointment requests' });
     expect(within(activityBlock).getByText('Rescheduled activity patient')).toBeInTheDocument();
+  });
+
+  it('loads only visible appointment statuses and defers manual-booking reference data', async () => {
+    mockedFetchAppointments.mockResolvedValue([]);
+
+    render(<AppointmentsPageContent />);
+
+    await waitFor(() => {
+      expect(mockedFetchAppointments).toHaveBeenCalledWith(
+        CLINIC_ID,
+        ['pending_confirmation', 'confirmed', 'visited'],
+        expect.any(AbortSignal),
+      );
+    });
+    expect(mockedFetchAppointmentActionRequests).toHaveBeenCalledTimes(1);
+    expect(mockedFetchAppointmentActivity).toHaveBeenCalledTimes(1);
+    expect(mockedFetchClinicSettings).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDoctors).not.toHaveBeenCalled();
+    expect(mockedFetchServices).not.toHaveBeenCalled();
+    expect(mockedFetchDoctorServices).not.toHaveBeenCalled();
+  });
+
+  it('does not request admin-only resources for a doctor', async () => {
+    effectiveRole = 'doctor';
+    mockedFetchAppointments.mockResolvedValue([]);
+
+    render(<AppointmentsPageContent />);
+
+    await waitFor(() => expect(mockedFetchAppointments).toHaveBeenCalledTimes(1));
+    expect(mockedFetchAppointmentActionRequests).not.toHaveBeenCalled();
+    expect(mockedFetchAppointmentActivity).not.toHaveBeenCalled();
+    expect(mockedFetchClinicSettings).not.toHaveBeenCalled();
+    expect(mockedFetchDoctors).not.toHaveBeenCalled();
+    expect(mockedFetchServices).not.toHaveBeenCalled();
+    expect(mockedFetchDoctorServices).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'New appointment' })).not.toBeInTheDocument();
+  });
+
+  it('loads manual-booking reference data on first use and reuses the clinic cache', async () => {
+    mockedFetchAppointments.mockResolvedValue([]);
+    mockedFetchDoctors.mockResolvedValue([
+      {
+        id: 'doctor-1',
+        name: 'Dr One',
+        qualification: null,
+        user_id: null,
+        active: true,
+      },
+    ]);
+    mockedFetchServices.mockResolvedValue([
+      {
+        id: 'service-1',
+        service_name: 'General Consultation',
+        service_key: 'general_consultation',
+        active: true,
+      },
+    ]);
+    mockedFetchDoctorServices.mockResolvedValue([
+      {
+        id: 'mapping-1',
+        doctor_id: 'doctor-1',
+        clinic_service_id: 'service-1',
+        consultation_fee_amount: null,
+        active: true,
+      },
+    ]);
+
+    render(<AppointmentsPageContent />);
+
+    const newAppointment = await screen.findByRole('button', { name: 'New appointment' });
+    expect(mockedFetchDoctors).not.toHaveBeenCalled();
+    fireEvent.click(newAppointment);
+
+    expect(
+      await screen.findByRole('dialog', { name: 'New manual appointment' }),
+    ).toBeInTheDocument();
+    expect(mockedFetchDoctors).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
+    expect(mockedFetchServices).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
+    expect(mockedFetchDoctorServices).toHaveBeenCalledWith(
+      CLINIC_ID,
+      expect.any(AbortSignal),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close manual appointment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New appointment' }));
+    expect(
+      await screen.findByRole('dialog', { name: 'New manual appointment' }),
+    ).toBeInTheDocument();
+    expect(mockedFetchDoctors).toHaveBeenCalledTimes(1);
+    expect(mockedFetchServices).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDoctorServices).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the manual modal closed after a reference-data failure and supports retry', async () => {
+    mockedFetchAppointments.mockResolvedValue([]);
+    mockedFetchDoctors.mockRejectedValueOnce(new Error('Doctors unavailable'));
+
+    render(<AppointmentsPageContent />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New appointment' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Unable to load appointment booking options. Please try again.',
+    );
+    expect(screen.queryByRole('dialog', { name: 'New manual appointment' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+
+    expect(
+      await screen.findByRole('dialog', { name: 'New manual appointment' }),
+    ).toBeInTheDocument();
+    expect(mockedFetchDoctors).toHaveBeenCalledTimes(2);
+    expect(mockedFetchServices).toHaveBeenCalledTimes(2);
+    expect(mockedFetchDoctorServices).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores an older clinic response after the active clinic changes', async () => {
+    const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
+    const firstClinicResponse = deferred<AppointmentApiRow[]>();
+    const secondClinicResponse = deferred<AppointmentApiRow[]>();
+    mockedFetchAppointments.mockImplementation((clinicId) =>
+      clinicId === CLINIC_ID ? firstClinicResponse.promise : secondClinicResponse.promise,
+    );
+
+    const { rerender } = render(<AppointmentsPageContent />);
+    await waitFor(() => expect(mockedFetchAppointments).toHaveBeenCalledTimes(1));
+
+    activeClinicId = SECOND_CLINIC_ID;
+    rerender(<AppointmentsPageContent />);
+    await waitFor(() => expect(mockedFetchAppointments).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      secondClinicResponse.resolve([
+        appointmentRow('second-clinic', 'Second clinic patient', clinicToday),
+      ]);
+    });
+    expect(await screen.findByText('Second clinic patient')).toBeInTheDocument();
+
+    await act(async () => {
+      firstClinicResponse.resolve([
+        appointmentRow('first-clinic', 'First clinic patient', clinicToday),
+      ]);
+    });
+    expect(screen.queryByText('First clinic patient')).not.toBeInTheDocument();
+    expect(screen.getByText('Second clinic patient')).toBeInTheDocument();
+  });
+
+  it('cancels an edit-time slot lookup and does not mutate after leaving the page', async () => {
+    const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
+    const slotsResponse = deferred<Awaited<ReturnType<typeof fetchAvailableAppointmentSlots>>>();
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow('confirmed-navigation', 'Navigation patient', clinicToday, 'confirmed'),
+    ]);
+    mockedFetchAvailableAppointmentSlots.mockReturnValue(slotsResponse.promise);
+
+    const { unmount } = render(<AppointmentsPageContent />);
+
+    expect(await screen.findByText('Navigation patient')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Time' }));
+    fireEvent.change(screen.getByDisplayValue('09:00'), { target: { value: '10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledTimes(1));
+    const requestSignal = mockedFetchAvailableAppointmentSlots.mock.calls[0]?.[2];
+    unmount();
+    expect(requestSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      slotsResponse.resolve([
+        {
+          slot_id: 'slot-after-navigation',
+          doctor_id: '00000000-0000-0000-0000-000000000201',
+          clinic_service_id: '00000000-0000-0000-0000-000000000301',
+          appointment_start: `${clinicToday} 10:00:00`,
+          appointment_end: `${clinicToday} 10:30:00`,
+          available_count: 1,
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    expect(mockedRescheduleAppointment).not.toHaveBeenCalled();
   });
 });

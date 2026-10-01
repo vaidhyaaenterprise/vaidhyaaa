@@ -8,6 +8,7 @@ import {
   type AppointmentAvailableSlotApiRow,
 } from '@/lib/api/appointments';
 import { fetchHolidays, searchPatientHistory, type HolidayApiRow } from '@/lib/api/clinic-clinical';
+import { isAbortError } from '@/lib/api/client';
 import type { BookingRules } from './types';
 
 interface ManualAppointmentModalProps {
@@ -17,6 +18,9 @@ interface ManualAppointmentModalProps {
   doctors: Array<{ id: string; name: string }>;
   services: Array<{ id: string; name: string }>;
   doctorServiceMappings: Array<{ doctorId: string; serviceId: string }>;
+  referenceDataStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  referenceDataError?: string | null;
+  onRetryReferenceData?: () => void;
   onCreateAppointment: (data: ManualAppointmentData) => Promise<void>;
 }
 
@@ -179,6 +183,9 @@ export function ManualAppointmentModal({
   doctors,
   services,
   doctorServiceMappings,
+  referenceDataStatus = 'ready',
+  referenceDataError = null,
+  onRetryReferenceData,
   onCreateAppointment,
 }: ManualAppointmentModalProps) {
   const { effectiveRole, clinicRole } = useAuth();
@@ -333,22 +340,22 @@ export function ManualAppointmentModal({
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const holidays = await fetchHolidays(clinicId);
-        if (!cancelled) {
+        const holidays = await fetchHolidays(clinicId, controller.signal);
+        if (!controller.signal.aborted) {
           setHolidayRows(holidays.filter((row) => row.active));
         }
-      } catch {
-        if (!cancelled) {
+      } catch (error) {
+        if (!controller.signal.aborted && !isAbortError(error)) {
           setHolidayRows([]);
         }
       }
     })();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [clinicId, isOpen]);
 
@@ -391,18 +398,22 @@ export function ManualAppointmentModal({
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
 
     const loadSlots = async () => {
       setSlotsLoading(true);
       setSlotsError(null);
       try {
-        const rows = await fetchAvailableAppointmentSlots(clinicId, {
-          doctor_id: formData.doctorId,
-          clinic_service_id: formData.serviceId,
-          date: formData.appointmentDate,
-        });
-        if (cancelled) {
+        const rows = await fetchAvailableAppointmentSlots(
+          clinicId,
+          {
+            doctor_id: formData.doctorId,
+            clinic_service_id: formData.serviceId,
+            date: formData.appointmentDate,
+          },
+          controller.signal,
+        );
+        if (controller.signal.aborted) {
           return;
         }
         const mapped = mapSlots(rows);
@@ -439,7 +450,7 @@ export function ManualAppointmentModal({
           }));
         }
       } catch (error) {
-        if (cancelled) {
+        if (controller.signal.aborted || isAbortError(error)) {
           return;
         }
         setSlotOptions([]);
@@ -452,7 +463,7 @@ export function ManualAppointmentModal({
         }));
         setSlotsError(error instanceof Error ? error.message : 'Failed to load available slots.');
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setSlotsLoading(false);
         }
       }
@@ -461,7 +472,7 @@ export function ManualAppointmentModal({
     void loadSlots();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [clinicId, formData.appointmentDate, formData.doctorId, formData.serviceId, isOpen]);
 
@@ -482,16 +493,20 @@ export function ManualAppointmentModal({
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       void (async () => {
         setCheckingFollowupIdentity(true);
         try {
-          const rows = await searchPatientHistory(clinicId, {
-            phone: formData.patientPhone.trim(),
-            name: formData.patientName.trim(),
-          });
-          if (cancelled) {
+          const rows = await searchPatientHistory(
+            clinicId,
+            {
+              phone: formData.patientPhone.trim(),
+              name: formData.patientName.trim(),
+            },
+            controller.signal,
+          );
+          if (controller.signal.aborted) {
             return;
           }
 
@@ -506,12 +521,12 @@ export function ManualAppointmentModal({
               ? 'Please enter DOB to identify existing patient exactly.'
               : null,
           );
-        } catch {
-          if (!cancelled) {
+        } catch (error) {
+          if (!controller.signal.aborted && !isAbortError(error)) {
             setFollowupIdentityHint(null);
           }
         } finally {
-          if (!cancelled) {
+          if (!controller.signal.aborted) {
             setCheckingFollowupIdentity(false);
           }
         }
@@ -519,7 +534,7 @@ export function ManualAppointmentModal({
     }, 350);
 
     return () => {
-      cancelled = true;
+      controller.abort();
       clearTimeout(timer);
     };
   }, [
@@ -672,6 +687,65 @@ export function ManualAppointmentModal({
   };
 
   if (!isOpen) return null;
+
+  if (referenceDataStatus !== 'ready') {
+    const hasReferenceError = referenceDataStatus === 'error';
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="manual-appointment-title"
+          className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
+        >
+          <div className="mb-6">
+            <h3 id="manual-appointment-title" className="text-xl font-bold text-slate-900">
+              New manual appointment
+            </h3>
+            <p className="text-sm text-slate-500">
+              Create an appointment outside the normal booking flow.
+            </p>
+          </div>
+
+          {hasReferenceError ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-800"
+            >
+              <p className="font-bold">Doctors and services could not be loaded.</p>
+              <p className="mt-1">{referenceDataError ?? 'Please try again.'}</p>
+            </div>
+          ) : (
+            <div
+              role="status"
+              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600"
+            >
+              Loading doctors and services…
+            </div>
+          )}
+
+          <div className="mt-6 flex justify-end gap-3">
+            {hasReferenceError && onRetryReferenceData ? (
+              <button
+                type="button"
+                onClick={onRetryReferenceData}
+                className="rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800"
+              >
+                Try again
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

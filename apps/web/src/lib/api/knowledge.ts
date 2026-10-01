@@ -176,14 +176,15 @@ export type BulkApproveKnowledgeResult = {
   embedding_failure_state_persisted: boolean;
 };
 
-export async function fetchKnowledgeEntries() {
-  const data = await apiGet<{ entries: KnowledgeEntryWireRow[] }>('/v1/knowledge/entries');
+export async function fetchKnowledgeEntries(signal?: AbortSignal) {
+  const data = await apiGet<{ entries: KnowledgeEntryWireRow[] }>('/v1/knowledge/entries', signal);
   return data.entries.map(normalizeKnowledgeEntryApiRow);
 }
 
-export async function fetchKnowledgeEmbeddingStatus() {
+export async function fetchKnowledgeEmbeddingStatus(signal?: AbortSignal) {
   const data = await apiGet<{ embedding_status: KnowledgeEmbeddingStatus | null }>(
     '/v1/knowledge/embedding-status',
+    signal,
   );
   return data.embedding_status;
 }
@@ -193,10 +194,13 @@ export async function patchKnowledgeEntry(
   patch: Record<string, unknown>,
   clinicId: string,
 ) {
-  const data = await apiPatch<{ knowledge: KnowledgeEntryWireRow }>(`/v1/knowledge/${knowledgeId}`, {
-    ...patch,
-    clinic_id: clinicId,
-  });
+  const data = await apiPatch<{ knowledge: KnowledgeEntryWireRow }>(
+    `/v1/knowledge/${knowledgeId}`,
+    {
+      ...patch,
+      clinic_id: clinicId,
+    },
+  );
   return normalizeKnowledgeEntryApiRow(data.knowledge);
 }
 
@@ -207,37 +211,43 @@ export async function bulkApproveKnowledgeEntries(knowledgeIds: string[]) {
     );
   }
 
-  const data = await apiPost<{ result: BulkApproveKnowledgeResult }>(
-    '/v1/knowledge/bulk-approve',
-    { knowledge_ids: knowledgeIds },
-  );
+  const data = await apiPost<{ result: BulkApproveKnowledgeResult }>('/v1/knowledge/bulk-approve', {
+    knowledge_ids: knowledgeIds,
+  });
   return data.result;
 }
 
 export async function bulkApproveKnowledgeEntriesInChunks(
   knowledgeIds: string[],
   onChunkApproved?: (result: BulkApproveKnowledgeResult) => void,
+  shouldContinue?: () => boolean,
 ) {
   const results: BulkApproveKnowledgeResult[] = [];
 
-  for (
-    let offset = 0;
-    offset < knowledgeIds.length;
-    offset += MAX_KNOWLEDGE_BULK_APPROVAL_SIZE
-  ) {
+  for (let offset = 0; offset < knowledgeIds.length; offset += MAX_KNOWLEDGE_BULK_APPROVAL_SIZE) {
+    if (shouldContinue && !shouldContinue()) {
+      break;
+    }
+
     const result = await bulkApproveKnowledgeEntries(
       knowledgeIds.slice(offset, offset + MAX_KNOWLEDGE_BULK_APPROVAL_SIZE),
     );
     results.push(result);
+
+    if (shouldContinue && !shouldContinue()) {
+      break;
+    }
+
     onChunkApproved?.(result);
   }
 
   return results;
 }
 
-export async function fetchManualKnowledgeTemplate() {
+export async function fetchManualKnowledgeTemplate(signal?: AbortSignal) {
   const data = await apiGet<{ template: ManualTemplateApiResponse | null }>(
     '/v1/knowledge/manual-template',
+    signal,
   );
   return data.template;
 }

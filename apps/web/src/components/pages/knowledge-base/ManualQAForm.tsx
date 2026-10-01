@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import {
   createManualKnowledgeEntry,
   fetchManualKnowledgeTemplate,
@@ -53,10 +53,7 @@ type SaveTargetState = {
   status: 'pending_review' | 'needs_update' | 'approved' | 'disabled';
 };
 
-const STATUS_CONFIG: Record<
-  TemplateUiStatus,
-  { label: string; classes: string }
-> = {
+const STATUS_CONFIG: Record<TemplateUiStatus, { label: string; classes: string }> = {
   draft: {
     label: 'Draft',
     classes: 'border-amber-300 bg-amber-50 text-amber-800',
@@ -194,6 +191,21 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const [savingQuestionId, setSavingQuestionId] = useState<string | null>(null);
   const [importingTemplate, setImportingTemplate] = useState(false);
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
+  const openRef = useRef(isOpen);
+  openRef.current = isOpen;
+  const activeClinicIdRef = useRef(clinicId);
+  activeClinicIdRef.current = clinicId;
+  const formContextSequenceRef = useRef(0);
+  const activeLoadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
+
+  const isActiveFormContext = useCallback(
+    (targetClinicId: string, contextSequence: number) =>
+      openRef.current &&
+      activeClinicIdRef.current === targetClinicId &&
+      formContextSequenceRef.current === contextSequence,
+    [],
+  );
 
   const availableCategories = useMemo(() => {
     const seen = new Set<string>();
@@ -259,16 +271,33 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     selectedQuestion !== null && savingQuestionId === selectedQuestion.id;
 
   const loadTemplate = useCallback(async () => {
+    if (!openRef.current) {
+      return;
+    }
+
     if (!clinicId) {
       setLoadError('Clinic context is required to manage manual knowledge template.');
       return;
     }
 
+    activeLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeLoadControllerRef.current = controller;
+    const sequence = ++loadSequenceRef.current;
+    const isCurrent = () =>
+      openRef.current &&
+      activeClinicIdRef.current === clinicId &&
+      !controller.signal.aborted &&
+      loadSequenceRef.current === sequence;
+
     setLoading(true);
     setLoadError(null);
 
     try {
-      const template = await fetchManualKnowledgeTemplate();
+      const template = await fetchManualKnowledgeTemplate(controller.signal);
+      if (!isCurrent()) {
+        return;
+      }
       if (!template) {
         setSections([]);
         setActiveSectionKey(null);
@@ -297,22 +326,50 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
         return mapped[0]?.questions[0]?.id ?? null;
       });
     } catch (error) {
+      if (!isCurrent() || isAbortError(error)) {
+        return;
+      }
       setLoadError(
         error instanceof ApiRequestError
           ? error.apiError.message
           : 'Failed to load manual Q&A template.',
       );
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+      }
+      if (activeLoadControllerRef.current === controller) {
+        activeLoadControllerRef.current = null;
+      }
     }
   }, [clinicId]);
 
   useEffect(() => {
     if (!isOpen) {
+      openRef.current = false;
+      formContextSequenceRef.current += 1;
+      activeLoadControllerRef.current?.abort();
+      activeLoadControllerRef.current = null;
+      loadSequenceRef.current += 1;
+      setImportingTemplate(false);
+      setSavingQuestionId(null);
       return;
     }
+    openRef.current = true;
+    const formContextSequence = ++formContextSequenceRef.current;
+    setImportingTemplate(false);
+    setSavingQuestionId(null);
     setBannerMessage(null);
     void loadTemplate();
+    return () => {
+      if (formContextSequenceRef.current === formContextSequence) {
+        openRef.current = false;
+        formContextSequenceRef.current += 1;
+        activeLoadControllerRef.current?.abort();
+        activeLoadControllerRef.current = null;
+        loadSequenceRef.current += 1;
+      }
+    };
   }, [isOpen, loadTemplate]);
 
   useEffect(() => {
@@ -349,24 +406,35 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     if (!clinicId) {
       return;
     }
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
 
     setImportingTemplate(true);
     setBannerMessage(null);
     try {
       const result = await importManualKnowledgeTemplate();
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
       setBannerMessage(
         `Template import completed. Added ${result.imported} new rows, ${result.existing} already existed.`,
       );
       await loadTemplate();
-      await onSaved?.();
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        await onSaved?.();
+      }
     } catch (error) {
-      setLoadError(
-        error instanceof ApiRequestError
-          ? error.apiError.message
-          : 'Failed to import template questions.',
-      );
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setLoadError(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : 'Failed to import template questions.',
+        );
+      }
     } finally {
-      setImportingTemplate(false);
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setImportingTemplate(false);
+      }
     }
   };
 
@@ -444,6 +512,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     if (!clinicId) {
       return;
     }
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
 
     const section = sections.find((item) => item.key === sectionKey);
     const question = section?.questions.find((item) => item.id === questionId);
@@ -493,8 +563,12 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       };
 
       const saved = question.exists
-        ? await patchKnowledgeEntry(question.id, payload, clinicId)
+        ? await patchKnowledgeEntry(question.id, payload, targetClinicId)
         : await createManualKnowledgeEntry(payload);
+
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
 
       const savedQuestion: ManualTemplateQuestionApiRow = {
         ...saved,
@@ -524,12 +598,13 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       setBannerMessage('Question saved successfully.');
       await onSaved?.();
     } catch (error) {
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
       const duplicateWarning =
         error instanceof ApiRequestError && error.apiError.code === 'IDEMPOTENCY_CONFLICT';
       const message =
-        error instanceof ApiRequestError
-          ? error.apiError.message
-          : 'Failed to save this question.';
+        error instanceof ApiRequestError ? error.apiError.message : 'Failed to save this question.';
 
       applyQuestionPatch(sectionKey, questionId, (current) => ({
         ...current,
@@ -537,7 +612,9 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
         duplicateWarning,
       }));
     } finally {
-      setSavingQuestionId(null);
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setSavingQuestionId(null);
+      }
     }
   };
 
@@ -576,7 +653,10 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                     void saveQuestion(selectedQuestionSectionKey, selectedQuestion.id, 'draft');
                   }}
                   disabled={
-                    selectedQuestionSaving || !selectedQuestion || !selectedQuestionSectionKey || loading
+                    selectedQuestionSaving ||
+                    !selectedQuestion ||
+                    !selectedQuestionSectionKey ||
+                    loading
                   }
                   className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -591,7 +671,10 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                     void saveQuestion(selectedQuestionSectionKey, selectedQuestion.id, 'approve');
                   }}
                   disabled={
-                    selectedQuestionSaving || !selectedQuestion || !selectedQuestionSectionKey || loading
+                    selectedQuestionSaving ||
+                    !selectedQuestion ||
+                    !selectedQuestionSectionKey ||
+                    loading
                   }
                   className="rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -614,11 +697,12 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
               </div>
             </div>
           </div>
-
         </div>
 
         {loadError && (
-          <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">{loadError}</div>
+          <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">
+            {loadError}
+          </div>
         )}
 
         {bannerMessage && (
@@ -661,8 +745,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                           {section.questions.length} questions
                         </p>
                         <p className="mt-1 text-[11px] text-slate-500">
-                          {progress.approved} approved • {progress.draft} draft • {progress.inactive}{' '}
-                          inactive
+                          {progress.approved} approved • {progress.draft} draft •{' '}
+                          {progress.inactive} inactive
                         </p>
                       </button>
                     );
@@ -699,7 +783,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                       {activeSection.questions.map((question, index) => {
                         const statusConfig = STATUS_CONFIG[question.uiStatus];
                         const isSelected = selectedQuestionId === question.id;
-                        const showInlineRemove = !question.exists && question.sectionKey === 'custom';
+                        const showInlineRemove =
+                          !question.exists && question.sectionKey === 'custom';
 
                         return (
                           <article
@@ -736,12 +821,16 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 <textarea
                                   value={question.question}
                                   onChange={(event) =>
-                                    applyQuestionPatch(activeSection.key, question.id, (current) => ({
-                                      ...current,
-                                      question: event.target.value,
-                                      errorMessage: null,
-                                      duplicateWarning: false,
-                                    }))
+                                    applyQuestionPatch(
+                                      activeSection.key,
+                                      question.id,
+                                      (current) => ({
+                                        ...current,
+                                        question: event.target.value,
+                                        errorMessage: null,
+                                        duplicateWarning: false,
+                                      }),
+                                    )
                                   }
                                   rows={2}
                                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
@@ -755,12 +844,16 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 <textarea
                                   value={question.answer}
                                   onChange={(event) =>
-                                    applyQuestionPatch(activeSection.key, question.id, (current) => ({
-                                      ...current,
-                                      answer: event.target.value,
-                                      errorMessage: null,
-                                      duplicateWarning: false,
-                                    }))
+                                    applyQuestionPatch(
+                                      activeSection.key,
+                                      question.id,
+                                      (current) => ({
+                                        ...current,
+                                        answer: event.target.value,
+                                        errorMessage: null,
+                                        duplicateWarning: false,
+                                      }),
+                                    )
                                   }
                                   rows={3}
                                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
@@ -775,12 +868,16 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                   <select
                                     value={question.category}
                                     onChange={(event) =>
-                                      applyQuestionPatch(activeSection.key, question.id, (current) => ({
-                                        ...current,
-                                        category: event.target.value,
-                                        errorMessage: null,
-                                        duplicateWarning: false,
-                                      }))
+                                      applyQuestionPatch(
+                                        activeSection.key,
+                                        question.id,
+                                        (current) => ({
+                                          ...current,
+                                          category: event.target.value,
+                                          errorMessage: null,
+                                          duplicateWarning: false,
+                                        }),
+                                      )
                                     }
                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
                                   >
@@ -805,12 +902,16 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                     type="text"
                                     value={question.serviceName}
                                     onChange={(event) =>
-                                      applyQuestionPatch(activeSection.key, question.id, (current) => ({
-                                        ...current,
-                                        serviceName: event.target.value,
-                                        errorMessage: null,
-                                        duplicateWarning: false,
-                                      }))
+                                      applyQuestionPatch(
+                                        activeSection.key,
+                                        question.id,
+                                        (current) => ({
+                                          ...current,
+                                          serviceName: event.target.value,
+                                          errorMessage: null,
+                                          duplicateWarning: false,
+                                        }),
+                                      )
                                     }
                                     placeholder={
                                       question.serviceNameRequired
@@ -829,12 +930,16 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 <textarea
                                   value={question.sourceNotes}
                                   onChange={(event) =>
-                                    applyQuestionPatch(activeSection.key, question.id, (current) => ({
-                                      ...current,
-                                      sourceNotes: event.target.value,
-                                      errorMessage: null,
-                                      duplicateWarning: false,
-                                    }))
+                                    applyQuestionPatch(
+                                      activeSection.key,
+                                      question.id,
+                                      (current) => ({
+                                        ...current,
+                                        sourceNotes: event.target.value,
+                                        errorMessage: null,
+                                        duplicateWarning: false,
+                                      }),
+                                    )
                                   }
                                   rows={2}
                                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"

@@ -61,6 +61,19 @@ function call(id: string, sessionId: string, outcome: string, hour: number) {
 }
 
 describe('CallInboxService', () => {
+  it('queries every canonical source for an unfiltered inbox request', async () => {
+    const { service, callInbox } = makeService({});
+
+    await service.list({ clinicId: CLINIC_ID, limit: 200 });
+
+    expect(callInbox.listCalls).toHaveBeenCalledOnce();
+    expect(callInbox.listVoiceAppointmentBookings).toHaveBeenCalledOnce();
+    expect(callInbox.listAppointmentCallActions).toHaveBeenCalledOnce();
+    expect(callInbox.listCallbackRequests).toHaveBeenCalledOnce();
+    expect(callInbox.listEmergencyIncidents).toHaveBeenCalledOnce();
+    expect(callInbox.listVoiceInquiryMessages).toHaveBeenCalledOnce();
+  });
+
   it('normalizes canonical DB sources and suppresses duplicate raw call outcomes', async () => {
     const callbackCall = call('call-callback', 'session-callback', 'callback_requested', 5);
     const { service } = makeService({
@@ -161,9 +174,9 @@ describe('CallInboxService', () => {
     ]);
     expect(result.items.filter((item) => item.outcome === 'callback_requested')).toHaveLength(1);
     expect(result.items.some((item) => item.source_id === 'call-transport')).toBe(false);
-    expect(
-      result.items.find((item) => item.source_id === 'action-reschedule')?.action_needed,
-    ).toBe('appointment_action_needed');
+    expect(result.items.find((item) => item.source_id === 'action-reschedule')?.action_needed).toBe(
+      'appointment_action_needed',
+    );
   });
 
   it('applies multiple outcomes with OR semantics', async () => {
@@ -185,6 +198,34 @@ describe('CallInboxService', () => {
       'appointment_booked',
       'appointment_cancelled',
     ]);
+  });
+
+  it('uses canonical records for deduplication before applying an outcome filter', async () => {
+    const { service } = makeService({
+      calls: [call('raw-inquiry', 'session-canonical-booking', 'general_inquiry', 2)],
+      bookings: [
+        {
+          id: 'booking-canonical',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'session-canonical-booking',
+          patientPhone: '9000000010',
+          patientName: 'Booked patient',
+          patientId: null,
+          status: 'pending_confirmation',
+          reasonForVisit: 'Consultation',
+          createdAt: date(2),
+          updatedAt: date(2),
+        },
+      ],
+    });
+
+    const result = await service.list({
+      clinicId: CLINIC_ID,
+      outcomes: ['general_inquiry'],
+      limit: 200,
+    });
+
+    expect(result.items).toEqual([]);
   });
 
   it('derives enquiries from voice intents and never from generic completed calls', async () => {

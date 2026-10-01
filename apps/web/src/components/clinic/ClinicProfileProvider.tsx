@@ -73,32 +73,28 @@ export function ClinicProfileProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     if (!clinicId) {
       setState(INITIAL_STATE);
-      return () => {
-        cancelled = true;
-      };
+      return () => controller.abort();
     }
 
     setState({ clinicId, profile: null, status: 'loading' });
 
-    void fetchClinicProfile(clinicId)
+    void fetchClinicProfile(clinicId, controller.signal)
       .then((profile) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setState({ clinicId, profile, status: 'ready' });
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setState({ clinicId, profile: null, status: 'error' });
         }
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [clinicId, refreshVersion]);
 
   const value = useMemo<ClinicProfileContextValue>(() => {

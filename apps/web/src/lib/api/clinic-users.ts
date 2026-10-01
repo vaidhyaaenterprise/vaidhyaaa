@@ -17,11 +17,11 @@ export type ClinicUserRow = {
   };
 };
 
-export async function fetchClinicUsers(clinicId: string) {
+export async function fetchClinicUsers(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{
     users: ClinicUserRow[];
     clinic_login_number?: string | number | null;
-  }>(`/v1/clinics/${clinicId}/users`);
+  }>(`/v1/clinics/${clinicId}/users`, signal);
   return data;
 }
 

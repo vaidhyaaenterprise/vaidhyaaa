@@ -73,6 +73,9 @@ export function DeleteUserLoginModal({
       await onConfirm();
       onClose();
     } catch (confirmError) {
+      if (confirmError instanceof Error && confirmError.name === 'AbortError') {
+        return;
+      }
       setError(
         confirmError instanceof Error ? confirmError.message : 'The login could not be deleted.',
       );

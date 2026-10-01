@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '@/components/auth/AuthProvider';
 import { DeleteUserLoginModal } from '@/components/pages/clinic-setup/DeleteUserLoginModal';
@@ -23,6 +23,7 @@ import {
   type CreateClinicUserLoginPayload,
   type UpdateClinicUserLoginPayload,
 } from '@/lib/api/clinic-users';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 
 type ClinicUser = {
   id: string;
@@ -58,6 +59,12 @@ function apiMessage(error: unknown, fallback: string): string {
     : error instanceof Error
       ? error.message
       : fallback;
+}
+
+function clinicContextChangedError(): Error {
+  const error = new Error('Clinic context changed.');
+  error.name = 'AbortError';
+  return error;
 }
 
 function initials(name: string): string {
@@ -101,7 +108,6 @@ export function UserManagement() {
   const clinicId = useActiveClinicId();
   const isAdmin = effectiveRole === 'admin';
   const currentUserId = me?.user.id ?? null;
-  const requestSequence = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -114,15 +120,24 @@ export function UserManagement() {
   const [actionError, setActionError] = useState<string | null>(null);
   const closeCredentialModal = useCallback(() => setCredentialModal(null), []);
   const closeDeleteModal = useCallback(() => setDeleteTarget(null), []);
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const loadData = useCallback(
     async (showLoading = true) => {
+      const request = beginLoad();
+      if (!request) {
+        return;
+      }
       if (!isAdmin || !clinicId) {
-        setLoading(false);
+        if (request.isCurrent()) {
+          setUsers([]);
+          setClinicLoginNumber(null);
+          setDoctors([]);
+          setLoading(false);
+        }
         return;
       }
 
-      const sequence = ++requestSequence.current;
       if (showLoading) {
         setLoading(true);
         setError(null);
@@ -130,10 +145,10 @@ export function UserManagement() {
 
       try {
         const [userData, doctorData] = await Promise.all([
-          fetchClinicUsers(clinicId),
-          fetchDoctors(clinicId),
+          fetchClinicUsers(clinicId, request.signal),
+          fetchDoctors(clinicId, request.signal),
         ]);
-        if (sequence !== requestSequence.current) return;
+        if (!request.isCurrent()) return;
         setUsers(userData.users.map(mapUser));
         setClinicLoginNumber(
           userData.clinic_login_number === null || userData.clinic_login_number === undefined
@@ -142,23 +157,26 @@ export function UserManagement() {
         );
         setDoctors(doctorData);
       } catch (loadError) {
-        if (sequence !== requestSequence.current) return;
+        if (!request.isCurrent() || isAbortError(loadError)) return;
         const message = apiMessage(loadError, 'Failed to load clinic users.');
         if (showLoading) setError(message);
         else setActionError(message);
       } finally {
-        if (showLoading && sequence === requestSequence.current) setLoading(false);
+        if (showLoading && request.isCurrent()) setLoading(false);
       }
     },
-    [clinicId, isAdmin],
+    [beginLoad, clinicId, isAdmin],
   );
 
   useEffect(() => {
+    setCredentialModal(null);
+    setDeleteTarget(null);
+    setUpdatingUserId(null);
+    setActionError(null);
+    setError(null);
     void loadData();
-    return () => {
-      requestSequence.current += 1;
-    };
-  }, [loadData]);
+    return cancelLoad;
+  }, [cancelLoad, loadData]);
 
   const sortedUsers = useMemo(
     () =>
@@ -192,54 +210,74 @@ export function UserManagement() {
   );
 
   const refreshAfterMutation = async () => {
+    if (!isActive()) {
+      return;
+    }
     setActionError(null);
     await loadData(false);
   };
 
   const handleCreate = async (payload: CreateClinicUserLoginPayload) => {
     if (!clinicId) throw new Error('Clinic context is unavailable.');
+    if (!isActive()) throw clinicContextChangedError();
     try {
       const result = await createClinicUserLogin(clinicId, payload);
+      if (!isActive()) throw clinicContextChangedError();
       await refreshAfterMutation();
+      if (!isActive()) throw clinicContextChangedError();
       return { username: result.user.username ?? '' };
     } catch (createError) {
+      if (!isActive() || isAbortError(createError)) throw clinicContextChangedError();
       throw new Error(apiMessage(createError, 'The login could not be created.'));
     }
   };
 
   const handleUpdate = async (clinicUserId: string, payload: UpdateClinicUserLoginPayload) => {
     if (!clinicId) throw new Error('Clinic context is unavailable.');
+    if (!isActive()) throw clinicContextChangedError();
     try {
       const result = await updateClinicUserLogin(clinicId, clinicUserId, payload);
+      if (!isActive()) throw clinicContextChangedError();
       await refreshAfterMutation();
+      if (!isActive()) throw clinicContextChangedError();
       return { username: result.user.username ?? '' };
     } catch (updateError) {
+      if (!isActive() || isAbortError(updateError)) throw clinicContextChangedError();
       throw new Error(apiMessage(updateError, 'The credentials could not be updated.'));
     }
   };
 
   const handleDelete = async (user: ClinicUser) => {
     if (!clinicId) throw new Error('Clinic context is unavailable.');
+    if (!isActive()) throw clinicContextChangedError();
     try {
       await deleteClinicUserLogin(clinicId, user.id);
+      if (!isActive()) throw clinicContextChangedError();
       await refreshAfterMutation();
+      if (!isActive()) throw clinicContextChangedError();
     } catch (deleteError) {
+      if (!isActive() || isAbortError(deleteError)) throw clinicContextChangedError();
       throw new Error(apiMessage(deleteError, 'The login could not be deleted.'));
     }
   };
 
   const toggleUserActive = async (user: ClinicUser) => {
-    if (!clinicId || updatingUserId) return;
+    if (!clinicId || updatingUserId || !isActive()) return;
     setUpdatingUserId(user.id);
     setActionError(null);
     try {
       if (user.membershipActive) await disableClinicUser(clinicId, user.id);
       else await enableClinicUser(clinicId, user.id);
+      if (!isActive()) return;
       await refreshAfterMutation();
     } catch (toggleError) {
-      setActionError(apiMessage(toggleError, 'Failed to update clinic access.'));
+      if (isActive()) {
+        setActionError(apiMessage(toggleError, 'Failed to update clinic access.'));
+      }
     } finally {
-      setUpdatingUserId(null);
+      if (isActive()) {
+        setUpdatingUserId(null);
+      }
     }
   };
 

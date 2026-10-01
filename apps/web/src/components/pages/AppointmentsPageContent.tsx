@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -56,6 +56,30 @@ function filterByDate(appointments: Appointment[], date: string) {
   return appointments.filter((apt) => apt.appointmentDate === date);
 }
 
+const VISIBLE_APPOINTMENT_STATUSES = [
+  'pending_confirmation',
+  'confirmed',
+  'visited',
+] as const;
+
+type PageDataSelection = {
+  showLoading?: boolean;
+  includeAppointments?: boolean;
+  includeActionRequests?: boolean;
+  includeActivity?: boolean;
+  includeSettings?: boolean;
+};
+
+type ManualReferenceData = {
+  doctors: Array<{ id: string; name: string }>;
+  services: Array<{ id: string; name: string }>;
+  doctorServiceMappings: Array<{ doctorId: string; serviceId: string }>;
+};
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 export function AppointmentsPageContent() {
   const { effectiveRole } = useAuth();
   const { profile: clinicProfile, status: clinicProfileStatus } = useClinicProfile();
@@ -77,53 +101,99 @@ export function AppointmentsPageContent() {
   const [doctorServiceMappings, setDoctorServiceMappings] = useState<
     Array<{ doctorId: string; serviceId: string }>
   >([]);
+  const [manualReferenceStatus, setManualReferenceStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
+  const [manualReferenceError, setManualReferenceError] = useState<string | null>(null);
+  const pageLoadSequenceRef = useRef(0);
+  const pageLoadAbortRef = useRef<AbortController | null>(null);
+  const manualReferenceSequenceRef = useRef(0);
+  const manualReferenceAbortRef = useRef<AbortController | null>(null);
+  const manualReferenceCacheRef = useRef(new Map<string, ManualReferenceData>());
+  const manualReferenceLoadRef = useRef<{
+    clinicId: string;
+    sequence: number;
+    promise: Promise<boolean>;
+  } | null>(null);
+  const mountedRef = useRef(true);
+  const activeClinicIdRef = useRef(clinicId);
+  const interactionReadAbortRef = useRef<AbortController | null>(null);
 
   const loadAppointments = useCallback(
-    async (showLoading = true, includeReferenceData = true) => {
+    async ({
+      showLoading = true,
+      includeAppointments = true,
+      includeActionRequests = false,
+      includeActivity = false,
+      includeSettings = false,
+    }: PageDataSelection = {}) => {
+      if (!mountedRef.current) {
+        return;
+      }
+      const sequence = pageLoadSequenceRef.current + 1;
+      pageLoadSequenceRef.current = sequence;
+      pageLoadAbortRef.current?.abort();
+      const controller = new AbortController();
+      pageLoadAbortRef.current = controller;
+
       if (!clinicId) {
+        setPendingAppointments([]);
+        setConfirmedAppointments([]);
+        setVisitedAppointments([]);
+        setActionRequests([]);
+        setAppointmentActivities([]);
+        setBookingRules(DEFAULT_BOOKING_RULES);
+        setError(null);
         setLoading(false);
         return;
       }
 
       if (showLoading) {
         setLoading(true);
+        setBookingRules(DEFAULT_BOOKING_RULES);
       }
       setError(null);
       try {
-        const [rows, requests, activities, settings, doctors, services, doctorServices] =
-          await Promise.all([
-          fetchAppointments(clinicId),
-          isAdmin ? fetchAppointmentActionRequests(clinicId) : Promise.resolve([]),
-          isAdmin ? fetchAppointmentActivity(clinicId) : Promise.resolve([]),
-          includeReferenceData
-            ? fetchClinicSettings(clinicId).catch(() => null)
+        const [rows, requests, activities, settings] = await Promise.all([
+          includeAppointments
+            ? fetchAppointments(clinicId, VISIBLE_APPOINTMENT_STATUSES, controller.signal)
             : Promise.resolve(null),
-          includeReferenceData ? fetchDoctors(clinicId).catch(() => []) : Promise.resolve(null),
-          includeReferenceData ? fetchServices(clinicId).catch(() => []) : Promise.resolve(null),
-          includeReferenceData
-            ? fetchDoctorServices(clinicId).catch(() => [])
+          isAdmin && includeActionRequests
+            ? fetchAppointmentActionRequests(clinicId, controller.signal)
             : Promise.resolve(null),
-          ]);
+          isAdmin && includeActivity
+            ? fetchAppointmentActivity(clinicId, controller.signal)
+            : Promise.resolve(null),
+          isAdmin && includeSettings
+            ? fetchClinicSettings(clinicId, controller.signal).catch((settingsError: unknown) => {
+                if (isAbortError(settingsError)) {
+                  throw settingsError;
+                }
+                return null;
+              })
+            : Promise.resolve(null),
+        ]);
 
-        if (doctors && services && doctorServices) {
-          setDoctorOptions(doctors.map((d) => ({ id: d.id, name: d.name })));
-          setServiceOptions(services.map((s) => ({ id: s.id, name: s.service_name })));
-          setDoctorServiceMappings(
-            doctorServices
-              .filter((mapping) => mapping.active)
-              .map((mapping) => ({
-                doctorId: mapping.doctor_id,
-                serviceId: mapping.clinic_service_id,
-              })),
-          );
+        if (
+          !mountedRef.current ||
+          controller.signal.aborted ||
+          pageLoadSequenceRef.current !== sequence
+        ) {
+          return;
         }
 
-        const mapped = rows.map(mapAppointmentRow);
-        setPendingAppointments(mapped.filter((apt) => apt.status === 'pending_confirmation'));
-        setConfirmedAppointments(mapped.filter((apt) => apt.status === 'confirmed'));
-        setVisitedAppointments(mapped.filter((apt) => apt.status === 'visited'));
-        setActionRequests(requests.map(mapActionRequestRow));
-        setAppointmentActivities(activities.map(mapAppointmentActivityRow));
+        if (rows) {
+          const mapped = rows.map(mapAppointmentRow);
+          setPendingAppointments(mapped.filter((apt) => apt.status === 'pending_confirmation'));
+          setConfirmedAppointments(mapped.filter((apt) => apt.status === 'confirmed'));
+          setVisitedAppointments(mapped.filter((apt) => apt.status === 'visited'));
+        }
+        if (requests) {
+          setActionRequests(requests.map(mapActionRequestRow));
+        }
+        if (activities) {
+          setAppointmentActivities(activities.map(mapAppointmentActivityRow));
+        }
 
         if (settings) {
           setBookingRules({
@@ -132,11 +202,27 @@ export function AppointmentsPageContent() {
           });
         }
       } catch (err) {
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          pageLoadSequenceRef.current !== sequence ||
+          isAbortError(err)
+        ) {
+          return;
+        }
         setError(
           err instanceof ApiRequestError ? err.apiError.message : 'Failed to load appointments.',
         );
       } finally {
-        if (showLoading) {
+        if (pageLoadAbortRef.current === controller) {
+          pageLoadAbortRef.current = null;
+        }
+        if (
+          showLoading &&
+          mountedRef.current &&
+          !controller.signal.aborted &&
+          pageLoadSequenceRef.current === sequence
+        ) {
           setLoading(false);
         }
       }
@@ -145,8 +231,152 @@ export function AppointmentsPageContent() {
   );
 
   useEffect(() => {
-    void loadAppointments();
-  }, [loadAppointments]);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      interactionReadAbortRef.current?.abort();
+      interactionReadAbortRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    activeClinicIdRef.current = clinicId;
+    interactionReadAbortRef.current?.abort();
+    interactionReadAbortRef.current = null;
+  }, [clinicId]);
+
+  useEffect(() => {
+    void loadAppointments({
+      showLoading: true,
+      includeAppointments: true,
+      includeActionRequests: isAdmin,
+      includeActivity: isAdmin,
+      includeSettings: isAdmin,
+    });
+
+    return () => {
+      pageLoadSequenceRef.current += 1;
+      pageLoadAbortRef.current?.abort();
+      pageLoadAbortRef.current = null;
+    };
+  }, [isAdmin, loadAppointments]);
+
+  useEffect(() => {
+    manualReferenceSequenceRef.current += 1;
+    manualReferenceAbortRef.current?.abort();
+    manualReferenceAbortRef.current = null;
+    manualReferenceLoadRef.current = null;
+    setDoctorOptions([]);
+    setServiceOptions([]);
+    setDoctorServiceMappings([]);
+    setManualReferenceStatus('idle');
+    setManualReferenceError(null);
+    setIsManualModalOpen(false);
+
+    return () => {
+      manualReferenceSequenceRef.current += 1;
+      manualReferenceAbortRef.current?.abort();
+      manualReferenceAbortRef.current = null;
+      manualReferenceLoadRef.current = null;
+    };
+  }, [clinicId, isAdmin]);
+
+  const applyManualReferenceData = useCallback((data: ManualReferenceData) => {
+    setDoctorOptions(data.doctors);
+    setServiceOptions(data.services);
+    setDoctorServiceMappings(data.doctorServiceMappings);
+  }, []);
+
+  const ensureManualReferenceData = useCallback((): Promise<boolean> => {
+    if (!clinicId || !isAdmin) {
+      return Promise.resolve(false);
+    }
+
+    const cached = manualReferenceCacheRef.current.get(clinicId);
+    if (cached) {
+      applyManualReferenceData(cached);
+      setManualReferenceStatus('ready');
+      setManualReferenceError(null);
+      return Promise.resolve(true);
+    }
+
+    const existing = manualReferenceLoadRef.current;
+    if (existing?.clinicId === clinicId) {
+      return existing.promise;
+    }
+
+    const targetClinicId = clinicId;
+    const sequence = manualReferenceSequenceRef.current + 1;
+    manualReferenceSequenceRef.current = sequence;
+    manualReferenceAbortRef.current?.abort();
+    const controller = new AbortController();
+    manualReferenceAbortRef.current = controller;
+    setManualReferenceStatus('loading');
+    setManualReferenceError(null);
+
+    const promise = (async () => {
+      try {
+        const [doctors, services, doctorServices] = await Promise.all([
+          fetchDoctors(targetClinicId, controller.signal),
+          fetchServices(targetClinicId, controller.signal),
+          fetchDoctorServices(targetClinicId, controller.signal),
+        ]);
+
+        if (controller.signal.aborted || manualReferenceSequenceRef.current !== sequence) {
+          return false;
+        }
+
+        const data: ManualReferenceData = {
+          doctors: doctors.map((doctor) => ({ id: doctor.id, name: doctor.name })),
+          services: services.map((service) => ({ id: service.id, name: service.service_name })),
+          doctorServiceMappings: doctorServices
+            .filter((mapping) => mapping.active)
+            .map((mapping) => ({
+              doctorId: mapping.doctor_id,
+              serviceId: mapping.clinic_service_id,
+            })),
+        };
+        manualReferenceCacheRef.current.set(targetClinicId, data);
+        applyManualReferenceData(data);
+        setManualReferenceStatus('ready');
+        return true;
+      } catch (referenceError) {
+        if (
+          controller.signal.aborted ||
+          isAbortError(referenceError) ||
+          manualReferenceSequenceRef.current !== sequence
+        ) {
+          return false;
+        }
+
+        controller.abort();
+        setManualReferenceStatus('error');
+        setManualReferenceError(
+          referenceError instanceof ApiRequestError
+            ? referenceError.apiError.message
+            : 'Unable to load appointment booking options. Please try again.',
+        );
+        return false;
+      } finally {
+        if (manualReferenceAbortRef.current === controller) {
+          manualReferenceAbortRef.current = null;
+        }
+        if (manualReferenceLoadRef.current?.sequence === sequence) {
+          manualReferenceLoadRef.current = null;
+        }
+      }
+    })();
+
+    manualReferenceLoadRef.current = { clinicId: targetClinicId, sequence, promise };
+    return promise;
+  }, [applyManualReferenceData, clinicId, isAdmin]);
+
+  const handleOpenManualAppointment = useCallback(async () => {
+    const ready = await ensureManualReferenceData();
+    if (ready) {
+      setIsManualModalOpen(true);
+    }
+  }, [ensureManualReferenceData]);
 
   const doctors = useMemo(() => {
     const map = new Map<string, string>(doctorOptions.map((d) => [d.id, d.name]));
@@ -210,8 +440,11 @@ export function AppointmentsPageContent() {
     if (!clinicId) {
       return;
     }
-    await confirmAppointment(clinicId, id);
-    await loadAppointments(false, false);
+    const targetClinicId = clinicId;
+    await confirmAppointment(targetClinicId, id);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({ showLoading: false });
+    }
   };
 
   const handleEditTime = async (id: string, newDate: string, newTime: string) => {
@@ -219,6 +452,7 @@ export function AppointmentsPageContent() {
       throw new Error('Select a clinic before editing an appointment.');
     }
 
+    const targetClinicId = clinicId;
     const appointment = [...pendingAppointments, ...confirmedAppointments].find(
       (item) => item.id === id,
     );
@@ -233,11 +467,25 @@ export function AppointmentsPageContent() {
       return;
     }
 
-    const slots = await fetchAvailableAppointmentSlots(clinicId, {
-      doctor_id: appointment.doctorId,
-      clinic_service_id: appointment.serviceId,
-      date: newDate,
-    });
+    interactionReadAbortRef.current?.abort();
+    const controller = new AbortController();
+    interactionReadAbortRef.current = controller;
+    const slots = await fetchAvailableAppointmentSlots(
+      targetClinicId,
+      {
+        doctor_id: appointment.doctorId,
+        clinic_service_id: appointment.serviceId,
+        date: newDate,
+      },
+      controller.signal,
+    );
+    if (
+      controller.signal.aborted ||
+      !mountedRef.current ||
+      activeClinicIdRef.current !== targetClinicId
+    ) {
+      return;
+    }
     const targetSlot = slots.find((slot) => {
       const match = slot.appointment_start
         .trim()
@@ -249,26 +497,34 @@ export function AppointmentsPageContent() {
       throw new Error('Slot is full for that time. Choose another available time.');
     }
 
-    await rescheduleAppointment(clinicId, appointment.id, targetSlot.slot_id);
-    await loadAppointments(false, false);
+    await rescheduleAppointment(targetClinicId, appointment.id, targetSlot.slot_id);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({ showLoading: false, includeActivity: isAdmin });
+    }
   };
 
   const handleCancel = async (id: string) => {
     if (!clinicId) {
       return;
     }
-    await cancelAppointment(clinicId, id);
-    await loadAppointments(false, false);
+    const targetClinicId = clinicId;
+    await cancelAppointment(targetClinicId, id);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({ showLoading: false, includeActivity: isAdmin });
+    }
   };
 
   const handleMarkVisited = async (id: string, visitReason: string) => {
     if (!clinicId) {
       return;
     }
-    await markAppointmentVisited(clinicId, id, {
+    const targetClinicId = clinicId;
+    await markAppointmentVisited(targetClinicId, id, {
       visit_reason: visitReason,
     });
-    await loadAppointments(false, false);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({ showLoading: false });
+    }
   };
 
   const handleViewHistory = (patientPhone: string) => {
@@ -280,17 +536,21 @@ export function AppointmentsPageContent() {
       throw new Error('Select a clinic before creating an appointment.');
     }
 
+    const targetClinicId = clinicId;
     await createManualAppointment(
-      clinicId,
+      targetClinicId,
       buildManualAppointmentPayload(data, bookingRules.slotDurationMinutes),
     );
-    await loadAppointments(false, false);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({ showLoading: false });
+    }
   };
 
   const handleApproveReschedule = async (requestId: string, newDate: string, newTime: string) => {
     if (!clinicId) {
       return;
     }
+    const targetClinicId = clinicId;
     const request = actionRequests.find((r) => r.id === requestId);
     if (!request) {
       throw new Error('Appointment request could not be found. Reload the page and try again.');
@@ -302,11 +562,25 @@ export function AppointmentsPageContent() {
       newDate !== request.requestedDate ||
       newTime !== request.requestedTime
     ) {
-      const slots = await fetchAvailableAppointmentSlots(clinicId, {
-        doctor_id: request.doctorId,
-        clinic_service_id: request.serviceId,
-        date: newDate,
-      });
+      interactionReadAbortRef.current?.abort();
+      const controller = new AbortController();
+      interactionReadAbortRef.current = controller;
+      const slots = await fetchAvailableAppointmentSlots(
+        targetClinicId,
+        {
+          doctor_id: request.doctorId,
+          clinic_service_id: request.serviceId,
+          date: newDate,
+        },
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted ||
+        !mountedRef.current ||
+        activeClinicIdRef.current !== targetClinicId
+      ) {
+        return;
+      }
       newSlotId = slots.find((slot) => {
         const match = slot.appointment_start
           .trim()
@@ -319,27 +593,47 @@ export function AppointmentsPageContent() {
       throw new Error('Slot is full for that time. Choose another available time.');
     }
 
-    await resolveAppointmentActionRequest(clinicId, requestId, {
+    await resolveAppointmentActionRequest(targetClinicId, requestId, {
       status: 'approved',
       new_slot_id: newSlotId,
     });
-    await loadAppointments(false, false);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({
+        showLoading: false,
+        includeActionRequests: true,
+        includeActivity: true,
+      });
+    }
   };
 
   const handleRejectRequest = async (requestId: string) => {
     if (!clinicId) {
       return;
     }
-    await resolveAppointmentActionRequest(clinicId, requestId, { status: 'rejected' });
-    await loadAppointments(false, false);
+    const targetClinicId = clinicId;
+    await resolveAppointmentActionRequest(targetClinicId, requestId, { status: 'rejected' });
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({
+        showLoading: false,
+        includeAppointments: false,
+        includeActionRequests: true,
+      });
+    }
   };
 
   const handleCancelAppointment = async (requestId: string) => {
     if (!clinicId) {
       return;
     }
-    await resolveAppointmentActionRequest(clinicId, requestId, { status: 'approved' });
-    await loadAppointments(false, false);
+    const targetClinicId = clinicId;
+    await resolveAppointmentActionRequest(targetClinicId, requestId, { status: 'approved' });
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({
+        showLoading: false,
+        includeActionRequests: true,
+        includeActivity: true,
+      });
+    }
   };
 
   if (loading) {
@@ -361,7 +655,15 @@ export function AppointmentsPageContent() {
         <ErrorState title="Could not load appointments" description={error}>
           <button
             type="button"
-            onClick={() => void loadAppointments()}
+            onClick={() =>
+              void loadAppointments({
+                showLoading: true,
+                includeAppointments: true,
+                includeActionRequests: isAdmin,
+                includeActivity: isAdmin,
+                includeSettings: isAdmin,
+              })
+            }
             className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white"
           >
             Retry
@@ -398,12 +700,33 @@ export function AppointmentsPageContent() {
           />
         </div>
         {isAdmin && (
-          <button
-            onClick={() => setIsManualModalOpen(true)}
-            className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800"
-          >
-            New appointment
-          </button>
+          <div className="flex max-w-md flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => void handleOpenManualAppointment()}
+              disabled={manualReferenceStatus === 'loading'}
+              className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
+            >
+              {manualReferenceStatus === 'loading'
+                ? 'Loading booking options…'
+                : 'New appointment'}
+            </button>
+            {manualReferenceError ? (
+              <div
+                role="alert"
+                className="flex flex-wrap items-center justify-end gap-2 text-right text-xs font-semibold text-red-600"
+              >
+                <span>{manualReferenceError}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleOpenManualAppointment()}
+                  className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 font-bold text-red-700 hover:bg-red-100"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 

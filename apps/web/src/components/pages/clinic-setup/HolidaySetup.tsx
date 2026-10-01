@@ -13,6 +13,7 @@ import {
   type HolidayApiRow,
 } from '@/lib/api/clinic-clinical';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 
 type Holiday = {
   id: string;
@@ -86,6 +87,7 @@ export function HolidaySetup() {
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const doctorNameById = useMemo(
     () => new Map(doctors.map((doctor) => [doctor.id, doctor.name])),
@@ -93,8 +95,17 @@ export function HolidaySetup() {
   );
 
   const loadHolidays = useCallback(async () => {
+    const request = beginLoad();
+    if (!request) {
+      return;
+    }
     if (!isAdmin || !clinicId) {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setDoctors([]);
+        setHolidays([]);
+        setTempHolidays([]);
+        setLoading(false);
+      }
       return;
     }
 
@@ -102,9 +113,12 @@ export function HolidaySetup() {
     setError(null);
     try {
       const [holidayRows, doctorRows] = await Promise.all([
-        fetchHolidays(clinicId),
-        fetchDoctors(clinicId),
+        fetchHolidays(clinicId, request.signal),
+        fetchDoctors(clinicId, request.signal),
       ]);
+      if (!request.isCurrent()) {
+        return;
+      }
 
       const mappedDoctors = doctorRows
         .filter((doctor) => doctor.active)
@@ -119,15 +133,25 @@ export function HolidaySetup() {
       setHolidays(mappedHolidays);
       setTempHolidays(mappedHolidays);
     } catch (err) {
+      if (!request.isCurrent() || isAbortError(err)) {
+        return;
+      }
       setError(err instanceof ApiRequestError ? err.apiError.message : 'Failed to load holidays.');
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [isAdmin, clinicId]);
+  }, [beginLoad, clinicId, isAdmin]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setConflicts([]);
+    setError(null);
+    setSaving(false);
     void loadHolidays();
-  }, [loadHolidays]);
+    return cancelLoad;
+  }, [cancelLoad, loadHolidays]);
 
   const handleEdit = () => {
     setTempHolidays(holidays);
@@ -152,7 +176,7 @@ export function HolidaySetup() {
   };
 
   const handleSave = async () => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
 
@@ -172,26 +196,44 @@ export function HolidaySetup() {
       const existingById = new Map(holidays.map((holiday) => [holiday.id, holiday]));
       const tempIds = new Set(tempHolidays.map((holiday) => holiday.id));
 
-      await Promise.all(
-        holidays
-          .filter((holiday) => !tempIds.has(holiday.id))
-          .map((holiday) => patchHoliday(clinicId, holiday.id, { active: false })),
-      );
+      for (const holiday of holidays.filter((item) => !tempIds.has(item.id))) {
+        if (!isActive()) {
+          return;
+        }
+        await patchHoliday(clinicId, holiday.id, { active: false });
+        if (!isActive()) {
+          return;
+        }
+      }
 
       const savedHolidays: Holiday[] = [];
       for (const holiday of tempHolidays) {
+        if (!isActive()) {
+          return;
+        }
         const original = existingById.get(holiday.id);
         const payload = holidayPayload(holiday);
 
         if (!original) {
-          savedHolidays.push(mapHolidayRow(await createHoliday(clinicId, payload)));
+          const created = await createHoliday(clinicId, payload);
+          if (!isActive()) {
+            return;
+          }
+          savedHolidays.push(mapHolidayRow(created));
         } else if (sameHoliday(original, holiday)) {
           savedHolidays.push(original);
         } else {
-          savedHolidays.push(mapHolidayRow(await patchHoliday(clinicId, holiday.id, payload)));
+          const updated = await patchHoliday(clinicId, holiday.id, payload);
+          if (!isActive()) {
+            return;
+          }
+          savedHolidays.push(mapHolidayRow(updated));
         }
       }
 
+      if (!isActive()) {
+        return;
+      }
       const saved = savedHolidays
         .filter((holiday) => holiday.active)
         .sort((left, right) => left.date.localeCompare(right.date));
@@ -201,6 +243,9 @@ export function HolidaySetup() {
       setIsEditing(false);
       setConflicts([]);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -209,7 +254,9 @@ export function HolidaySetup() {
 
       setError(err instanceof ApiRequestError ? err.apiError.message : 'Failed to save holidays.');
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
   };
 
@@ -250,7 +297,7 @@ export function HolidaySetup() {
   };
 
   const toggleHolidayActive = async (id: string) => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
     const holiday = holidays.find((item) => item.id === id);
@@ -258,8 +305,19 @@ export function HolidaySetup() {
       return;
     }
 
-    await patchHoliday(clinicId, id, { active: !holiday.active });
-    await loadHolidays();
+    try {
+      await patchHoliday(clinicId, id, { active: !holiday.active });
+      if (!isActive()) {
+        return;
+      }
+      await loadHolidays();
+    } catch (err) {
+      if (isActive()) {
+        setError(
+          err instanceof ApiRequestError ? err.apiError.message : 'Failed to update holiday.',
+        );
+      }
+    }
   };
 
   const scopeLabel = (holiday: Holiday): string => {

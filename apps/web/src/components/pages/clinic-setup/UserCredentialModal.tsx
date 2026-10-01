@@ -218,6 +218,9 @@ export function UserCredentialModal({
         setConfirmPassword('');
       }
     } catch (submitError) {
+      if (submitError instanceof Error && submitError.name === 'AbortError') {
+        return;
+      }
       setError(
         submitError instanceof Error ? submitError.message : 'The login could not be saved.',
       );

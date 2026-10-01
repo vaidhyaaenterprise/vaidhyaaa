@@ -16,6 +16,7 @@ import {
 import { previewBookingRuleChange } from '@/lib/api/clinic-subscription';
 import { conflictsFromApiError, formatScheduleConflicts } from '@/lib/api/conflict-helpers';
 import { fetchClinicSettings, patchClinicSettings } from '@/lib/api/clinic-settings';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 
 type DoctorScopedBookingRules = {
   ruleIds: string[];
@@ -137,10 +138,10 @@ export function BookingRules() {
 
   const myDoctorId = useMemo(
     () =>
-      me?.clinics.find((clinic) => clinic.role === 'doctor')?.doctor_id ??
-      me?.clinics[0]?.doctor_id ??
-      null,
-    [me],
+      me?.clinics.find(
+        (clinic) => clinic.clinic_id === clinicId && clinic.role === 'doctor' && clinic.active,
+      )?.doctor_id ?? null,
+    [clinicId, me],
   );
 
   const doctorNameById = useMemo(() => {
@@ -176,13 +177,24 @@ export function BookingRules() {
     () =>
       doctorRows
         .filter((doctor) => doctor.active)
+        .filter((doctor) => isAdmin || doctor.id === myDoctorId)
         .filter((doctor) => (rulesByDoctor.get(doctor.id)?.length ?? 0) > 0),
-    [doctorRows, rulesByDoctor],
+    [doctorRows, isAdmin, myDoctorId, rulesByDoctor],
   );
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const loadRules = useCallback(async () => {
+    const request = beginLoad();
+    if (!request) {
+      return;
+    }
     if (!clinicId) {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setRuleRows([]);
+        setDoctorRows([]);
+        setAllowDoctorServiceEdit(false);
+        setLoading(false);
+      }
       return;
     }
 
@@ -190,27 +202,45 @@ export function BookingRules() {
     setError(null);
 
     try {
+      const settingsRequest = isAdmin
+        ? fetchClinicSettings(clinicId, request.signal)
+        : Promise.resolve(null);
       const [bookingRules, settings, doctors] = await Promise.all([
-        fetchBookingRules(clinicId),
-        fetchClinicSettings(clinicId),
-        fetchDoctors(clinicId),
+        fetchBookingRules(clinicId, request.signal),
+        settingsRequest,
+        fetchDoctors(clinicId, request.signal),
       ]);
+      if (!request.isCurrent()) {
+        return;
+      }
 
       setRuleRows(bookingRules);
-      setAllowDoctorServiceEdit(settings.allow_doctor_service_edit);
+      setAllowDoctorServiceEdit(settings?.allow_doctor_service_edit ?? false);
       setDoctorRows(doctors);
     } catch (err) {
+      if (!request.isCurrent() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load booking rules.',
       );
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [clinicId]);
+  }, [beginLoad, clinicId, isAdmin]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setConflicts([]);
+    setConflictModal(null);
+    setError(null);
+    setSaving(false);
+    setApplyingImplementFrom(false);
     void loadRules();
-  }, [loadRules]);
+    return cancelLoad;
+  }, [cancelLoad, loadRules]);
 
   useEffect(() => {
     if (availableDoctors.length === 0) {
@@ -227,7 +257,7 @@ export function BookingRules() {
         : (availableDoctors[0]?.id ?? '')
       : myDoctorId && availableDoctorIds.has(myDoctorId)
         ? myDoctorId
-        : (availableDoctors[0]?.id ?? '');
+        : '';
 
     if (preferredDoctorId !== selectedDoctorId) {
       setSelectedDoctorId(preferredDoctorId);
@@ -288,20 +318,25 @@ export function BookingRules() {
   };
 
   const applyChanges = async (patch: BookingRulePatchPayload, implementFrom?: string) => {
-    if (!clinicId || !rules || !tempRules) {
+    if (!clinicId || !rules || !tempRules || !isActive()) {
       return;
     }
 
-    let updatedRules: BookingRuleApiRow[] = [];
+    const updatedRules: BookingRuleApiRow[] = [];
     if (Object.keys(patch).length > 0) {
-      updatedRules = await Promise.all(
-        rules.ruleIds.map((ruleId) =>
-          patchBookingRule(clinicId, ruleId, {
-            ...patch,
-            ...(implementFrom ? { implement_from: implementFrom } : {}),
-          }),
-        ),
-      );
+      for (const ruleId of rules.ruleIds) {
+        if (!isActive()) {
+          return;
+        }
+        const updatedRule = await patchBookingRule(clinicId, ruleId, {
+          ...patch,
+          ...(implementFrom ? { implement_from: implementFrom } : {}),
+        });
+        if (!isActive()) {
+          return;
+        }
+        updatedRules.push(updatedRule);
+      }
       const updatedById = new Map(updatedRules.map((row) => [row.id, row]));
       setRuleRows((current) =>
         current.map((row) => {
@@ -312,19 +347,28 @@ export function BookingRules() {
     }
 
     if (tempRules.allowDoctorServiceEdit !== rules.allowDoctorServiceEdit) {
+      if (!isActive()) {
+        return;
+      }
       await patchClinicSettings(clinicId, {
         allow_doctor_service_edit: tempRules.allowDoctorServiceEdit,
       });
+      if (!isActive()) {
+        return;
+      }
       setAllowDoctorServiceEdit(tempRules.allowDoctorServiceEdit);
     }
 
+    if (!isActive()) {
+      return;
+    }
     setIsEditing(false);
     setConflicts([]);
     setConflictModal(null);
   };
 
   const handleSave = async () => {
-    if (!clinicId || !rules || !tempRules) {
+    if (!clinicId || !rules || !tempRules || !isActive()) {
       return;
     }
 
@@ -336,18 +380,24 @@ export function BookingRules() {
     setError(null);
     try {
       if (capacityOrDurationChanged) {
-        const previews = await Promise.all(
-          rules.ruleIds.map((ruleId) =>
-            previewBookingRuleChange(clinicId, ruleId, {
-              ...(patch.capacity_per_slot !== undefined
-                ? { capacity_per_slot: patch.capacity_per_slot }
-                : {}),
-              ...(patch.slot_duration_minutes !== undefined
-                ? { slot_duration_minutes: patch.slot_duration_minutes }
-                : {}),
-            }),
-          ),
-        );
+        const previews: Awaited<ReturnType<typeof previewBookingRuleChange>>[] = [];
+        for (const ruleId of rules.ruleIds) {
+          if (!isActive()) {
+            return;
+          }
+          const preview = await previewBookingRuleChange(clinicId, ruleId, {
+            ...(patch.capacity_per_slot !== undefined
+              ? { capacity_per_slot: patch.capacity_per_slot }
+              : {}),
+            ...(patch.slot_duration_minutes !== undefined
+              ? { slot_duration_minutes: patch.slot_duration_minutes }
+              : {}),
+          });
+          if (!isActive()) {
+            return;
+          }
+          previews.push(preview);
+        }
 
         const hasBlocked = previews.some((preview) => preview.blocked);
         if (hasBlocked) {
@@ -375,6 +425,9 @@ export function BookingRules() {
 
       await applyChanges(patch);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -383,12 +436,14 @@ export function BookingRules() {
 
       setError(err instanceof Error ? err.message : 'Failed to save booking rules.');
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
   };
 
   const handleImplementFrom = async () => {
-    if (!conflictModal || !tempRules) {
+    if (!conflictModal || !tempRules || !isActive()) {
       return;
     }
 
@@ -396,6 +451,9 @@ export function BookingRules() {
     try {
       await applyChanges(conflictModal.patch, conflictModal.implementFrom);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -404,7 +462,9 @@ export function BookingRules() {
       }
       setConflictModal(null);
     } finally {
-      setApplyingImplementFrom(false);
+      if (isActive()) {
+        setApplyingImplementFrom(false);
+      }
     }
   };
 
@@ -529,14 +589,16 @@ export function BookingRules() {
                 {rules.effectiveFrom ?? 'Today'}
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-              <span className="text-sm font-semibold text-slate-600">Doctor service edit</span>
-              <span
-                className={`text-sm font-bold ${rules.allowDoctorServiceEdit ? 'text-green-600' : 'text-slate-500'}`}
-              >
-                {rules.allowDoctorServiceEdit ? 'Enabled' : 'Disabled'}
-              </span>
-            </div>
+            {isAdmin && (
+              <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+                <span className="text-sm font-semibold text-slate-600">Doctor service edit</span>
+                <span
+                  className={`text-sm font-bold ${rules.allowDoctorServiceEdit ? 'text-green-600' : 'text-slate-500'}`}
+                >
+                  {rules.allowDoctorServiceEdit ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">

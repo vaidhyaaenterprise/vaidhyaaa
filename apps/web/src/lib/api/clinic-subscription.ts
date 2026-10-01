@@ -45,22 +45,27 @@ export type SupportedLanguageApi = {
   enabled_platform_wide: boolean;
 };
 
-export async function fetchClinicSubscription(clinicId: string) {
+export async function fetchClinicSubscription(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ subscription: ClinicSubscriptionApi }>(
     clinicPath(clinicId, '/subscription'),
+    signal,
   );
   return data.subscription;
 }
 
-export async function fetchClinicUsage(clinicId: string) {
+export async function fetchClinicUsage(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ usage: ClinicUsageApi }>(
     clinicPath(clinicId, '/usage/current-month'),
+    signal,
   );
   return data.usage;
 }
 
-export async function fetchClinicLanguages(clinicId: string) {
-  const data = await apiGet<{ languages: ClinicLanguagesApi }>(clinicPath(clinicId, '/languages'));
+export async function fetchClinicLanguages(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ languages: ClinicLanguagesApi }>(
+    clinicPath(clinicId, '/languages'),
+    signal,
+  );
   return data.languages;
 }
 
@@ -78,12 +83,12 @@ export async function replaceClinicLanguages(
   return data.languages;
 }
 
-export async function fetchSupportedLanguages() {
-  const data = await apiGet<{ languages: SupportedLanguageApi[] }>('/v1/languages');
+export async function fetchSupportedLanguages(signal?: AbortSignal) {
+  const data = await apiGet<{ languages: SupportedLanguageApi[] }>('/v1/languages', signal);
   return data.languages;
 }
 
-export async function fetchSubscriptionPlans() {
+export async function fetchSubscriptionPlans(signal?: AbortSignal) {
   const data = await apiGet<{
     plans: Array<{
       plan_key: string;
@@ -91,7 +96,7 @@ export async function fetchSubscriptionPlans() {
       included_voice_minutes: number;
       active: boolean;
     }>;
-  }>('/internal/platform/subscription-plans');
+  }>('/internal/platform/subscription-plans', signal);
   return data.plans;
 }
 

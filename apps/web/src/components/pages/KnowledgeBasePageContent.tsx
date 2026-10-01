@@ -24,6 +24,12 @@ import type { KnowledgeEntry, KnowledgeFile } from '@/components/pages/knowledge
 
 const REALTIME_RELOAD_DEBOUNCE_MS = 350;
 
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  );
+}
+
 function mapEntry(row: KnowledgeEntryApiRow): KnowledgeEntry {
   const normalizedStatus =
     row.status === 'approved' ||
@@ -61,6 +67,14 @@ function mapEntry(row: KnowledgeEntryApiRow): KnowledgeEntry {
   };
 }
 
+function isAnsweredReviewEntry(entry: KnowledgeEntry): boolean {
+  return (
+    (entry.status === 'pending_review' || entry.status === 'needs_update') &&
+    typeof entry.answer === 'string' &&
+    entry.answer.trim().length > 0
+  );
+}
+
 export function KnowledgeBasePageContent() {
   const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
@@ -76,13 +90,71 @@ export function KnowledgeBasePageContent() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
   const bulkUpdateInProgressRef = useRef(false);
+  const bulkOperationSequenceRef = useRef(0);
   const realtimeReloadPendingRef = useRef(false);
   const realtimeReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeLoadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
+  const mountedRef = useRef(false);
+  const loadContextRef = useRef({ clinicId, isAdmin });
+  loadContextRef.current = { clinicId, isAdmin };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const isActiveKnowledgeContext = useCallback(
+    (targetClinicId: string | null) =>
+      targetClinicId !== null &&
+      mountedRef.current &&
+      loadContextRef.current.clinicId === targetClinicId &&
+      loadContextRef.current.isAdmin,
+    [],
+  );
+
+  useEffect(() => {
+    bulkOperationSequenceRef.current += 1;
+    bulkUpdateInProgressRef.current = false;
+    realtimeReloadPendingRef.current = false;
+    if (realtimeReloadTimerRef.current) {
+      clearTimeout(realtimeReloadTimerRef.current);
+      realtimeReloadTimerRef.current = null;
+    }
+    setActionError(null);
+    setActionWarning(null);
+    setUploadStatus(null);
+    setIsManualFormOpen(false);
+  }, [clinicId, isAdmin]);
 
   const loadEntries = useCallback(
     async (showLoading = true) => {
-      if (!isAdmin) {
-        setLoading(false);
+      const isActiveContext = () =>
+        mountedRef.current &&
+        loadContextRef.current.clinicId === clinicId &&
+        loadContextRef.current.isAdmin === isAdmin;
+      if (!isActiveContext()) {
+        return;
+      }
+
+      activeLoadControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeLoadControllerRef.current = controller;
+      const loadSequence = ++loadSequenceRef.current;
+      const isCurrentLoad = () =>
+        isActiveContext() && !controller.signal.aborted && loadSequence === loadSequenceRef.current;
+
+      if (!isAdmin || !clinicId) {
+        if (isCurrentLoad()) {
+          setError(null);
+          setPendingEntries([]);
+          setApprovedEntries([]);
+          setEmbeddingStatus(null);
+          setLoading(false);
+          activeLoadControllerRef.current = null;
+        }
         return;
       }
       if (showLoading) {
@@ -91,23 +163,20 @@ export function KnowledgeBasePageContent() {
       }
       try {
         const [entries, status] = await Promise.all([
-          fetchKnowledgeEntries(),
-          fetchKnowledgeEmbeddingStatus(),
+          fetchKnowledgeEntries(controller.signal),
+          fetchKnowledgeEmbeddingStatus(controller.signal),
         ]);
-        const mapped = entries.map(mapEntry);
-        setPendingEntries(
-          mapped.filter(
-            (entry) => entry.status === 'pending_review' || entry.status === 'needs_update',
-          ),
-        );
-        setApprovedEntries(mapped.filter((entry) => entry.status === 'approved'));
-        if (status) {
-          setEmbeddingStatus(
-            `${status.generated_count}/${status.approved_total} embeddings generated`,
-          );
+        if (!isCurrentLoad()) {
+          return;
         }
+        const mapped = entries.map(mapEntry);
+        setPendingEntries(mapped.filter(isAnsweredReviewEntry));
+        setApprovedEntries(mapped.filter((entry) => entry.status === 'approved'));
+        setEmbeddingStatus(
+          status ? `${status.generated_count}/${status.approved_total} embeddings generated` : null,
+        );
       } catch (err) {
-        if (showLoading) {
+        if (showLoading && isCurrentLoad() && !isAbortError(err)) {
           setError(
             err instanceof ApiRequestError
               ? err.apiError.message
@@ -115,12 +184,15 @@ export function KnowledgeBasePageContent() {
           );
         }
       } finally {
-        if (showLoading) {
+        if (isCurrentLoad()) {
           setLoading(false);
+        }
+        if (isCurrentLoad() && activeLoadControllerRef.current === controller) {
+          activeLoadControllerRef.current = null;
         }
       }
     },
-    [isAdmin],
+    [clinicId, isAdmin],
   );
 
   const applyKnowledgeRows = useCallback((rows: KnowledgeEntryApiRow[]) => {
@@ -129,9 +201,7 @@ export function KnowledgeBasePageContent() {
 
     setPendingEntries((current) => [
       ...current.filter((entry) => !changedIds.has(entry.id)),
-      ...changedEntries.filter(
-        (entry) => entry.status === 'pending_review' || entry.status === 'needs_update',
-      ),
+      ...changedEntries.filter(isAnsweredReviewEntry),
     ]);
     setApprovedEntries((current) => [
       ...current.filter((entry) => !changedIds.has(entry.id)),
@@ -141,6 +211,11 @@ export function KnowledgeBasePageContent() {
 
   useEffect(() => {
     void loadEntries();
+    return () => {
+      activeLoadControllerRef.current?.abort();
+      activeLoadControllerRef.current = null;
+      loadSequenceRef.current += 1;
+    };
   }, [loadEntries]);
 
   const scheduleRealtimeReload = useCallback(() => {
@@ -164,11 +239,18 @@ export function KnowledgeBasePageContent() {
       return;
     }
 
-    return (
-      subscribeToClinicKnowledge(clinicId, () => {
-        scheduleRealtimeReload();
-      }) ?? undefined
-    );
+    const unsubscribe = subscribeToClinicKnowledge(clinicId, () => {
+      scheduleRealtimeReload();
+    });
+
+    return () => {
+      unsubscribe?.();
+      if (realtimeReloadTimerRef.current) {
+        clearTimeout(realtimeReloadTimerRef.current);
+        realtimeReloadTimerRef.current = null;
+      }
+      realtimeReloadPendingRef.current = false;
+    };
   }, [clinicId, isAdmin, scheduleRealtimeReload]);
 
   useEffect(
@@ -230,12 +312,15 @@ export function KnowledgeBasePageContent() {
     if (!clinicId) {
       return;
     }
+    const targetClinicId = clinicId;
     const updated = await patchKnowledgeEntry(
       id,
       { status: 'approved', qa_approved: true, applicable: true },
-      clinicId,
+      targetClinicId,
     );
-    applyKnowledgeRows([updated]);
+    if (isActiveKnowledgeContext(targetClinicId)) {
+      applyKnowledgeRows([updated]);
+    }
   };
 
   const handleBulkApprove = async (ids: string[]) => {
@@ -244,6 +329,12 @@ export function KnowledgeBasePageContent() {
       setActionError(clinicContextError.message);
       throw clinicContextError;
     }
+
+    const targetClinicId = clinicId;
+    const operationSequence = ++bulkOperationSequenceRef.current;
+    const isCurrentBulkContext = () =>
+      operationSequence === bulkOperationSequenceRef.current &&
+      isActiveKnowledgeContext(targetClinicId);
 
     setActionError(null);
     setActionWarning(null);
@@ -262,33 +353,47 @@ export function KnowledgeBasePageContent() {
     let embeddingFailureStatePersisted = true;
 
     try {
-      await bulkApproveKnowledgeEntriesInChunks(ids, (result) => {
-        const approvedIds = new Set(result.knowledge_ids);
-        approvedCount += result.approved;
-        approvedKnowledgeIds.push(...result.knowledge_ids);
-        skippedKnowledgeIds.push(...result.skipped_knowledge_ids);
-        skippedEntries.push(...(result.skipped_entries ?? []));
-        embeddingFailedKnowledgeIds.push(...result.embedding_job_failed_knowledge_ids);
-        embeddingFailureStatePersisted =
-          embeddingFailureStatePersisted && result.embedding_failure_state_persisted;
+      await bulkApproveKnowledgeEntriesInChunks(
+        ids,
+        (result) => {
+          if (!isCurrentBulkContext()) {
+            return;
+          }
+          const approvedIds = new Set(result.knowledge_ids);
+          approvedCount += result.approved;
+          approvedKnowledgeIds.push(...result.knowledge_ids);
+          skippedKnowledgeIds.push(...result.skipped_knowledge_ids);
+          skippedEntries.push(...(result.skipped_entries ?? []));
+          embeddingFailedKnowledgeIds.push(...result.embedding_job_failed_knowledge_ids);
+          embeddingFailureStatePersisted =
+            embeddingFailureStatePersisted && result.embedding_failure_state_persisted;
 
-        setPendingEntries((current) => current.filter((entry) => !approvedIds.has(entry.id)));
-        setApprovedEntries((current) => {
-          const currentIds = new Set(current.map((entry) => entry.id));
-          const newlyApproved = result.knowledge_ids
-            .map((id) => selectedEntries.get(id))
-            .filter((entry): entry is KnowledgeEntry => entry !== undefined)
-            .filter((entry) => !currentIds.has(entry.id))
-            .map((entry) => ({
-              ...entry,
-              status: 'approved' as const,
-              uiStatus: 'approved' as const,
-              applicable: true,
-              qaApproved: true,
-            }));
-          return [...current, ...newlyApproved];
-        });
-      });
+          setPendingEntries((current) => current.filter((entry) => !approvedIds.has(entry.id)));
+          setApprovedEntries((current) => {
+            const currentIds = new Set(current.map((entry) => entry.id));
+            const newlyApproved = result.knowledge_ids
+              .map((id) => selectedEntries.get(id))
+              .filter((entry): entry is KnowledgeEntry => entry !== undefined)
+              .filter((entry) => !currentIds.has(entry.id))
+              .map((entry) => ({
+                ...entry,
+                status: 'approved' as const,
+                uiStatus: 'approved' as const,
+                applicable: true,
+                qaApproved: true,
+              }));
+            return [...current, ...newlyApproved];
+          });
+        },
+        isCurrentBulkContext,
+      );
+
+      if (!isCurrentBulkContext()) {
+        return {
+          approvedIds: approvedKnowledgeIds,
+          skippedIds: skippedKnowledgeIds,
+        };
+      }
 
       const warnings: string[] = [];
       if (skippedKnowledgeIds.length > 0) {
@@ -349,27 +454,33 @@ export function KnowledgeBasePageContent() {
         err instanceof ApiRequestError
           ? err.apiError.message
           : 'Bulk approval failed. Please try the remaining entries again.';
-      setActionError(
-        approvedCount > 0
-          ? `${approvedCount} entries were approved before the request failed. ${message}`
-          : message,
-      );
+      if (isCurrentBulkContext()) {
+        setActionError(
+          approvedCount > 0
+            ? `${approvedCount} entries were approved before the request failed. ${message}`
+            : message,
+        );
+      }
       throw err;
     } finally {
-      // All events emitted by completed chunks are covered by this refresh.
-      // If another event arrives while the refresh is in flight, schedule one
-      // final coalesced read after bulk mode is released.
-      realtimeReloadPendingRef.current = false;
-      await loadEntries(false);
-      bulkUpdateInProgressRef.current = false;
-      const needsFollowupReload = realtimeReloadPendingRef.current;
-      realtimeReloadPendingRef.current = false;
-      if (realtimeReloadTimerRef.current) {
-        clearTimeout(realtimeReloadTimerRef.current);
-        realtimeReloadTimerRef.current = null;
-      }
-      if (needsFollowupReload) {
-        scheduleRealtimeReload();
+      if (operationSequence === bulkOperationSequenceRef.current) {
+        // All events emitted by completed chunks are covered by this refresh.
+        // If another event arrives while the refresh is in flight, schedule one
+        // final coalesced read after bulk mode is released.
+        if (isCurrentBulkContext()) {
+          realtimeReloadPendingRef.current = false;
+          await loadEntries(false);
+          const needsFollowupReload = realtimeReloadPendingRef.current;
+          realtimeReloadPendingRef.current = false;
+          if (realtimeReloadTimerRef.current) {
+            clearTimeout(realtimeReloadTimerRef.current);
+            realtimeReloadTimerRef.current = null;
+          }
+          if (needsFollowupReload) {
+            scheduleRealtimeReload();
+          }
+        }
+        bulkUpdateInProgressRef.current = false;
       }
     }
   };
@@ -378,18 +489,22 @@ export function KnowledgeBasePageContent() {
     if (!clinicId) {
       return;
     }
+    const targetClinicId = clinicId;
     const updated = await patchKnowledgeEntry(
       id,
       { status: 'disabled', applicable: false },
-      clinicId,
+      targetClinicId,
     );
-    applyKnowledgeRows([updated]);
+    if (isActiveKnowledgeContext(targetClinicId)) {
+      applyKnowledgeRows([updated]);
+    }
   };
 
   const handleEdit = async (id: string, updatedData: Partial<KnowledgeEntry>) => {
     if (!clinicId) {
       return;
     }
+    const targetClinicId = clinicId;
     const updated = await patchKnowledgeEntry(
       id,
       {
@@ -400,9 +515,11 @@ export function KnowledgeBasePageContent() {
           ? { alternative_phrases_json: updatedData.alternativePhrases }
           : {}),
       },
-      clinicId,
+      targetClinicId,
     );
-    applyKnowledgeRows([updated]);
+    if (isActiveKnowledgeContext(targetClinicId)) {
+      applyKnowledgeRows([updated]);
+    }
   };
 
   const handleUpload = (file: File) => {
@@ -475,7 +592,10 @@ export function KnowledgeBasePageContent() {
         onClose={() => setIsManualFormOpen(false)}
         categories={KNOWLEDGE_CATEGORIES}
         onSaved={() => {
-          void loadEntries(false);
+          const targetClinicId = clinicId;
+          if (isActiveKnowledgeContext(targetClinicId)) {
+            void loadEntries(false);
+          }
         }}
       />
     </>

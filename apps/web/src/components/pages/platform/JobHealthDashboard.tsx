@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useIsPlatformAdmin } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchPlatformJobHealth } from '@/lib/api/clinic-clinical';
 
 import type { JobHealth, JobRunLog } from './types';
@@ -105,16 +105,38 @@ export function JobHealthDashboard() {
     lastRunTranscriptCleanup: null,
   });
   const [runLogs, setRunLogs] = useState<JobRunLog[]>([]);
+  const mountedRef = useRef(false);
+  const loadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const loadHealth = useCallback(async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    loadControllerRef.current?.abort();
+    loadControllerRef.current = null;
+    const sequence = ++loadSequenceRef.current;
+
     if (!isPlatformAdmin) {
       setLoading(false);
       return;
     }
+
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
+    const isCurrentLoad = () =>
+      mountedRef.current &&
+      !controller.signal.aborted &&
+      loadSequenceRef.current === sequence;
+
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchPlatformJobHealth();
+      const data = await fetchPlatformJobHealth(controller.signal);
+      if (!isCurrentLoad()) {
+        return;
+      }
       const runs = (data.recent_runs as ApiJobRunRow[]).map(mapRunLog);
       setRunLogs(runs);
       setHealth({
@@ -134,16 +156,29 @@ export function JobHealthDashboard() {
         ),
       });
     } catch (err) {
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load job health.',
       );
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+        loadControllerRef.current = null;
+      }
     }
   }, [isPlatformAdmin]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadHealth();
+    return () => {
+      mountedRef.current = false;
+      loadSequenceRef.current += 1;
+      loadControllerRef.current?.abort();
+      loadControllerRef.current = null;
+    };
   }, [loadHealth]);
 
   if (!isPlatformAdmin) {

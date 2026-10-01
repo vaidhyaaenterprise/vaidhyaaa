@@ -24,6 +24,35 @@ const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 const DOCTOR_ID = '00000000-0000-0000-0000-000000000201';
 const SERVICE_ID = '00000000-0000-0000-0000-000000000301';
 
+const authContext = vi.hoisted(() => ({
+  effectiveRole: 'admin' as 'admin' | 'doctor',
+  clinicRole: {
+    clinic_id: '00000000-0000-0000-0000-000000000001',
+    role: 'clinic_admin' as 'clinic_admin' | 'doctor',
+    doctor_id: null as string | null,
+    active: true,
+  },
+}));
+
+const clinicProfileContext = vi.hoisted(() => ({
+  clinicId: '00000000-0000-0000-0000-000000000001' as string | null,
+  profile: {
+    name: 'Test Clinic',
+    clinic_unique_number: 100001,
+    primary_phone: null,
+    address_line1: null,
+    address_line2: null,
+    city: null,
+    state: null,
+    postal_code: null,
+    country: 'India',
+    timezone: 'Asia/Kolkata',
+  } as Record<string, unknown> | null,
+  status: 'ready' as 'idle' | 'loading' | 'ready' | 'error',
+  refresh: vi.fn(),
+  updateProfile: vi.fn(),
+}));
+
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({
     status: 'authenticated',
@@ -45,17 +74,16 @@ vi.mock('@/components/auth/AuthProvider', () => ({
         },
       ],
     },
-    effectiveRole: 'admin',
-    clinicRole: {
-      clinic_id: CLINIC_ID,
-      role: 'clinic_admin',
-      doctor_id: null,
-      active: true,
-    },
+    effectiveRole: authContext.effectiveRole,
+    clinicRole: authContext.clinicRole,
     error: null,
     errorCode: null,
     refresh: async () => {},
   }),
+}));
+
+vi.mock('@/components/clinic/ClinicProfileProvider', () => ({
+  useClinicProfile: () => clinicProfileContext,
 }));
 
 vi.mock('@/lib/api/appointments', () => ({
@@ -125,6 +153,29 @@ const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
 const mockedFetchClinicProfile = vi.mocked(fetchClinicProfile);
 
 beforeEach(() => {
+  authContext.effectiveRole = 'admin';
+  authContext.clinicRole = {
+    clinic_id: CLINIC_ID,
+    role: 'clinic_admin',
+    doctor_id: null,
+    active: true,
+  };
+  clinicProfileContext.clinicId = CLINIC_ID;
+  clinicProfileContext.profile = {
+    name: 'Test Clinic',
+    clinic_unique_number: 100001,
+    primary_phone: null,
+    address_line1: null,
+    address_line2: null,
+    city: null,
+    state: null,
+    postal_code: null,
+    country: 'India',
+    timezone: 'Asia/Kolkata',
+  };
+  clinicProfileContext.status = 'ready';
+  clinicProfileContext.refresh.mockReset();
+  clinicProfileContext.updateProfile.mockReset();
   mockedFetchAppointments.mockReset().mockResolvedValue([]);
   mockedFetchAvailableAppointmentSlots.mockReset().mockResolvedValue([]);
   mockedConfirmAppointment.mockReset().mockResolvedValue({ appointment: {} });
@@ -187,6 +238,10 @@ describe('HomePage dashboard', () => {
     expect(await screen.findByRole('heading', { name: 'Missed actions' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: "Today's summary" })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
+    expect(mockedFetchClinicProfile).not.toHaveBeenCalled();
+    expect(mockedFetchDoctors).not.toHaveBeenCalled();
+    expect(mockedFetchServices).not.toHaveBeenCalled();
+    expect(mockedFetchDoctorServices).not.toHaveBeenCalled();
   });
 
   it('opens the shared manual-booking modal and creates a slot-backed appointment', async () => {
@@ -218,12 +273,24 @@ describe('HomePage dashboard', () => {
     render(<HomePageContent />);
 
     await screen.findByText('Vaidya dashboard for Clinic Admin');
+    expect(mockedFetchDoctors).not.toHaveBeenCalled();
+    expect(mockedFetchServices).not.toHaveBeenCalled();
+    expect(mockedFetchDoctorServices).not.toHaveBeenCalled();
     const manualBookingButton = screen.getByRole('button', { name: 'Add manual booking' });
     expect(manualBookingButton).toBeEnabled();
     fireEvent.click(manualBookingButton);
 
     const dialog = await screen.findByRole('dialog', { name: 'New manual appointment' });
-    fireEvent.change(within(dialog).getByPlaceholderText('Enter patient name'), {
+    const patientNameInput = await within(dialog).findByPlaceholderText('Enter patient name');
+    expect(mockedFetchDoctors).toHaveBeenCalledTimes(1);
+    expect(mockedFetchServices).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDoctorServices).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      const [doctorSelect, serviceSelect] = within(dialog).getAllByRole('combobox');
+      expect(doctorSelect).toHaveValue(DOCTOR_ID);
+      expect(serviceSelect).toHaveValue(SERVICE_ID);
+    });
+    fireEvent.change(patientNameInput, {
       target: { value: 'New Patient' },
     });
     fireEvent.change(within(dialog).getByPlaceholderText('+91 98765 43210'), {
@@ -239,11 +306,15 @@ describe('HomePage dashboard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Today' }));
 
     await waitFor(() => {
-      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(CLINIC_ID, {
-        doctor_id: DOCTOR_ID,
-        clinic_service_id: SERVICE_ID,
-        date: todayDate,
-      });
+      expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(
+        CLINIC_ID,
+        {
+          doctor_id: DOCTOR_ID,
+          clinic_service_id: SERVICE_ID,
+          date: todayDate,
+        },
+        expect.any(AbortSignal),
+      );
     });
 
     const createButton = within(dialog).getByRole('button', { name: 'Create appointment' });
@@ -280,6 +351,14 @@ describe('HomePage dashboard', () => {
       ).not.toBeInTheDocument();
     });
     expect(mockedFetchAppointments).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(manualBookingButton);
+    const reopenedDialog = await screen.findByRole('dialog', { name: 'New manual appointment' });
+    expect(await within(reopenedDialog).findByPlaceholderText('Enter patient name')).toBeVisible();
+    expect(mockedFetchDoctors).toHaveBeenCalledTimes(1);
+    expect(mockedFetchServices).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDoctorServices).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(reopenedDialog).getByRole('button', { name: 'Cancel' }));
   });
 
   it('shows only clinic-today data in current cards and moves older pending requests to missed actions', async () => {
@@ -338,10 +417,38 @@ describe('HomePage dashboard', () => {
     expect(topCardGrid?.children[2]).toBe(nextAppointments);
     expect(missedActions.parentElement).not.toBe(topCardGrid);
 
-    expect(mockedFetchAppointments).toHaveBeenCalledWith(CLINIC_ID, [
-      'pending_confirmation',
-      'confirmed',
+    expect(mockedFetchAppointments).toHaveBeenCalledWith(
+      CLINIC_ID,
+      ['pending_confirmation', 'confirmed'],
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('does not call admin-only settings or appointment actions for a doctor session', async () => {
+    authContext.effectiveRole = 'doctor';
+    authContext.clinicRole = {
+      clinic_id: CLINIC_ID,
+      role: 'doctor',
+      doctor_id: DOCTOR_ID,
+      active: true,
+    };
+    const today = getClinicDate(new Date(), 'Asia/Kolkata');
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow('doctor-pending', 'Doctor Pending', today, '09:30', 'pending_confirmation'),
     ]);
+
+    render(<HomePageContent />);
+
+    await screen.findByText('Your clinic day at a glance');
+    expect(mockedFetchClinicSettings).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: 'Confirm appointment for Doctor Pending' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Cancel appointment for Doctor Pending' }),
+    ).not.toBeInTheDocument();
+    expect(mockedConfirmAppointment).not.toHaveBeenCalled();
+    expect(mockedCancelAppointment).not.toHaveBeenCalled();
   });
 
   it('does not classify appointments when the clinic timezone cannot be loaded', async () => {
@@ -355,12 +462,71 @@ describe('HomePage dashboard', () => {
         'pending_confirmation',
       ),
     ]);
-    mockedFetchClinicProfile.mockRejectedValue(new Error('Profile unavailable'));
+    clinicProfileContext.profile = null;
+    clinicProfileContext.status = 'error';
 
     render(<HomePageContent />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load dashboard data.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Failed to load the clinic timezone for this dashboard.',
+    );
     expect(screen.queryByText('Must Not Be Classified')).not.toBeInTheDocument();
+    expect(mockedFetchClinicProfile).not.toHaveBeenCalled();
+  });
+
+  it('shows a retry state when lazy manual-booking reference data fails', async () => {
+    mockedFetchDoctors.mockRejectedValueOnce(new Error('Doctors unavailable'));
+
+    render(<HomePageContent />);
+
+    await screen.findByText('Vaidya dashboard for Clinic Admin');
+    fireEvent.click(screen.getByRole('button', { name: 'Add manual booking' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'New manual appointment' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Doctors and services could not be loaded.',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Try again' }));
+
+    expect(await within(dialog).findByPlaceholderText('Enter patient name')).toBeVisible();
+    expect(mockedFetchDoctors).toHaveBeenCalledTimes(2);
+    expect(mockedFetchServices).toHaveBeenCalledTimes(2);
+    expect(mockedFetchDoctorServices).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts dashboard and lazy reference requests when Home unmounts', async () => {
+    let dashboardSignal: AbortSignal | undefined;
+    let referenceSignal: AbortSignal | undefined;
+    mockedFetchAppointments.mockImplementation((_clinicId, _statuses, signal) => {
+      dashboardSignal = signal;
+      return new Promise<AppointmentApiRow[]>((_resolve, reject) => {
+        signal?.addEventListener('abort', () =>
+          reject(new DOMException('Request aborted', 'AbortError')),
+        );
+      });
+    });
+
+    const firstRender = render(<HomePageContent />);
+    await waitFor(() => expect(dashboardSignal).toBeDefined());
+    firstRender.unmount();
+    expect(dashboardSignal?.aborted).toBe(true);
+
+    mockedFetchAppointments.mockResolvedValue([]);
+    mockedFetchDoctors.mockImplementation((_clinicId, signal) => {
+      referenceSignal = signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () =>
+          reject(new DOMException('Request aborted', 'AbortError')),
+        );
+      });
+    });
+
+    const secondRender = render(<HomePageContent />);
+    await screen.findByText('Vaidya dashboard for Clinic Admin');
+    fireEvent.click(screen.getByRole('button', { name: 'Add manual booking' }));
+    await waitFor(() => expect(referenceSignal).toBeDefined());
+    secondRender.unmount();
+    expect(referenceSignal?.aborted).toBe(true);
   });
 
   it('shows missed requests as read-only history and excludes them from pending staff actions', async () => {

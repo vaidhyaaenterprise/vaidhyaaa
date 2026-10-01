@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AgentSettings } from '@/components/pages/settings/AgentSettings';
@@ -49,6 +49,44 @@ function mapSettingsToNotification(settings: ClinicSettingsResponse): Notificati
   };
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'AbortError'
+  );
+}
+
+async function readOptional<T>(request: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await request;
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return fallback;
+  }
+}
+
+const DEFAULT_LANGUAGE_SETTINGS: LanguageSettingsType = {
+  supportedLanguages: ['ta_tanglish', 'english'],
+  clinicLanguages: ['ta_tanglish', 'english'],
+  defaultLanguage: 'ta_tanglish',
+  missingTemplates: [],
+};
+
+const DEFAULT_SUBSCRIPTION: SubscriptionPlan = {
+  planKey: 'pilot',
+  planName: 'Pilot',
+  status: 'manual_free',
+  includedVoiceMinutes: 500,
+  usedVoiceMinutes: 0,
+  maxConcurrentCalls: 3,
+  recordingRetentionDays: 10,
+  transcriptRetentionDays: 30,
+};
+
 export function SettingsPageContent() {
   const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
@@ -61,39 +99,73 @@ export function SettingsPageContent() {
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType | null>(
     null,
   );
-  const [languageSettings, setLanguageSettings] = useState<LanguageSettingsType>({
-    supportedLanguages: ['ta_tanglish', 'english'],
-    clinicLanguages: ['ta_tanglish', 'english'],
-    defaultLanguage: 'ta_tanglish',
-    missingTemplates: [],
-  });
-  const [subscription, setSubscription] = useState<SubscriptionPlan>({
-    planKey: 'pilot',
-    planName: 'Pilot',
-    status: 'manual_free',
-    includedVoiceMinutes: 500,
-    usedVoiceMinutes: 0,
-    maxConcurrentCalls: 3,
-    recordingRetentionDays: 10,
-    transcriptRetentionDays: 30,
-  });
+  const [languageSettings, setLanguageSettings] = useState<LanguageSettingsType>(
+    DEFAULT_LANGUAGE_SETTINGS,
+  );
+  const [subscription, setSubscription] = useState<SubscriptionPlan>(DEFAULT_SUBSCRIPTION);
   const [notificationEvents] = useState<NotificationEvent[]>([]);
+  const activeLoadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
+  const activeClinicIdRef = useRef(clinicId);
+  const postMutationReadAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      postMutationReadAbortRef.current?.abort();
+      postMutationReadAbortRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    activeClinicIdRef.current = clinicId;
+    postMutationReadAbortRef.current?.abort();
+    postMutationReadAbortRef.current = null;
+  }, [clinicId]);
 
   const loadSettings = useCallback(async () => {
+    activeLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeLoadControllerRef.current = controller;
+    const loadSequence = ++loadSequenceRef.current;
+    const isCurrentLoad = () =>
+      !controller.signal.aborted && loadSequence === loadSequenceRef.current;
+
     if (!clinicId) {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setAgentSettings(null);
+        setNotificationSettings(null);
+        setLanguageSettings(DEFAULT_LANGUAGE_SETTINGS);
+        setSubscription(DEFAULT_SUBSCRIPTION);
+        setLoading(false);
+        activeLoadControllerRef.current = null;
+      }
       return;
     }
     setLoading(true);
     setError(null);
+    setAgentSettings(null);
+    setNotificationSettings(null);
+    setLanguageSettings(DEFAULT_LANGUAGE_SETTINGS);
+    setSubscription(DEFAULT_SUBSCRIPTION);
     try {
       const [settings, subscriptionRow, usageRow, languagesRow, supported] = await Promise.all([
-        isAdmin ? fetchClinicSettings(clinicId) : Promise.resolve(null),
-        fetchClinicSubscription(clinicId).catch(() => null),
-        fetchClinicUsage(clinicId).catch(() => null),
-        fetchClinicLanguages(clinicId).catch(() => null),
-        fetchSupportedLanguages().catch(() => []),
+        isAdmin ? fetchClinicSettings(clinicId, controller.signal) : Promise.resolve(null),
+        isAdmin
+          ? readOptional(fetchClinicSubscription(clinicId, controller.signal), null)
+          : Promise.resolve(null),
+        isAdmin
+          ? readOptional(fetchClinicUsage(clinicId, controller.signal), null)
+          : Promise.resolve(null),
+        readOptional(fetchClinicLanguages(clinicId, controller.signal), null),
+        readOptional(fetchSupportedLanguages(controller.signal), []),
       ]);
+
+      if (!isCurrentLoad()) {
+        return;
+      }
 
       if (settings) {
         setAgentSettings(mapSettingsToAgent(settings));
@@ -135,49 +207,69 @@ export function SettingsPageContent() {
         }));
       }
     } catch (err) {
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError
           ? err.apiError.message
           : 'Failed to load clinic settings from the API.',
       );
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+        if (activeLoadControllerRef.current === controller) {
+          activeLoadControllerRef.current = null;
+        }
+      }
     }
   }, [clinicId, isAdmin]);
 
   useEffect(() => {
     void loadSettings();
+    return () => {
+      activeLoadControllerRef.current?.abort();
+      activeLoadControllerRef.current = null;
+      loadSequenceRef.current += 1;
+    };
   }, [loadSettings]);
 
   const handleUpdateAgentSettings = async (settings: Partial<AgentSettingsType>) => {
     if (!clinicId || !agentSettings) {
       return;
     }
+    const targetClinicId = clinicId;
     const next = { ...agentSettings, ...settings };
-    const saved = await patchClinicSettings(clinicId, {
+    const saved = await patchClinicSettings(targetClinicId, {
       agent_enabled: next.agentEnabled,
       booking_mode: next.bookingMode,
     });
-    setAgentSettings(mapSettingsToAgent(saved));
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      setAgentSettings(mapSettingsToAgent(saved));
+    }
   };
 
   const handleUpdateNotificationSettings = async (settings: Partial<NotificationSettingsType>) => {
     if (!clinicId || !notificationSettings) {
       return;
     }
+    const targetClinicId = clinicId;
     const next = { ...notificationSettings, ...settings };
-    const saved = await patchClinicSettings(clinicId, {
+    const saved = await patchClinicSettings(targetClinicId, {
       notify_staff_on_pending_appointment: next.notifyStaffOnPendingAppointment,
     });
-    setNotificationSettings(mapSettingsToNotification(saved));
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      setNotificationSettings(mapSettingsToNotification(saved));
+    }
   };
 
   const handleUpdateLanguageSettings = async (settings: Partial<LanguageSettingsType>) => {
     if (!clinicId || !isAdmin) {
       return;
     }
+    const targetClinicId = clinicId;
     const next = { ...languageSettings, ...settings };
-    const saved = await replaceClinicLanguages(clinicId, {
+    const saved = await replaceClinicLanguages(targetClinicId, {
       default_language_code: next.defaultLanguage,
       languages: next.supportedLanguages.map((language) => ({
         language_code: language,
@@ -185,26 +277,50 @@ export function SettingsPageContent() {
         is_default: language === next.defaultLanguage,
       })),
     });
-    setLanguageSettings({
-      ...next,
-      clinicLanguages: saved.languages
-        .filter((language) => language.enabled)
-        .map((language) => language.language_code as Language),
-      defaultLanguage: saved.default_language_code as Language,
-    });
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      setLanguageSettings({
+        ...next,
+        clinicLanguages: saved.languages
+          .filter((language) => language.enabled)
+          .map((language) => language.language_code as Language),
+        defaultLanguage: saved.default_language_code as Language,
+      });
+    }
   };
 
   const handlePlanChange = async (change: PlatformSubscriptionChange) => {
     if (!clinicId) {
       return;
     }
-    await changeClinicSubscription(clinicId, {
+    const targetClinicId = clinicId;
+    await changeClinicSubscription(targetClinicId, {
       plan_key: change.planKey,
       status: change.status,
       trial_end: change.trialEnd ?? null,
       notes: change.notes ?? null,
     });
-    const saved = await fetchClinicSubscription(clinicId);
+    if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+      return;
+    }
+    postMutationReadAbortRef.current?.abort();
+    const controller = new AbortController();
+    postMutationReadAbortRef.current = controller;
+    let saved: Awaited<ReturnType<typeof fetchClinicSubscription>>;
+    try {
+      saved = await fetchClinicSubscription(targetClinicId, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) {
+        return;
+      }
+      throw error;
+    } finally {
+      if (postMutationReadAbortRef.current === controller) {
+        postMutationReadAbortRef.current = null;
+      }
+    }
+    if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+      return;
+    }
     setSubscription((previous) => ({
       planKey: saved.plan_key,
       planName: saved.plan_name,

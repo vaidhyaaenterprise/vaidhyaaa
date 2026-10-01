@@ -50,7 +50,7 @@ describe('clinic user API', () => {
     await disableClinicUser(CLINIC_ID, CLINIC_USER_ID);
     await enableClinicUser(CLINIC_ID, CLINIC_USER_ID);
 
-    expect(apiGet).toHaveBeenCalledWith(`/v1/clinics/${CLINIC_ID}/users`);
+    expect(apiGet).toHaveBeenCalledWith(`/v1/clinics/${CLINIC_ID}/users`, undefined);
     expect(apiPost).toHaveBeenNthCalledWith(1, `/v1/clinics/${CLINIC_ID}/users`, {
       role: 'doctor',
       doctor_id: 'doctor-id',
