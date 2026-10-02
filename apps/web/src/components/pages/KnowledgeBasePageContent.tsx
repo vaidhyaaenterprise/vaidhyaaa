@@ -576,13 +576,13 @@ export function KnowledgeBasePageContent() {
           categories={KNOWLEDGE_CATEGORIES}
           onApprove={(id) => void handleApprove(id)}
           onBulkApprove={handleBulkApprove}
-          onEdit={(id, data) => void handleEdit(id, data)}
+          onEdit={handleEdit}
           onDisable={(id) => void handleDisable(id)}
         />
         <ApprovedQA
           entries={approvedEntries}
           categories={KNOWLEDGE_CATEGORIES}
-          onEdit={(id, data) => void handleEdit(id, data)}
+          onEdit={handleEdit}
           onDisable={(id) => void handleDisable(id)}
         />
       </div>

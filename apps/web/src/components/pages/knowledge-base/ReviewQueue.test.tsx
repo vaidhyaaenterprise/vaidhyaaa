@@ -178,4 +178,48 @@ describe('ReviewQueue bulk approval', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Select all' })).not.toBeInTheDocument();
   });
+
+  it('keeps rendering after save when a mixed-version mutation row omits alternative phrases', () => {
+    const onEdit = vi.fn();
+    const sharedProps = {
+      categories,
+      onApprove: vi.fn(),
+      onBulkApprove: vi.fn(),
+      onDisable: vi.fn(),
+    };
+    const { rerender } = render(
+      <ReviewQueue entries={[entry('one')]} {...sharedProps} onEdit={onEdit} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByDisplayValue('Answer one'), {
+      target: { value: 'Updated answer' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onEdit).toHaveBeenCalledWith(
+      'one',
+      expect.objectContaining({ answer: 'Updated answer' }),
+    );
+
+    rerender(
+      <ReviewQueue
+        entries={[
+          {
+            ...entry('one'),
+            answer: 'Updated answer',
+            // Older PATCH responses exposed `alternativePhrasesJson` instead of
+            // the UI model's `alternativePhrases`; keep the render boundary safe
+            // while API and web deployments roll independently.
+            alternativePhrases: undefined as unknown as string[],
+          },
+        ]}
+        {...sharedProps}
+        onEdit={onEdit}
+      />,
+    );
+
+    expect(screen.getByText('Updated answer')).toBeInTheDocument();
+    expect(screen.queryByText('Alternative phrases:')).not.toBeInTheDocument();
+  });
 });

@@ -10,7 +10,7 @@ import type { KnowledgeEntry, Category } from './types';
 interface ApprovedQAProps {
   entries: KnowledgeEntry[];
   categories: Category[];
-  onEdit: (id: string, entry: Partial<KnowledgeEntry>) => void;
+  onEdit: (id: string, entry: Partial<KnowledgeEntry>) => Promise<void>;
   onDisable: (id: string) => void;
 }
 
@@ -22,9 +22,12 @@ export function ApprovedQA({
 }: ApprovedQAProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<KnowledgeEntry>>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const handleEditStart = (entry: KnowledgeEntry) => {
     setEditingId(entry.id);
+    setEditError(null);
     setEditForm({
       question: entry.question,
       answer: entry.answer,
@@ -33,9 +36,28 @@ export function ApprovedQA({
     });
   };
 
-  const handleEditSave = () => {
-    if (editingId && editForm.question && editForm.answer && editForm.category) {
-      onEdit(editingId, editForm);
+  const handleEditSave = async () => {
+    if (
+      editingId &&
+      editForm.question &&
+      editForm.answer &&
+      editForm.category &&
+      !isSavingEdit
+    ) {
+      setIsSavingEdit(true);
+      setEditError(null);
+      try {
+        await onEdit(editingId, editForm);
+      } catch (error) {
+        setEditError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Failed to save the answer. Please try again.',
+        );
+        return;
+      } finally {
+        setIsSavingEdit(false);
+      }
       setEditingId(null);
       setEditForm({});
     }
@@ -44,6 +66,7 @@ export function ApprovedQA({
   const handleEditCancel = () => {
     setEditingId(null);
     setEditForm({});
+    setEditError(null);
   };
 
   const getLanguageBadge = (language: string) => {
@@ -96,6 +119,7 @@ export function ApprovedQA({
                     <textarea
                       value={editForm.question}
                       onChange={(e) => setEditForm({ ...editForm, question: e.target.value })}
+                      disabled={isSavingEdit}
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                       rows={2}
                     />
@@ -107,6 +131,7 @@ export function ApprovedQA({
                     <textarea
                       value={editForm.answer}
                       onChange={(e) => setEditForm({ ...editForm, answer: e.target.value })}
+                      disabled={isSavingEdit}
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                       rows={3}
                     />
@@ -118,6 +143,7 @@ export function ApprovedQA({
                     <select
                       value={editForm.category}
                       onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                      disabled={isSavingEdit}
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                     >
                       {categories.map((cat) => (
@@ -133,6 +159,11 @@ export function ApprovedQA({
                         )}
                     </select>
                   </div>
+                  {editError && (
+                    <p role="alert" className="text-xs font-semibold text-red-700">
+                      {editError}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>
@@ -149,12 +180,15 @@ export function ApprovedQA({
                     <span>•</span>
                     <span>Updated {new Date(entry.updatedAt).toLocaleDateString()}</span>
                   </div>
-                  {entry.alternativePhrases.length > 0 && (
-                    <div className="mt-2">
-                      <p className="text-xs font-semibold text-slate-500">Alternative phrases:</p>
-                      <p className="text-xs text-slate-600">{entry.alternativePhrases.join(', ')}</p>
-                    </div>
-                  )}
+                  {Array.isArray(entry.alternativePhrases) &&
+                    entry.alternativePhrases.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs font-semibold text-slate-500">Alternative phrases:</p>
+                        <p className="text-xs text-slate-600">
+                          {entry.alternativePhrases.join(', ')}
+                        </p>
+                      </div>
+                    )}
                 </>
               )}
             </div>
@@ -163,14 +197,16 @@ export function ApprovedQA({
               {editingId === entry.id ? (
                 <>
                   <button
-                    onClick={handleEditSave}
-                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800"
+                    onClick={() => void handleEditSave()}
+                    disabled={isSavingEdit}
+                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Save
+                    {isSavingEdit ? 'Saving...' : 'Save'}
                   </button>
                   <button
                     onClick={handleEditCancel}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    disabled={isSavingEdit}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Cancel
                   </button>
