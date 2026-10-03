@@ -20,10 +20,28 @@ export class HybridKnowledgeSearchTool {
 
   async search(input: KnowledgeSearchInput): Promise<KnowledgeSearchResult[]> {
     const limit = input.limit ?? this.env.KNOWLEDGE_VECTOR_MAX_RESULTS;
-    const [vectorResults, textResults] = await Promise.all([
+    const [vectorOutcome, textOutcome] = await Promise.allSettled([
       this.vectorSearch.search({ ...input, limit }),
       this.textSearch.search({ ...input, limit }),
     ]);
+
+    if (textOutcome.status === 'rejected') {
+      throw textOutcome.reason;
+    }
+
+    if (vectorOutcome.status === 'rejected') {
+      if (!this.env.KNOWLEDGE_VECTOR_USE_HYBRID_FALLBACK) {
+        throw vectorOutcome.reason;
+      }
+
+      return textOutcome.value.slice(0, limit).map((result) => ({
+        ...result,
+        searchProvider: 'hybrid',
+      }));
+    }
+
+    const vectorResults = vectorOutcome.value;
+    const textResults = textOutcome.value;
 
     const merged = new Map<string, KnowledgeSearchResult>();
 

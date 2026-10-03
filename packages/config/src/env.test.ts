@@ -23,6 +23,39 @@ describe('parseApiEnv', () => {
     expect(env.DATABASE_URL).toContain('postgresql://');
     expect(env.QUEUE_MODE).toBe('inline');
     expect(env.JOB_WORKER_ENABLED).toBe(false);
+    expect(env.EMBEDDING_DIMENSIONS).toBe(1024);
+  });
+
+  it('requires a Gemini API key when Gemini embeddings are enabled', () => {
+    expect(() =>
+      parseApiEnv({
+        ...validApiEnv,
+        EMBEDDING_PROVIDER: 'gemini',
+        EMBEDDING_MODEL: 'gemini-embedding-001',
+      }),
+    ).toThrow('GEMINI_API_KEY is required');
+  });
+
+  it('accepts a configured Gemini embedding provider', () => {
+    const env = parseApiEnv({
+      ...validApiEnv,
+      EMBEDDING_PROVIDER: 'gemini',
+      EMBEDDING_MODEL: 'gemini-embedding-001',
+      EMBEDDING_DIMENSIONS: '1024',
+      GEMINI_API_KEY: 'test-gemini-api-key',
+    });
+
+    expect(env.EMBEDDING_PROVIDER).toBe('gemini');
+    expect(env.EMBEDDING_DIMENSIONS).toBe(1024);
+  });
+
+  it('rejects an embedding dimension that cannot fit the database schema', () => {
+    expect(() =>
+      parseApiEnv({
+        ...validApiEnv,
+        EMBEDDING_DIMENSIONS: '768',
+      }),
+    ).toThrow('EMBEDDING_DIMENSIONS must be 1024');
   });
 
   it('accepts a secure Supabase URL for QA', () => {

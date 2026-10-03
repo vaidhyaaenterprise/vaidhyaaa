@@ -48,7 +48,7 @@ describe('knowledge mutation response normalization', () => {
         embeddingDimensions: null,
         embeddingStatus: 'failed',
         embeddingGeneratedAt: null,
-        embeddingError: 'expected 768 dimensions, not 1024',
+        embeddingError: 'expected 1024 dimensions, received 768',
         embeddingSourceHash: null,
         lastEmbeddingJobId: null,
         approvedByUserId: null,

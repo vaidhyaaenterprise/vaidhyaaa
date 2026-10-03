@@ -98,9 +98,7 @@ export class KnowledgeEmbeddingService {
           payload: {
             clinic_id: input.clinicId,
             knowledge_entry_id: knowledgeEntryId,
-            ...(input.requestedByUserId
-              ? { requested_by_user_id: input.requestedByUserId }
-              : {}),
+            ...(input.requestedByUserId ? { requested_by_user_id: input.requestedByUserId } : {}),
             reason,
           },
         })),
@@ -165,7 +163,8 @@ export class KnowledgeEmbeddingService {
     if (
       row.embeddingStatus === 'generated' &&
       row.embeddingSourceHash === sourceHash &&
-      row.embeddingModel === this.env.EMBEDDING_MODEL
+      row.embeddingModel === this.env.EMBEDDING_MODEL &&
+      row.embeddingDimensions === this.env.EMBEDDING_DIMENSIONS
     ) {
       return { status: 'skipped' as const, sourceHash };
     }
@@ -195,10 +194,16 @@ export class KnowledgeEmbeddingService {
       ]);
 
       for (const result of [embedding, questionEmbedding, answerEmbedding]) {
-        if (result.dimensions !== this.env.EMBEDDING_DIMENSIONS) {
+        if (
+          result.dimensions !== this.env.EMBEDDING_DIMENSIONS ||
+          result.vector.length !== this.env.EMBEDDING_DIMENSIONS
+        ) {
           throw new Error(
-            `embedding_dimension_mismatch expected=${this.env.EMBEDDING_DIMENSIONS} actual=${result.dimensions}`,
+            `embedding_dimension_mismatch expected=${this.env.EMBEDDING_DIMENSIONS} reported=${result.dimensions} actual=${result.vector.length}`,
           );
+        }
+        if (!result.vector.every(Number.isFinite)) {
+          throw new Error('embedding_invalid_vector contains_non_finite_values');
         }
       }
 

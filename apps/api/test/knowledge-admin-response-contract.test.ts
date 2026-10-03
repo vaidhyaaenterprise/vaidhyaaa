@@ -49,7 +49,7 @@ describe('KnowledgeAdminService response contract', () => {
     const refreshed = knowledgeRow({
       answer: 'Yes, you can share photos before the visit.',
       embeddingStatus: 'failed',
-      embeddingError: 'expected 768 dimensions, not 1024',
+      embeddingError: 'expected 1024 dimensions, received 768',
     });
     const findKnowledgeEntry = vi
       .fn()
@@ -84,7 +84,7 @@ describe('KnowledgeAdminService response contract', () => {
       source_notes: 'Do not give diagnosis advice.',
       qa_approved: true,
       embedding_status: 'failed',
-      embedding_error: 'expected 768 dimensions, not 1024',
+      embedding_error: 'expected 1024 dimensions, received 768',
     });
     expect(result).not.toHaveProperty('alternativePhrasesJson');
     expect(result).not.toHaveProperty('clinicId');

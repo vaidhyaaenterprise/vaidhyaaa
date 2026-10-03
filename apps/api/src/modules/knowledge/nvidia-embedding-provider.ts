@@ -50,14 +50,20 @@ export class NvidiaEmbeddingProvider implements EmbeddingProvider {
       throw new Error('NVIDIA embedding response missing data[0].embedding');
     }
 
-    if (values.length <= this.dimensions) {
-      return { vector: values, model: this.model, dimensions: this.dimensions };
+    if (!values.every(Number.isFinite)) {
+      throw new Error('NVIDIA embedding response contains non-finite values');
     }
 
-    const sliced = values.slice(0, this.dimensions);
-    const norm = Math.sqrt(sliced.reduce((sum, v) => sum + v * v, 0));
-    const vector = norm > 0 ? sliced.map((v) => v / norm) : sliced;
+    if (values.length < this.dimensions) {
+      throw new Error(
+        `NVIDIA embedding dimension mismatch: expected at least ${this.dimensions}, received ${values.length}`,
+      );
+    }
 
-    return { vector, model: this.model, dimensions: this.dimensions };
+    const selected = values.slice(0, this.dimensions);
+    const norm = Math.sqrt(selected.reduce((sum, value) => sum + value * value, 0));
+    const vector = norm > 0 ? selected.map((value) => value / norm) : selected;
+
+    return { vector, model: this.model, dimensions: vector.length };
   }
 }
