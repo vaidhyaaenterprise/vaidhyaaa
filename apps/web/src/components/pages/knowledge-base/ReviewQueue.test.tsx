@@ -42,6 +42,7 @@ describe('ReviewQueue bulk approval', () => {
       />,
     );
 
+    expect(screen.queryByText(/^english$/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     fireEvent.click(screen.getByRole('button', { name: 'Approve selected (2)' }));
 

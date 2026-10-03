@@ -29,12 +29,7 @@ function deferred<T>() {
 
 function renderApproved(onEdit: (id: string, update: Partial<KnowledgeEntry>) => Promise<void>) {
   render(
-    <ApprovedQA
-      entries={[entry]}
-      categories={categories}
-      onEdit={onEdit}
-      onDisable={vi.fn()}
-    />,
+    <ApprovedQA entries={[entry]} categories={categories} onEdit={onEdit} onDisable={vi.fn()} />,
   );
 }
 
@@ -46,6 +41,7 @@ describe('ApprovedQA edit save', () => {
     const onEdit = vi.fn(() => save.promise);
     renderApproved(onEdit);
 
+    expect(screen.queryByText(/^english$/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     fireEvent.change(screen.getAllByRole('textbox')[1]!, {
       target: { value: 'Yes, you can.' },

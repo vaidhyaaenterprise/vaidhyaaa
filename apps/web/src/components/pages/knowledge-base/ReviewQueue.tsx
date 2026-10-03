@@ -113,13 +113,7 @@ export function ReviewQueue({
   };
 
   const handleEditSave = async () => {
-    if (
-      editingId &&
-      editForm.question &&
-      editForm.answer &&
-      editForm.category &&
-      !isSavingEdit
-    ) {
+    if (editingId && editForm.question && editForm.answer && editForm.category && !isSavingEdit) {
       setIsSavingEdit(true);
       setEditError(null);
       try {
@@ -145,14 +139,6 @@ export function ReviewQueue({
     setEditError(null);
   };
 
-  const getLanguageBadge = (language: string) => {
-    return (
-      <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-        {language}
-      </span>
-    );
-  };
-
   // Template/import rows are created before the clinic supplies an answer. They
   // belong in the editing workflow, not the approval queue. Keep this filter at
   // the rendering boundary as a defensive guard even if the API returns them.
@@ -169,8 +155,7 @@ export function ReviewQueue({
 
   const selectableEntries = visibleEntries.filter((entry) => isEntryApprovable(entry));
   const allSelectableEntriesSelected =
-    selectableEntries.length > 0 &&
-    selectableEntries.every((entry) => selectedIds.has(entry.id));
+    selectableEntries.length > 0 && selectableEntries.every((entry) => selectedIds.has(entry.id));
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -203,9 +188,7 @@ export function ReviewQueue({
           <div
             key={entry.id}
             className={`rounded-xl border p-4 ${
-              editingId === entry.id
-                ? 'border-teal-300 bg-teal-50'
-                : 'border-slate-200 bg-slate-50'
+              editingId === entry.id ? 'border-teal-300 bg-teal-50' : 'border-slate-200 bg-slate-50'
             }`}
           >
             <div className="mb-3 flex items-start gap-3">
@@ -274,9 +257,8 @@ export function ReviewQueue({
                   </div>
                 ) : (
                   <>
-                    <div className="mb-2 flex items-center gap-2 flex-wrap">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
                       <h4 className="text-sm font-bold text-slate-900">{entry.question}</h4>
-                      {getLanguageBadge(entry.language)}
                     </div>
                     <p className="text-sm text-slate-600">{entry.answer}</p>
                     {entry.applicable === false && (
