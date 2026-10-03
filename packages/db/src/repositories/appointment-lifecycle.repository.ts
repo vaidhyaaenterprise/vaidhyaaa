@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, gt, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, inArray, or, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -19,6 +19,18 @@ function clinicLocalNow(clinicId: string) {
     FROM clinics c
     WHERE c.id = ${clinicId}
   )`;
+}
+
+function clinicActivityRetentionStartDate(clinicId: string) {
+  return sql`((${clinicLocalNow(clinicId)})::date - 3)`;
+}
+
+function clinicDateOfInstant(value: typeof appointmentEvents.createdAt, clinicId: string) {
+  return sql`(${value} AT TIME ZONE (
+    SELECT c.timezone
+    FROM clinics c
+    WHERE c.id = ${clinicId}
+  ))::date`;
 }
 
 const appointmentWithConflictDetails = {
@@ -55,11 +67,7 @@ export class AppointmentLifecycleRepository {
       .limit(1);
   }
 
-  findAppointmentByIdForUpdate(
-    clinicId: string,
-    appointmentId: string,
-    db: Database = this.db,
-  ) {
+  findAppointmentByIdForUpdate(clinicId: string, appointmentId: string, db: Database = this.db) {
     return db
       .select()
       .from(appointmentRequests)
@@ -183,6 +191,8 @@ export class AppointmentLifecycleRepository {
   }
 
   listClinicAdminAppointmentActivities(clinicId: string) {
+    const retentionStartDate = clinicActivityRetentionStartDate(clinicId);
+
     return this.db
       .select({
         id: appointmentEvents.id,
@@ -231,6 +241,16 @@ export class AppointmentLifecycleRepository {
             'appointment.rescheduled',
             'appointment.cancelled',
           ]),
+          or(
+            and(
+              eq(appointmentEvents.eventType, 'appointment.cancelled'),
+              sql`${clinicDateOfInstant(appointmentEvents.createdAt, clinicId)} >= ${retentionStartDate}`,
+            ),
+            and(
+              eq(appointmentEvents.eventType, 'appointment.rescheduled'),
+              sql`${appointmentRequests.appointmentStart}::date >= ${retentionStartDate}`,
+            ),
+          ),
         ),
       )
       .orderBy(desc(appointmentEvents.createdAt))
@@ -342,10 +362,7 @@ export class AppointmentLifecycleRepository {
       .where(and(...filters));
   }
 
-  insertAppointmentEvent(
-    values: typeof appointmentEvents.$inferInsert,
-    db: Database = this.db,
-  ) {
+  insertAppointmentEvent(values: typeof appointmentEvents.$inferInsert, db: Database = this.db) {
     return db.insert(appointmentEvents).values(values).returning();
   }
 

@@ -42,6 +42,7 @@ describe('groupHomeAppointments', () => {
         appointment('today-pending', '2026-09-19', '09:30', 'pending_confirmation'),
         appointment('today-confirmed', '2026-09-19', '10:00', 'confirmed'),
         appointment('past-pending', '2026-09-18', '11:00', 'pending_confirmation'),
+        appointment('expired-pending', '2026-09-15', '11:00', 'pending_confirmation'),
         appointment('past-confirmed', '2026-09-18', '12:00', 'confirmed'),
         appointment('future-pending', '2026-09-20', '09:00', 'pending_confirmation'),
         appointment('today-visited', '2026-09-19', '08:00', 'visited'),

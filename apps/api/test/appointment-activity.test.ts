@@ -83,8 +83,8 @@ describe('appointment activity', () => {
           appointment_start: '2026-09-24 10:00:00',
           appointment_end: '2026-09-24 10:30:00',
         },
-        appointmentStart: '2026-09-24 10:00:00',
-        appointmentEnd: '2026-09-24 10:30:00',
+        appointmentStart: '2026-09-27 12:00:00',
+        appointmentEnd: '2026-09-27 12:30:00',
       },
       {
         id: 'event-cancel',
@@ -124,8 +124,8 @@ describe('appointment activity', () => {
         occurred_at: '2026-09-23T08:00:00.000Z',
         previous_appointment_start: '2026-09-23 09:00:00',
         previous_appointment_end: '2026-09-23 09:30:00',
-        appointment_start: '2026-09-24 10:00:00',
-        appointment_end: '2026-09-24 10:30:00',
+        appointment_start: '2026-09-27 12:00:00',
+        appointment_end: '2026-09-27 12:30:00',
       },
       {
         id: 'event-cancel',

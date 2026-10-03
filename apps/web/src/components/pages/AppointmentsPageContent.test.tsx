@@ -119,13 +119,7 @@ vi.mock('@/components/pages/appointments/RescheduleCancelRequests', () => ({
 }));
 
 vi.mock('@/components/pages/appointments/ManualAppointmentModal', () => ({
-  ManualAppointmentModal: ({
-    isOpen,
-    onClose,
-  }: {
-    isOpen: boolean;
-    onClose: () => void;
-  }) =>
+  ManualAppointmentModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
     isOpen ? (
       <div role="dialog" aria-label="New manual appointment">
         Manual appointment modal
@@ -280,12 +274,7 @@ describe('AppointmentsPageContent', () => {
     mockedFetchAppointments.mockResolvedValue([
       appointmentRow('past', 'Past confirmed patient', shiftDate(clinicToday, -1), 'confirmed'),
       appointmentRow('today', 'Today confirmed patient', clinicToday, 'confirmed'),
-      appointmentRow(
-        'future',
-        'Future confirmed patient',
-        shiftDate(clinicToday, 1),
-        'confirmed',
-      ),
+      appointmentRow('future', 'Future confirmed patient', shiftDate(clinicToday, 1), 'confirmed'),
     ]);
 
     render(<AppointmentsPageContent />);
@@ -375,13 +364,7 @@ describe('AppointmentsPageContent', () => {
         appointmentRow('confirmed-1', 'Confirmed patient', clinicToday, 'confirmed'),
       ])
       .mockResolvedValueOnce([
-        appointmentRow(
-          'confirmed-1',
-          'Confirmed patient',
-          clinicToday,
-          'confirmed',
-          '10:00:00',
-        ),
+        appointmentRow('confirmed-1', 'Confirmed patient', clinicToday, 'confirmed', '10:00:00'),
       ]);
     mockedFetchAvailableAppointmentSlots.mockResolvedValue([
       {
@@ -516,6 +499,49 @@ describe('AppointmentsPageContent', () => {
     expect(within(activityBlock).getByText('Rescheduled activity patient')).toBeInTheDocument();
   });
 
+  it('shows completed activity only within its three-day retention window', async () => {
+    const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
+    mockedFetchAppointments.mockResolvedValue([]);
+    mockedFetchAppointmentActivity.mockResolvedValue([
+      appointmentActivityRow(
+        'cancel-retained',
+        'Retained cancellation',
+        'cancel',
+        shiftDate(clinicToday, -5),
+        shiftDate(clinicToday, -3),
+      ),
+      appointmentActivityRow(
+        'cancel-expired',
+        'Expired cancellation',
+        'cancel',
+        shiftDate(clinicToday, -5),
+        shiftDate(clinicToday, -4),
+      ),
+      appointmentActivityRow(
+        'reschedule-retained',
+        'Retained reschedule',
+        'reschedule',
+        shiftDate(clinicToday, -5),
+        shiftDate(clinicToday, -3),
+      ),
+      appointmentActivityRow(
+        'reschedule-expired',
+        'Expired reschedule',
+        'reschedule',
+        shiftDate(clinicToday, -5),
+        shiftDate(clinicToday, -4),
+      ),
+    ]);
+
+    render(<AppointmentsPageContent />);
+
+    const activityBlock = await screen.findByRole('region', { name: 'Appointment requests' });
+    expect(within(activityBlock).getByText('Retained cancellation')).toBeInTheDocument();
+    expect(within(activityBlock).getByText('Retained reschedule')).toBeInTheDocument();
+    expect(within(activityBlock).queryByText('Expired cancellation')).not.toBeInTheDocument();
+    expect(within(activityBlock).queryByText('Expired reschedule')).not.toBeInTheDocument();
+  });
+
   it('loads only visible appointment statuses and defers manual-booking reference data', async () => {
     mockedFetchAppointments.mockResolvedValue([]);
 
@@ -592,10 +618,7 @@ describe('AppointmentsPageContent', () => {
     ).toBeInTheDocument();
     expect(mockedFetchDoctors).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
     expect(mockedFetchServices).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
-    expect(mockedFetchDoctorServices).toHaveBeenCalledWith(
-      CLINIC_ID,
-      expect.any(AbortSignal),
-    );
+    expect(mockedFetchDoctorServices).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
 
     fireEvent.click(screen.getByRole('button', { name: 'Close manual appointment' }));
     fireEvent.click(screen.getByRole('button', { name: 'New appointment' }));
@@ -619,7 +642,9 @@ describe('AppointmentsPageContent', () => {
     expect(alert).toHaveTextContent(
       'Unable to load appointment booking options. Please try again.',
     );
-    expect(screen.queryByRole('dialog', { name: 'New manual appointment' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('dialog', { name: 'New manual appointment' }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
 

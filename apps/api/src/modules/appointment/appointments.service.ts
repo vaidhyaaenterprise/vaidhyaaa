@@ -217,9 +217,8 @@ export class AppointmentsService {
   }
 
   async listAppointmentActivities(clinicId: string): Promise<AppointmentActivityItem[]> {
-    const rows = await this.repos.appointmentLifecycle.listClinicAdminAppointmentActivities(
-      clinicId,
-    );
+    const rows =
+      await this.repos.appointmentLifecycle.listClinicAdminAppointmentActivities(clinicId);
 
     return rows.map((row) => ({
       id: row.id,
@@ -233,15 +232,10 @@ export class AppointmentsService {
       reason_for_visit: row.reasonForVisit,
       action_type: row.eventType === 'appointment.rescheduled' ? 'reschedule' : 'cancel',
       occurred_at: row.occurredAt.toISOString(),
-      previous_appointment_start: readJsonString(
-        row.oldValuesJson,
-        'appointment_start',
-      ),
+      previous_appointment_start: readJsonString(row.oldValuesJson, 'appointment_start'),
       previous_appointment_end: readJsonString(row.oldValuesJson, 'appointment_end'),
-      appointment_start:
-        readJsonString(row.newValuesJson, 'appointment_start') ?? row.appointmentStart,
-      appointment_end:
-        readJsonString(row.newValuesJson, 'appointment_end') ?? row.appointmentEnd,
+      appointment_start: row.appointmentStart,
+      appointment_end: row.appointmentEnd,
     }));
   }
 

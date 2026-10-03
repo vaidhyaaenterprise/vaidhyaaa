@@ -37,6 +37,7 @@ import {
   filterCurrentAndFutureConfirmedAppointments,
   filterCurrentAndFuturePendingAppointments,
   filterMissedPendingAppointments,
+  filterRetainedAppointmentActivities,
 } from '@/lib/appointment-filters';
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
@@ -56,11 +57,7 @@ function filterByDate(appointments: Appointment[], date: string) {
   return appointments.filter((apt) => apt.appointmentDate === date);
 }
 
-const VISIBLE_APPOINTMENT_STATUSES = [
-  'pending_confirmation',
-  'confirmed',
-  'visited',
-] as const;
+const VISIBLE_APPOINTMENT_STATUSES = ['pending_confirmation', 'confirmed', 'visited'] as const;
 
 type PageDataSelection = {
   showLoading?: boolean;
@@ -428,6 +425,17 @@ export function AppointmentsPageContent() {
   const visibleMissed = filterByDate(missedPending, selectedDate);
   const visibleConfirmed = filterByDate(currentAndFutureConfirmed, selectedDate);
   const visibleVisited = filterByDate(visitedAppointments, selectedDate);
+  const visibleAppointmentActivities = useMemo(
+    () =>
+      clinicDate && clinicProfile?.timezone
+        ? filterRetainedAppointmentActivities(
+            appointmentActivities,
+            clinicDate,
+            clinicProfile.timezone,
+          )
+        : [],
+    [appointmentActivities, clinicDate, clinicProfile?.timezone],
+  );
 
   const pendingEmptyMessage =
     clinicProfileStatus === 'error' || (clinicProfileStatus === 'ready' && !clinicDate)
@@ -460,10 +468,7 @@ export function AppointmentsPageContent() {
       throw new Error('Appointment could not be found. Reload the page and try again.');
     }
 
-    if (
-      newDate === appointment.appointmentDate &&
-      newTime === appointment.appointmentTime
-    ) {
+    if (newDate === appointment.appointmentDate && newTime === appointment.appointmentTime) {
       return;
     }
 
@@ -487,9 +492,7 @@ export function AppointmentsPageContent() {
       return;
     }
     const targetSlot = slots.find((slot) => {
-      const match = slot.appointment_start
-        .trim()
-        .match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+      const match = slot.appointment_start.trim().match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
       return match?.[1] === newDate && match[2] === newTime && slot.available_count > 0;
     });
 
@@ -557,11 +560,7 @@ export function AppointmentsPageContent() {
     }
 
     let newSlotId = request.requestedNewSlotId ?? undefined;
-    if (
-      !newSlotId ||
-      newDate !== request.requestedDate ||
-      newTime !== request.requestedTime
-    ) {
+    if (!newSlotId || newDate !== request.requestedDate || newTime !== request.requestedTime) {
       interactionReadAbortRef.current?.abort();
       const controller = new AbortController();
       interactionReadAbortRef.current = controller;
@@ -582,9 +581,7 @@ export function AppointmentsPageContent() {
         return;
       }
       newSlotId = slots.find((slot) => {
-        const match = slot.appointment_start
-          .trim()
-          .match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+        const match = slot.appointment_start.trim().match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
         return match?.[1] === newDate && match[2] === newTime && slot.available_count > 0;
       })?.slot_id;
     }
@@ -707,9 +704,7 @@ export function AppointmentsPageContent() {
               disabled={manualReferenceStatus === 'loading'}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-wait disabled:opacity-60"
             >
-              {manualReferenceStatus === 'loading'
-                ? 'Loading booking options…'
-                : 'New appointment'}
+              {manualReferenceStatus === 'loading' ? 'Loading booking options…' : 'New appointment'}
             </button>
             {manualReferenceError ? (
               <div
@@ -764,7 +759,7 @@ export function AppointmentsPageContent() {
         {isAdmin && (
           <RescheduleCancelRequests
             requests={actionRequests}
-            activities={appointmentActivities}
+            activities={visibleAppointmentActivities}
             onApproveReschedule={handleApproveReschedule}
             onRejectRequest={handleRejectRequest}
             onCancelAppointment={handleCancelAppointment}

@@ -54,4 +54,16 @@ describe('appointment conflict detail queries', () => {
     expect(query.params).toContain('2026-09-21');
     expect(query.params).toContain(DOCTOR_ID);
   });
+
+  it('limits completed activity by cancellation date and the latest rescheduled appointment date', () => {
+    const query = repository.listClinicAdminAppointmentActivities(CLINIC_ID).toSQL();
+    const normalizedSql = query.sql.toLowerCase();
+
+    expect(normalizedSql).toContain('"appointment_events"."created_at" at time zone');
+    expect(normalizedSql).toContain('"appointment_requests"."appointment_start"::date');
+    expect(normalizedSql).toContain('::date - 3');
+    expect(query.params).toContain('appointment.cancelled');
+    expect(query.params).toContain('appointment.rescheduled');
+    expect(query.params).toContain(CLINIC_ID);
+  });
 });
