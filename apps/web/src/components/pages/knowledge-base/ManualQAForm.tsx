@@ -1,5 +1,6 @@
 'use client';
 
+import { PREDEFINED_CLINIC_SERVICES } from '@vaidya/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -7,7 +8,6 @@ import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import {
   createManualKnowledgeEntry,
   fetchManualKnowledgeTemplate,
-  importManualKnowledgeTemplate,
   patchKnowledgeEntry,
   type CreateManualKnowledgeEntryPayload,
   type ManualTemplateApiResponse,
@@ -27,7 +27,6 @@ type TemplateDraftQuestion = {
   templateKey: string | undefined;
   sectionKey: string;
   status: string;
-  sourceNotes: string;
   serviceName: string;
   serviceNameRequired: boolean;
   applicable: boolean;
@@ -92,7 +91,6 @@ function mapApiQuestion(row: ManualTemplateQuestionApiRow): TemplateDraftQuestio
     templateKey: row.template_key ?? undefined,
     sectionKey: row.section_key ?? 'custom',
     status: row.status,
-    sourceNotes: row.source_notes ?? '',
     serviceName: row.service_name ?? '',
     serviceNameRequired: row.service_name_required,
     applicable: row.applicable,
@@ -189,7 +187,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const [activeSectionKey, setActiveSectionKey] = useState<string | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [savingQuestionId, setSavingQuestionId] = useState<string | null>(null);
-  const [importingTemplate, setImportingTemplate] = useState(false);
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const openRef = useRef(isOpen);
   openRef.current = isOpen;
@@ -226,6 +223,11 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const activeSection = useMemo(
     () => sections.find((section) => section.key === activeSectionKey) ?? null,
     [sections, activeSectionKey],
+  );
+
+  const approvedQuestionsInActiveSection = useMemo(
+    () => activeSection?.questions.filter((question) => question.uiStatus === 'approved') ?? [],
+    [activeSection],
   );
 
   const applyQuestionPatch = useCallback(
@@ -351,13 +353,11 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       activeLoadControllerRef.current?.abort();
       activeLoadControllerRef.current = null;
       loadSequenceRef.current += 1;
-      setImportingTemplate(false);
       setSavingQuestionId(null);
       return;
     }
     openRef.current = true;
     const formContextSequence = ++formContextSequenceRef.current;
-    setImportingTemplate(false);
     setSavingQuestionId(null);
     setBannerMessage(null);
     void loadTemplate();
@@ -402,42 +402,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     setSelectedQuestionId(activeSection.questions[0]?.id ?? null);
   }, [activeSection, selectedQuestionId]);
 
-  const handleImportTemplate = async () => {
-    if (!clinicId) {
-      return;
-    }
-    const targetClinicId = clinicId;
-    const contextSequence = formContextSequenceRef.current;
-
-    setImportingTemplate(true);
-    setBannerMessage(null);
-    try {
-      const result = await importManualKnowledgeTemplate();
-      if (!isActiveFormContext(targetClinicId, contextSequence)) {
-        return;
-      }
-      setBannerMessage(
-        `Template import completed. Added ${result.imported} new rows, ${result.existing} already existed.`,
-      );
-      await loadTemplate();
-      if (isActiveFormContext(targetClinicId, contextSequence)) {
-        await onSaved?.();
-      }
-    } catch (error) {
-      if (isActiveFormContext(targetClinicId, contextSequence)) {
-        setLoadError(
-          error instanceof ApiRequestError
-            ? error.apiError.message
-            : 'Failed to import template questions.',
-        );
-      }
-    } finally {
-      if (isActiveFormContext(targetClinicId, contextSequence)) {
-        setImportingTemplate(false);
-      }
-    }
-  };
-
   const handleAddCustomQuestion = () => {
     const newQuestionId = `custom:new:${Date.now().toString()}`;
 
@@ -451,7 +415,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
         templateKey: undefined,
         sectionKey: 'custom',
         status: 'needs_update',
-        sourceNotes: '',
         serviceName: '',
         serviceNameRequired: false,
         applicable: true,
@@ -508,6 +471,22 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     );
   };
 
+  const handleApplicableChange = (sectionKey: string, questionId: string, applicable: boolean) => {
+    applyQuestionPatch(sectionKey, questionId, (current) => ({
+      ...current,
+      applicable,
+      qaApproved: false,
+      status: applicable
+        ? current.answer.trim().length > 0
+          ? 'pending_review'
+          : 'needs_update'
+        : 'disabled',
+      uiStatus: applicable ? 'draft' : 'inactive',
+      errorMessage: null,
+      duplicateWarning: false,
+    }));
+  };
+
   const saveQuestion = async (sectionKey: string, questionId: string, mode: SaveMode) => {
     if (!clinicId) {
       return;
@@ -535,7 +514,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     const trimmedQuestion = question.question.trim();
     const trimmedAnswer = question.answer.trim();
     const trimmedCategory = question.category.trim() || 'general';
-    const trimmedSourceNotes = question.sourceNotes.trim();
     const trimmedServiceName = question.serviceName.trim();
 
     setSavingQuestionId(questionId);
@@ -556,7 +534,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
         qa_approved: targetState.qaApproved,
         status: targetState.status,
         ...(question.templateKey ? { template_key: question.templateKey } : {}),
-        ...(trimmedSourceNotes.length > 0 ? { source_notes: trimmedSourceNotes } : {}),
         ...(trimmedServiceName.length > 0 ? { service_name: trimmedServiceName } : {}),
         ...(question.sourceFile ? { source_file: question.sourceFile } : {}),
         ...(question.sourcePage !== undefined ? { source_page: question.sourcePage } : {}),
@@ -595,7 +572,14 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
         ),
       );
 
-      setBannerMessage('Question saved successfully.');
+      setSelectedQuestionId(saved.id);
+      setBannerMessage(
+        mode === 'approve'
+          ? 'Question saved, activated, and approved successfully.'
+          : targetState.applicable
+            ? 'Active draft saved successfully.'
+            : 'Question saved as inactive.',
+      );
       await onSaved?.();
     } catch (error) {
       if (!isActiveFormContext(targetClinicId, contextSequence)) {
@@ -636,14 +620,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
             </div>
             <div className="flex max-w-[640px] flex-col items-end gap-2">
               <div className="flex flex-wrap justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={handleImportTemplate}
-                  disabled={importingTemplate || loading}
-                  className="rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {importingTemplate ? 'Importing...' : 'Import Template Rows'}
-                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -779,12 +755,47 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                       )}
                     </div>
 
+                    <section
+                      aria-label={`Approved questions in ${activeSection.title}`}
+                      className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <h5 className="text-sm font-bold text-emerald-900">Approved questions</h5>
+                        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                          {approvedQuestionsInActiveSection.length}
+                        </span>
+                      </div>
+                      {approvedQuestionsInActiveSection.length === 0 ? (
+                        <p className="mt-2 text-xs text-emerald-800/75">
+                          No approved questions in this section yet.
+                        </p>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {approvedQuestionsInActiveSection.map((question) => (
+                            <button
+                              key={question.id}
+                              type="button"
+                              onClick={() => setSelectedQuestionId(question.id)}
+                              className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-left text-xs font-semibold text-emerald-900 hover:border-emerald-400"
+                            >
+                              {question.question}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
                     <div className="space-y-4">
                       {activeSection.questions.map((question, index) => {
                         const statusConfig = STATUS_CONFIG[question.uiStatus];
                         const isSelected = selectedQuestionId === question.id;
                         const showInlineRemove =
                           !question.exists && question.sectionKey === 'custom';
+                        const hasLegacyServiceName =
+                          question.serviceName.length > 0 &&
+                          !PREDEFINED_CLINIC_SERVICES.some(
+                            (service) => service.service_name === question.serviceName,
+                          );
 
                         return (
                           <article
@@ -806,11 +817,32 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                   {question.exists ? 'Saved row' : 'New row'}
                                 </p>
                               </div>
-                              <span
-                                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusConfig.classes}`}
-                              >
-                                {statusConfig.label}
-                              </span>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusConfig.classes}`}
+                                >
+                                  {statusConfig.label}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-pressed={question.applicable}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleApplicableChange(
+                                      activeSection.key,
+                                      question.id,
+                                      !question.applicable,
+                                    );
+                                  }}
+                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition ${
+                                    question.applicable
+                                      ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                                      : 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
+                                  }`}
+                                >
+                                  {question.applicable ? 'Make inactive' : 'Make active'}
+                                </button>
+                              </div>
                             </div>
 
                             <div className="space-y-3">
@@ -895,11 +927,14 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 </div>
 
                                 <div>
-                                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                  <label
+                                    htmlFor={`service-name-${question.id}`}
+                                    className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                                  >
                                     Service Name {question.serviceNameRequired ? '*' : '(optional)'}
                                   </label>
-                                  <input
-                                    type="text"
+                                  <select
+                                    id={`service-name-${question.id}`}
                                     value={question.serviceName}
                                     onChange={(event) =>
                                       applyQuestionPatch(
@@ -913,37 +948,29 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                         }),
                                       )
                                     }
-                                    placeholder={
-                                      question.serviceNameRequired
-                                        ? 'Example: Dental cleaning'
-                                        : 'Optional'
-                                    }
+                                    required={question.serviceNameRequired}
                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
-                                  />
+                                  >
+                                    <option value="">Select service</option>
+                                    {hasLegacyServiceName && (
+                                      <option value={question.serviceName}>
+                                        {question.serviceName} (Current service)
+                                      </option>
+                                    )}
+                                    {PREDEFINED_CLINIC_SERVICES.map((service) => (
+                                      <option
+                                        key={service.service_key}
+                                        value={service.service_name}
+                                      >
+                                        {service.service_name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <p className="mt-1 text-[11px] text-slate-500">
+                                    Use this only when the answer belongs to one specific clinic
+                                    service. It is required only for service-specific template rows.
+                                  </p>
                                 </div>
-                              </div>
-
-                              <div>
-                                <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                                  Source Notes
-                                </label>
-                                <textarea
-                                  value={question.sourceNotes}
-                                  onChange={(event) =>
-                                    applyQuestionPatch(
-                                      activeSection.key,
-                                      question.id,
-                                      (current) => ({
-                                        ...current,
-                                        sourceNotes: event.target.value,
-                                        errorMessage: null,
-                                        duplicateWarning: false,
-                                      }),
-                                    )
-                                  }
-                                  rows={2}
-                                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
-                                />
                               </div>
 
                               {question.duplicateWarning && (
@@ -973,10 +1000,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                   </button>
                                 </div>
                               )}
-
-                              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                                Use top-right Template Controls for save actions.
-                              </div>
                             </div>
                           </article>
                         );

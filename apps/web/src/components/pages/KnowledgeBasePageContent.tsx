@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ManualQAForm } from '@/components/pages/knowledge-base/ManualQAForm';
-import { DocxUpload } from '@/components/pages/knowledge-base/DocxUpload';
 import { ReviewQueue } from '@/components/pages/knowledge-base/ReviewQueue';
 import { ApprovedQA } from '@/components/pages/knowledge-base/ApprovedQA';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
@@ -20,7 +19,7 @@ import {
   type KnowledgeEntryApiRow,
 } from '@/lib/api/knowledge';
 import { subscribeToClinicKnowledge } from '@/lib/supabase-realtime';
-import type { KnowledgeEntry, KnowledgeFile } from '@/components/pages/knowledge-base/types';
+import type { KnowledgeEntry } from '@/components/pages/knowledge-base/types';
 
 const REALTIME_RELOAD_DEBOUNCE_MS = 350;
 
@@ -83,7 +82,6 @@ export function KnowledgeBasePageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isManualFormOpen, setIsManualFormOpen] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<KnowledgeFile | null>(null);
   const [pendingEntries, setPendingEntries] = useState<KnowledgeEntry[]>([]);
   const [approvedEntries, setApprovedEntries] = useState<KnowledgeEntry[]>([]);
   const [embeddingStatus, setEmbeddingStatus] = useState<string | null>(null);
@@ -125,7 +123,6 @@ export function KnowledgeBasePageContent() {
     }
     setActionError(null);
     setActionWarning(null);
-    setUploadStatus(null);
     setIsManualFormOpen(false);
   }, [clinicId, isAdmin]);
 
@@ -267,7 +264,7 @@ export function KnowledgeBasePageContent() {
       <>
         <PageHeader
           title="Knowledge base"
-          description="Approved Q&A and document uploads that train Vaidya's answers."
+          description="Approved clinic Q&A that trains Vaidya's answers."
         />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Knowledge base is admin-only.</p>
@@ -522,15 +519,6 @@ export function KnowledgeBasePageContent() {
     }
   };
 
-  const handleUpload = (file: File) => {
-    setUploadStatus({
-      id: Date.now().toString(),
-      fileName: file.name,
-      uploadedAt: new Date().toISOString(),
-      status: 'processing',
-    });
-  };
-
   return (
     <>
       <PageHeader
@@ -547,7 +535,7 @@ export function KnowledgeBasePageContent() {
           onClick={() => setIsManualFormOpen(true)}
           className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800"
         >
-          Add manual Q&A
+          Manage Knowledge Q&A
         </button>
       </div>
 
@@ -570,7 +558,6 @@ export function KnowledgeBasePageContent() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <DocxUpload onUpload={handleUpload} uploadStatus={uploadStatus} />
         <ReviewQueue
           entries={pendingEntries}
           categories={KNOWLEDGE_CATEGORIES}

@@ -20,7 +20,9 @@ import {
 
 type TemplateUiStatus = 'draft' | 'approved' | 'inactive';
 
-type ManualTemplateQuestionResponse = ReturnType<KnowledgeAdminService['buildManualEntryResponse']> & {
+type ManualTemplateQuestionResponse = ReturnType<
+  KnowledgeAdminService['buildManualEntryResponse']
+> & {
   exists: boolean;
   service_name_required: boolean;
   ui_status: TemplateUiStatus;
@@ -213,9 +215,7 @@ export class KnowledgeAdminService {
   async listManualTemplate(clinicId: string) {
     const existingRows = await this.repos.knowledge.listManualTemplateEntries(clinicId);
     const byTemplateKey = new Map(
-      existingRows
-        .filter((row) => row.templateKey)
-        .map((row) => [row.templateKey!, row]),
+      existingRows.filter((row) => row.templateKey).map((row) => [row.templateKey!, row]),
     );
 
     const sections = new Map<string, ManualTemplateSectionResponse>();
@@ -307,9 +307,7 @@ export class KnowledgeAdminService {
     };
   }
 
-  async importManualTemplate(input: {
-    clinicId: string;
-  }) {
+  async importManualTemplate(input: { clinicId: string }) {
     let importedCount = 0;
     let existingCount = 0;
     const importedKnowledgeIds: string[] = [];
@@ -366,13 +364,12 @@ export class KnowledgeAdminService {
     };
   }
 
-  async createManualEntry(input: {
-    clinicId: string;
-    payload: CreateKnowledgeEntryInput;
-  }) {
+  async createManualEntry(input: { clinicId: string; payload: CreateKnowledgeEntryInput }) {
     const applicable = input.payload.applicable ?? true;
     const forcedQaApproved =
-      input.payload.status === 'approved' && input.payload.qa_approved === undefined ? true : undefined;
+      input.payload.status === 'approved' && input.payload.qa_approved === undefined
+        ? true
+        : undefined;
     const qaApproved = input.payload.qa_approved ?? forcedQaApproved ?? false;
     this.ensureNonMedicalAnswer(input.payload.answer);
 
@@ -601,7 +598,10 @@ export class KnowledgeAdminService {
     patch: PatchKnowledgeEntryInput;
     actorUserId?: string;
   }) {
-    const [existing] = await this.repos.knowledge.findKnowledgeEntry(input.clinicId, input.knowledgeId);
+    const [existing] = await this.repos.knowledge.findKnowledgeEntry(
+      input.clinicId,
+      input.knowledgeId,
+    );
     if (!existing) {
       throw new AppError('NOT_FOUND', 'Knowledge entry not found.', {
         clinic_id: input.clinicId,
@@ -615,23 +615,25 @@ export class KnowledgeAdminService {
     const forcedQaApproved =
       input.patch.status === 'approved' && input.patch.qa_approved === undefined ? true : undefined;
     const inheritedQaApproved = existing.qaApproved || existing.status === 'approved';
-    const nextApplicable =
-      input.patch.applicable ?? existing.applicable ?? true;
-    const nextQaApproved =
-      input.patch.qa_approved ?? forcedQaApproved ?? inheritedQaApproved;
-    const nextServiceName =
-      input.patch.service_name ?? existing.serviceName;
-    const nextSourceNotes =
-      input.patch.source_notes ?? existing.sourceNotes;
+    const nextApplicable = input.patch.applicable ?? existing.applicable ?? true;
+    const nextQaApproved = input.patch.qa_approved ?? forcedQaApproved ?? inheritedQaApproved;
+    const nextServiceName = input.patch.service_name ?? existing.serviceName;
+    const nextSourceNotes = input.patch.source_notes ?? existing.sourceNotes;
     const nextPhrases =
       input.patch.alternative_phrases_json ??
-      ((existing.alternativePhrasesJson as string[] | null) ?? []);
+      (existing.alternativePhrasesJson as string[] | null) ??
+      [];
     const nextTemplateKey = input.patch.template_key ?? existing.templateKey;
     const nextSectionKey = input.patch.section_key ?? existing.sectionKey;
     const isManualTemplateEntry = Boolean(nextTemplateKey || nextSectionKey);
     this.ensureNonMedicalAnswer(nextAnswer);
+    const requestedStatus =
+      input.patch.status ??
+      (input.patch.applicable === true && existing.status === 'disabled'
+        ? undefined
+        : existing.status);
     const nextStatus = this.computeStatus({
-      status: input.patch.status ?? existing.status,
+      status: requestedStatus,
       applicable: nextApplicable,
       qaApproved: nextQaApproved,
       answer: nextAnswer,
@@ -660,7 +662,7 @@ export class KnowledgeAdminService {
           ? { qaApproved: forcedQaApproved }
           : !existing.qaApproved && nextQaApproved
             ? { qaApproved: true }
-          : {}),
+            : {}),
       ...(input.patch.alternative_phrases_json !== undefined
         ? { alternativePhrasesJson: input.patch.alternative_phrases_json }
         : {}),

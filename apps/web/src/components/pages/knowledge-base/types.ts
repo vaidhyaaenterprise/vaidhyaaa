@@ -9,7 +9,7 @@ export interface KnowledgeEntry {
   category: string;
   alternativePhrases: string[];
   status: KnowledgeStatus;
-   uiStatus?: ManualTemplateUiStatus;
+  uiStatus?: ManualTemplateUiStatus;
   language: Language;
   source: 'manual' | 'upload';
   templateKey?: string | undefined;
@@ -36,15 +36,6 @@ export interface AuditLog {
   performedAt: string;
   previousValue?: string;
   newValue?: string;
-}
-
-export interface KnowledgeFile {
-  id: string;
-  fileName: string;
-  uploadedAt: string;
-  status: 'processing' | 'completed' | 'failed';
-  error?: string;
-  entriesCount?: number;
 }
 
 export interface Category {

@@ -37,7 +37,6 @@ vi.mock('@/lib/api/knowledge', () => ({
   fetchKnowledgeEmbeddingStatus: vi.fn(),
   fetchKnowledgeEntries: vi.fn(),
   fetchManualKnowledgeTemplate: vi.fn(),
-  importManualKnowledgeTemplate: vi.fn(),
   patchKnowledgeEntry: vi.fn(),
 }));
 
@@ -128,6 +127,8 @@ describe('KnowledgeBasePageContent bulk refresh behavior', () => {
     expect(screen.getByText('Tests & Reports')).toBeInTheDocument();
     expect(screen.queryByText('visit_policy')).not.toBeInTheDocument();
     expect(screen.queryByText('scan_preparation')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage Knowledge Q&A' })).toBeInTheDocument();
+    expect(screen.queryByText('Upload DOCX template')).not.toBeInTheDocument();
   });
 
   it('keeps unanswered drafts out of the review queue', async () => {

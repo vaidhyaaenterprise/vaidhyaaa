@@ -252,13 +252,6 @@ export async function fetchManualKnowledgeTemplate(signal?: AbortSignal) {
   return data.template;
 }
 
-export async function importManualKnowledgeTemplate() {
-  const data = await apiPost<{ result: { imported: number; existing: number } }>(
-    '/v1/knowledge/manual-template/import',
-  );
-  return data.result;
-}
-
 export async function createManualKnowledgeEntry(payload: CreateManualKnowledgeEntryPayload) {
   const data = await apiPost<{ knowledge: KnowledgeEntryWireRow }>('/v1/knowledge/manual', payload);
   return normalizeKnowledgeEntryApiRow(data.knowledge);

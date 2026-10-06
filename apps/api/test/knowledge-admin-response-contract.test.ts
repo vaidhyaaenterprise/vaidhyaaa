@@ -89,4 +89,60 @@ describe('KnowledgeAdminService response contract', () => {
     expect(result).not.toHaveProperty('alternativePhrasesJson');
     expect(result).not.toHaveProperty('clinicId');
   });
+
+  it('reactivates a disabled manual-template entry when applicable is enabled', async () => {
+    const existing = knowledgeRow({
+      applicable: false,
+      qaApproved: false,
+      status: 'disabled',
+      embeddingStatus: 'not_required',
+      approvedAt: null,
+    });
+    const updated = knowledgeRow({
+      applicable: true,
+      qaApproved: false,
+      status: 'pending_review',
+      embeddingStatus: 'pending',
+    });
+    const refreshed = knowledgeRow({
+      applicable: true,
+      qaApproved: false,
+      status: 'pending_review',
+      embeddingStatus: 'generated',
+    });
+    const findKnowledgeEntry = vi
+      .fn()
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValueOnce([refreshed]);
+    const updateKnowledgeEntry = vi.fn().mockResolvedValue([updated]);
+    const generateEmbedding = vi.fn().mockResolvedValue({ status: 'generated' });
+
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    Reflect.set(service, 'repos', {
+      knowledge: {
+        findKnowledgeEntry,
+        updateKnowledgeEntry,
+      },
+    });
+    Reflect.set(service, 'embeddingService', { generateEmbedding });
+
+    const result = await service.patchKnowledgeEntry({
+      clinicId: CLINIC_ID,
+      knowledgeId: KNOWLEDGE_ID,
+      patch: { applicable: true },
+    });
+
+    expect(updateKnowledgeEntry).toHaveBeenCalledWith(
+      CLINIC_ID,
+      KNOWLEDGE_ID,
+      expect.objectContaining({
+        applicable: true,
+        status: 'pending_review',
+      }),
+    );
+    expect(result).toMatchObject({
+      applicable: true,
+      status: 'pending_review',
+    });
+  });
 });

@@ -1,24 +1,18 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ManualQAForm } from './ManualQAForm';
 import {
   fetchManualKnowledgeTemplate,
-  importManualKnowledgeTemplate,
+  patchKnowledgeEntry,
+  type KnowledgeEntryApiRow,
   type ManualTemplateApiResponse,
+  type ManualTemplateQuestionApiRow,
 } from '@/lib/api/knowledge';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
-const OTHER_CLINIC_ID = '00000000-0000-0000-0000-000000000002';
+const KNOWLEDGE_ID = '00000000-0000-0000-0000-000000000501';
 let activeClinicId: string | null = CLINIC_ID;
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
 
 const EMPTY_TEMPLATE: ManualTemplateApiResponse = {
   source: 'manual-template',
@@ -39,47 +33,151 @@ vi.mock('@/hooks/useActiveClinicId', () => ({
 vi.mock('@/lib/api/knowledge', () => ({
   createManualKnowledgeEntry: vi.fn(),
   fetchManualKnowledgeTemplate: vi.fn(),
-  importManualKnowledgeTemplate: vi.fn(),
   patchKnowledgeEntry: vi.fn(),
 }));
 
 const mockedFetchTemplate = vi.mocked(fetchManualKnowledgeTemplate);
-const mockedImportTemplate = vi.mocked(importManualKnowledgeTemplate);
+const mockedPatchKnowledgeEntry = vi.mocked(patchKnowledgeEntry);
+
+function templateQuestion(
+  overrides: Partial<ManualTemplateQuestionApiRow> = {},
+): ManualTemplateQuestionApiRow {
+  return {
+    id: KNOWLEDGE_ID,
+    clinic_id: CLINIC_ID,
+    question: 'Is UPI accepted?',
+    answer: 'Yes, UPI payments are accepted.',
+    category: 'payment',
+    alternative_phrases_json: [],
+    template_key: 'payment::Is UPI accepted?',
+    section_key: 'payment',
+    source_notes: 'Use the payment policy approved by the clinic.',
+    service_name: null,
+    applicable: false,
+    qa_approved: false,
+    status: 'disabled',
+    source_file: 'Vaidya Clinic Knowledge Base Q&A Template',
+    source_page: null,
+    embedding_status: 'not_required',
+    embedding_model: null,
+    embedding_generated_at: null,
+    search_text: null,
+    approved_at: null,
+    created_at: '2026-10-01T00:00:00.000Z',
+    updated_at: '2026-10-01T00:00:00.000Z',
+    exists: true,
+    service_name_required: false,
+    ui_status: 'inactive',
+    ...overrides,
+  };
+}
+
+function knowledgeRow(overrides: Partial<KnowledgeEntryApiRow> = {}): KnowledgeEntryApiRow {
+  const {
+    exists: _exists,
+    service_name_required: _required,
+    ui_status: _uiStatus,
+    ...row
+  } = templateQuestion();
+  return {
+    ...row,
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   activeClinicId = CLINIC_ID;
   mockedFetchTemplate.mockReset().mockResolvedValue(EMPTY_TEMPLATE);
-  mockedImportTemplate.mockReset();
+  mockedPatchKnowledgeEntry.mockReset();
 });
 
 afterEach(() => {
   cleanup();
 });
 
-describe('ManualQAForm clinic context', () => {
-  it('does not publish an import result after the active clinic changes', async () => {
-    const importResult = deferred<{ imported: number; existing: number }>();
+describe('ManualQAForm activation and approval', () => {
+  it('reactivates an inactive question and lists it under the selected section after approval', async () => {
+    mockedFetchTemplate.mockResolvedValue({
+      source: 'manual-template',
+      sections: [
+        {
+          key: 'payment',
+          title: 'Payment',
+          questions: [templateQuestion()],
+        },
+      ],
+      summary: {
+        total: 1,
+        completed: 1,
+        approved: 0,
+        pending: 0,
+        not_applicable: 1,
+      },
+    });
+    mockedPatchKnowledgeEntry.mockResolvedValue(
+      knowledgeRow({
+        applicable: true,
+        qa_approved: true,
+        status: 'approved',
+        embedding_status: 'generated',
+        embedding_model: 'gemini-embedding-001',
+        embedding_dimensions: 1024,
+        search_text: 'Category: payment Question: Is UPI accepted? Answer: Yes',
+        approved_at: '2026-10-06T12:00:00.000Z',
+      }),
+    );
     const onSaved = vi.fn();
-    mockedImportTemplate.mockImplementation(() => importResult.promise);
 
-    const { rerender } = render(
-      <ManualQAForm isOpen onClose={vi.fn()} categories={[]} onSaved={onSaved} />,
+    render(
+      <ManualQAForm
+        isOpen
+        onClose={vi.fn()}
+        categories={[{ id: 'payment', name: 'Payment', description: 'Payment policies' }]}
+        onSaved={onSaved}
+      />,
     );
 
-    await waitFor(() => expect(mockedFetchTemplate).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole('button', { name: 'Import Template Rows' }));
-    expect(mockedImportTemplate).toHaveBeenCalledOnce();
+    expect(await screen.findByText('Inactive')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import Template Rows' })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Approved questions in Payment' })).getByText(
+        'No approved questions in this section yet.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Source Notes/i)).not.toBeInTheDocument();
 
-    activeClinicId = OTHER_CLINIC_ID;
-    rerender(<ManualQAForm isOpen onClose={vi.fn()} categories={[]} onSaved={onSaved} />);
-    await waitFor(() => expect(mockedFetchTemplate).toHaveBeenCalledTimes(2));
+    const serviceSelect = screen.getByRole('combobox', { name: /Service Name/i });
+    expect(
+      within(serviceSelect).getByRole('option', { name: 'General Consultation' }),
+    ).toBeInTheDocument();
+    fireEvent.change(serviceSelect, { target: { value: 'Dental Consultation' } });
 
-    await act(async () => {
-      importResult.resolve({ imported: 4, existing: 1 });
-      await importResult.promise;
+    fireEvent.click(screen.getByRole('button', { name: 'Make active' }));
+    expect(screen.getByText('Draft')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save & Approve' }));
+
+    await waitFor(() => {
+      expect(mockedPatchKnowledgeEntry).toHaveBeenCalledWith(
+        KNOWLEDGE_ID,
+        expect.objectContaining({
+          applicable: true,
+          qa_approved: true,
+          status: 'approved',
+          service_name: 'Dental Consultation',
+        }),
+        CLINIC_ID,
+      );
     });
-
-    expect(onSaved).not.toHaveBeenCalled();
-    expect(screen.queryByText(/Template import completed/)).not.toBeInTheDocument();
+    expect(mockedPatchKnowledgeEntry.mock.calls[0]?.[1]).not.toHaveProperty('source_notes');
+    const approvedRegion = screen.getByRole('region', {
+      name: 'Approved questions in Payment',
+    });
+    expect(
+      within(approvedRegion).getByRole('button', { name: 'Is UPI accepted?' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Question saved, activated, and approved successfully.'),
+    ).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledOnce();
   });
 });
