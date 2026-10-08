@@ -74,6 +74,10 @@ function isAnsweredReviewEntry(entry: KnowledgeEntry): boolean {
   );
 }
 
+function isApprovedEntry(entry: KnowledgeEntry): boolean {
+  return entry.status === 'approved' && entry.applicable !== false && entry.qaApproved === true;
+}
+
 export function KnowledgeBasePageContent() {
   const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
@@ -168,7 +172,7 @@ export function KnowledgeBasePageContent() {
         }
         const mapped = entries.map(mapEntry);
         setPendingEntries(mapped.filter(isAnsweredReviewEntry));
-        setApprovedEntries(mapped.filter((entry) => entry.status === 'approved'));
+        setApprovedEntries(mapped.filter(isApprovedEntry));
         setEmbeddingStatus(
           status ? `${status.generated_count}/${status.approved_total} embeddings generated` : null,
         );
@@ -202,7 +206,7 @@ export function KnowledgeBasePageContent() {
     ]);
     setApprovedEntries((current) => [
       ...current.filter((entry) => !changedIds.has(entry.id)),
-      ...changedEntries.filter((entry) => entry.status === 'approved'),
+      ...changedEntries.filter(isApprovedEntry),
     ]);
   }, []);
 
@@ -489,7 +493,7 @@ export function KnowledgeBasePageContent() {
     const targetClinicId = clinicId;
     const updated = await patchKnowledgeEntry(
       id,
-      { status: 'disabled', applicable: false },
+      { status: 'disabled', applicable: false, qa_approved: false },
       targetClinicId,
     );
     if (isActiveKnowledgeContext(targetClinicId)) {

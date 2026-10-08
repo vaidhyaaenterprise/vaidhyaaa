@@ -155,6 +155,21 @@ describe('KnowledgeBasePageContent bulk refresh behavior', () => {
     expect(screen.queryByText(whitespaceOnly.question)).not.toBeInTheDocument();
   });
 
+  it('keeps inactive records out of Approved Q&A even if legacy data has approved status', async () => {
+    const inconsistentInactiveRow = {
+      ...knowledgeRow('00000000-0000-0000-0000-000000000213'),
+      applicable: false,
+      qa_approved: true,
+      status: 'approved',
+    };
+    mockedFetchEntries.mockResolvedValue([inconsistentInactiveRow]);
+
+    render(<KnowledgeBasePageContent />);
+
+    expect(await screen.findByText('No approved entries yet')).toBeInTheDocument();
+    expect(screen.queryByText(inconsistentInactiveRow.question)).not.toBeInTheDocument();
+  });
+
   it('coalesces a burst of realtime row changes into one knowledge reload', async () => {
     render(<KnowledgeBasePageContent />);
 

@@ -370,7 +370,8 @@ export class KnowledgeAdminService {
       input.payload.status === 'approved' && input.payload.qa_approved === undefined
         ? true
         : undefined;
-    const qaApproved = input.payload.qa_approved ?? forcedQaApproved ?? false;
+    const requestedQaApproved = input.payload.qa_approved ?? forcedQaApproved ?? false;
+    const qaApproved = applicable ? requestedQaApproved : false;
     this.ensureNonMedicalAnswer(input.payload.answer);
 
     const status = this.computeStatus({
@@ -420,10 +421,8 @@ export class KnowledgeAdminService {
       alternativePhrases: input.payload.alternative_phrases_json,
     });
 
-    const isManualTemplateEntry = Boolean(input.payload.section_key || input.payload.template_key);
     const shouldGenerateEmbedding =
-      isManualTemplateEntry ||
-      (status === 'approved' && applicable && qaApproved && input.payload.answer.trim().length > 0);
+      status === 'approved' && applicable && qaApproved && input.payload.answer.trim().length > 0;
 
     const [created] = await this.repos.knowledge.createKnowledgeEntry({
       clinicId: input.clinicId,
@@ -451,7 +450,7 @@ export class KnowledgeAdminService {
     }
 
     if (shouldGenerateEmbedding) {
-      if (isManualTemplateEntry) {
+      if (input.payload.section_key || input.payload.template_key) {
         await this.embeddingService.generateEmbedding(input.clinicId, created.id);
         const [refreshed] = await this.repos.knowledge.findKnowledgeEntry(
           input.clinicId,
@@ -616,7 +615,8 @@ export class KnowledgeAdminService {
       input.patch.status === 'approved' && input.patch.qa_approved === undefined ? true : undefined;
     const inheritedQaApproved = existing.qaApproved || existing.status === 'approved';
     const nextApplicable = input.patch.applicable ?? existing.applicable ?? true;
-    const nextQaApproved = input.patch.qa_approved ?? forcedQaApproved ?? inheritedQaApproved;
+    const requestedQaApproved = input.patch.qa_approved ?? forcedQaApproved ?? inheritedQaApproved;
+    const nextQaApproved = nextApplicable ? requestedQaApproved : false;
     const nextServiceName = input.patch.service_name ?? existing.serviceName;
     const nextSourceNotes = input.patch.source_notes ?? existing.sourceNotes;
     const nextPhrases =
@@ -656,13 +656,11 @@ export class KnowledgeAdminService {
       ...(input.patch.source_notes !== undefined ? { sourceNotes: input.patch.source_notes } : {}),
       ...(input.patch.service_name !== undefined ? { serviceName: input.patch.service_name } : {}),
       ...(input.patch.applicable !== undefined ? { applicable: input.patch.applicable } : {}),
-      ...(input.patch.qa_approved !== undefined
-        ? { qaApproved: input.patch.qa_approved }
-        : forcedQaApproved !== undefined
-          ? { qaApproved: forcedQaApproved }
-          : !existing.qaApproved && nextQaApproved
-            ? { qaApproved: true }
-            : {}),
+      ...(input.patch.qa_approved !== undefined ||
+      forcedQaApproved !== undefined ||
+      nextQaApproved !== existing.qaApproved
+        ? { qaApproved: nextQaApproved }
+        : {}),
       ...(input.patch.alternative_phrases_json !== undefined
         ? { alternativePhrasesJson: input.patch.alternative_phrases_json }
         : {}),
@@ -670,11 +668,7 @@ export class KnowledgeAdminService {
     };
 
     const shouldGenerateEmbedding =
-      isManualTemplateEntry ||
-      (nextStatus === 'approved' &&
-        nextApplicable &&
-        nextQaApproved &&
-        nextAnswer.trim().length > 0);
+      nextStatus === 'approved' && nextApplicable && nextQaApproved && nextAnswer.trim().length > 0;
 
     if (
       shouldGenerateEmbedding &&
