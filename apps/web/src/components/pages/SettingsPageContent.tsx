@@ -51,10 +51,7 @@ function mapSettingsToNotification(settings: ClinicSettingsResponse): Notificati
 
 function isAbortError(error: unknown): boolean {
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    'name' in error &&
-    error.name === 'AbortError'
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
   );
 }
 
@@ -67,6 +64,59 @@ async function readOptional<T>(request: Promise<T>, fallback: T): Promise<T> {
     }
     return fallback;
   }
+}
+
+type OptionalSettingsData = {
+  subscriptionRow: Awaited<ReturnType<typeof fetchClinicSubscription>> | null;
+  usageRow: Awaited<ReturnType<typeof fetchClinicUsage>> | null;
+  languagesRow: Awaited<ReturnType<typeof fetchClinicLanguages>> | null;
+  supported: Awaited<ReturnType<typeof fetchSupportedLanguages>>;
+};
+
+async function loadOptionalSettingsData(clinicId: string, isAdmin: boolean, signal: AbortSignal) {
+  const result: OptionalSettingsData = {
+    subscriptionRow: null,
+    usageRow: null,
+    languagesRow: null,
+    supported: [],
+  };
+  const loadLanguages = async () => {
+    result.languagesRow = await readOptional(fetchClinicLanguages(clinicId, signal), null);
+  };
+  const loadSupportedLanguages = async () => {
+    result.supported = await readOptional(fetchSupportedLanguages(signal), []);
+  };
+  const tasks: Array<() => Promise<void>> = isAdmin
+    ? [
+        async () => {
+          result.subscriptionRow = await readOptional(
+            fetchClinicSubscription(clinicId, signal),
+            null,
+          );
+        },
+        loadLanguages,
+        async () => {
+          result.usageRow = await readOptional(fetchClinicUsage(clinicId, signal), null);
+        },
+        loadSupportedLanguages,
+      ]
+    : [loadLanguages, loadSupportedLanguages];
+
+  // Keep optional reads behind the required settings request and cap their
+  // concurrency. A worker starts the next read as soon as its current read
+  // settles, avoiding both a serverless request burst and batch head-of-line
+  // blocking while preserving the existing optional-data fallbacks.
+  let nextTaskIndex = 0;
+  const runWorker = async () => {
+    while (nextTaskIndex < tasks.length) {
+      const task = tasks[nextTaskIndex];
+      nextTaskIndex += 1;
+      await task?.();
+    }
+  };
+  await Promise.all([runWorker(), runWorker()]);
+
+  return result;
 }
 
 const DEFAULT_LANGUAGE_SETTINGS: LanguageSettingsType = {
@@ -94,14 +144,13 @@ export function SettingsPageContent() {
   const isDoctor = effectiveRole === 'doctor';
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; requestId?: string } | null>(null);
   const [agentSettings, setAgentSettings] = useState<AgentSettingsType | null>(null);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType | null>(
     null,
   );
-  const [languageSettings, setLanguageSettings] = useState<LanguageSettingsType>(
-    DEFAULT_LANGUAGE_SETTINGS,
-  );
+  const [languageSettings, setLanguageSettings] =
+    useState<LanguageSettingsType>(DEFAULT_LANGUAGE_SETTINGS);
   const [subscription, setSubscription] = useState<SubscriptionPlan>(DEFAULT_SUBSCRIPTION);
   const [notificationEvents] = useState<NotificationEvent[]>([]);
   const activeLoadControllerRef = useRef<AbortController | null>(null);
@@ -151,17 +200,11 @@ export function SettingsPageContent() {
     setLanguageSettings(DEFAULT_LANGUAGE_SETTINGS);
     setSubscription(DEFAULT_SUBSCRIPTION);
     try {
-      const [settings, subscriptionRow, usageRow, languagesRow, supported] = await Promise.all([
-        isAdmin ? fetchClinicSettings(clinicId, controller.signal) : Promise.resolve(null),
-        isAdmin
-          ? readOptional(fetchClinicSubscription(clinicId, controller.signal), null)
-          : Promise.resolve(null),
-        isAdmin
-          ? readOptional(fetchClinicUsage(clinicId, controller.signal), null)
-          : Promise.resolve(null),
-        readOptional(fetchClinicLanguages(clinicId, controller.signal), null),
-        readOptional(fetchSupportedLanguages(controller.signal), []),
-      ]);
+      // Core settings are required. Give this read priority so an optional
+      // request cannot consume the last available upstream/database capacity.
+      // The shared API client already applies one bounded retry to GETs. Keep
+      // one retry budget here so a persistent outage cannot multiply timeouts.
+      const settings = isAdmin ? await fetchClinicSettings(clinicId, controller.signal) : null;
 
       if (!isCurrentLoad()) {
         return;
@@ -170,6 +213,16 @@ export function SettingsPageContent() {
       if (settings) {
         setAgentSettings(mapSettingsToAgent(settings));
         setNotificationSettings(mapSettingsToNotification(settings));
+      }
+
+      const { subscriptionRow, usageRow, languagesRow, supported } = await loadOptionalSettingsData(
+        clinicId,
+        isAdmin,
+        controller.signal,
+      );
+
+      if (!isCurrentLoad()) {
+        return;
       }
 
       if (languagesRow) {
@@ -210,11 +263,12 @@ export function SettingsPageContent() {
       if (!isCurrentLoad() || isAbortError(err)) {
         return;
       }
-      setError(
+      const message =
         err instanceof ApiRequestError
           ? err.apiError.message
-          : 'Failed to load clinic settings from the API.',
-      );
+          : 'Failed to load clinic settings from the API.';
+      const requestId = err instanceof ApiRequestError ? err.apiError.requestId : undefined;
+      setError({ message, ...(requestId ? { requestId } : {}) });
     } finally {
       if (isCurrentLoad()) {
         setLoading(false);
@@ -343,7 +397,10 @@ export function SettingsPageContent() {
 
   if (error) {
     return (
-      <ErrorState title="Could not load settings" description={error}>
+      <ErrorState
+        title="Could not load settings"
+        description={`${error.message}${error.requestId ? ` Reference ID: ${error.requestId}.` : ''}`}
+      >
         <button
           type="button"
           onClick={() => void loadSettings()}
