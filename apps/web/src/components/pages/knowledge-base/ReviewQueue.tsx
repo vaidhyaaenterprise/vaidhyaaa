@@ -158,10 +158,10 @@ export function ReviewQueue({
     selectableEntries.length > 0 && selectableEntries.every((entry) => selectedIds.has(entry.id));
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <h3 className="text-lg font-bold text-slate-900">Review queue</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {selectedIds.size > 0 && (
             <button
               onClick={() => void handleBulkApprove()}

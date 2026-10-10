@@ -69,6 +69,7 @@ export {
   type NotificationEventRow,
   type KnowledgeEntryRow,
   type KnowledgeEmbeddingStatusSummary,
+  type KnowledgeSectionRow,
   type Repositories,
 } from './repositories';
 

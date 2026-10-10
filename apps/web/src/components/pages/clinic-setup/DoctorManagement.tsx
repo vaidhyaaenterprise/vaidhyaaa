@@ -475,8 +475,8 @@ export function DoctorManagement() {
 
   if (!isAdmin) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Doctors and services</h3>
         </div>
         <p className="text-sm text-slate-500">Only admins can manage doctors and services.</p>
@@ -486,7 +486,7 @@ export function DoctorManagement() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading doctors and services" description="Fetching from the API." />
       </div>
     );
@@ -494,7 +494,7 @@ export function DoctorManagement() {
 
   if (error && !isEditing) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load doctors and services" description={error}>
           <button
             type="button"
@@ -509,8 +509,11 @@ export function DoctorManagement() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div
+      data-testid="doctor-management-card"
+      className={`doctor-management-card min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${isEditing ? 'xl:col-span-2' : ''}`}
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-900">Doctors and services</h3>
         {!isEditing && (
           <button
@@ -535,20 +538,20 @@ export function DoctorManagement() {
               {doctors.map((doctor) => (
                 <div
                   key={doctor.id}
-                  className={`flex items-center justify-between rounded-lg border p-3 ${
+                  className={`doctor-summary-row flex min-w-0 flex-col gap-3 rounded-lg border p-3 ${
                     doctor.active ? 'border-slate-200 bg-white' : 'border-red-200 bg-red-50'
                   }`}
                 >
-                  <div>
-                    <p className="font-bold text-slate-900">{doctor.name}</p>
-                    <p className="text-sm text-slate-500">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-bold text-slate-900">{doctor.name}</p>
+                    <p className="break-words text-sm text-slate-500">
                       {doctor.specialization || 'No qualification'}
                     </p>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    <p className="break-words text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Service: {displayServiceName(doctor.serviceKey, doctor.serviceName)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex shrink-0 flex-wrap items-center gap-3">
                     <span className="text-sm font-bold text-slate-900">Rs.{doctor.fee}</span>
                     <button
                       type="button"
@@ -577,8 +580,8 @@ export function DoctorManagement() {
           )}
 
           <div>
-            <div className="mb-3 flex items-center justify-between">
-              <div>
+            <div className="doctor-editor-header mb-3 flex flex-col gap-3">
+              <div className="min-w-0">
                 <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500">
                   Doctors
                 </h4>
@@ -589,7 +592,7 @@ export function DoctorManagement() {
               <button
                 type="button"
                 onClick={addDoctor}
-                className="rounded-lg border border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100"
+                className="doctor-add-button w-full shrink-0 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100"
               >
                 + Add doctor
               </button>
@@ -603,70 +606,93 @@ export function DoctorManagement() {
                 return (
                   <div
                     key={doctor.id}
-                    className="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_100px_40px]"
+                    data-testid="doctor-editor-row"
+                    className="doctor-editor-row grid min-w-0 gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3"
                   >
-                    <input
-                      type="text"
-                      value={doctor.name}
-                      onChange={(event) => updateDoctor(doctor.id, 'name', event.target.value)}
-                      placeholder="Doctor name"
-                      aria-label="Doctor name"
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                    />
-                    <input
-                      type="text"
-                      value={doctor.specialization}
-                      onChange={(event) =>
-                        updateDoctor(doctor.id, 'specialization', event.target.value)
-                      }
-                      placeholder="Qualification"
-                      aria-label={`Qualification for ${doctor.name || 'new doctor'}`}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                    />
-                    <select
-                      value={doctor.serviceKey}
-                      onChange={(event) => {
-                        const selected = findPredefinedClinicService(event.target.value);
-                        updateDoctor(doctor.id, 'serviceKey', event.target.value);
-                        if (selected) {
-                          updateDoctor(doctor.id, 'serviceName', selected.service_name);
+                    <label className="block min-w-0">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Doctor name
+                      </span>
+                      <input
+                        type="text"
+                        value={doctor.name}
+                        onChange={(event) => updateDoctor(doctor.id, 'name', event.target.value)}
+                        placeholder="Doctor name"
+                        aria-label="Doctor name"
+                        className="mt-1 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                      />
+                    </label>
+                    <label className="block min-w-0">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Qualification
+                      </span>
+                      <input
+                        type="text"
+                        value={doctor.specialization}
+                        onChange={(event) =>
+                          updateDoctor(doctor.id, 'specialization', event.target.value)
                         }
-                      }}
-                      aria-label={`Service for ${doctor.name || 'new doctor'}`}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                      required
-                    >
-                      <option value="">Select service</option>
-                      {isLegacyService && (
-                        <option value={doctor.serviceKey}>
-                          {doctor.serviceName || doctor.serviceKey} (Current custom service)
-                        </option>
-                      )}
-                      {PREDEFINED_CLINIC_SERVICES.map((service) => (
-                        <option key={service.service_key} value={service.service_key}>
-                          {service.service_name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      value={doctor.fee}
-                      onChange={(event) =>
-                        updateDoctor(doctor.id, 'fee', Number(event.target.value) || 0)
-                      }
-                      placeholder="Fee"
-                      aria-label={`Fee for ${doctor.name || 'new doctor'}`}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                      min={0}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeDoctor(doctor.id)}
-                      aria-label={`Remove ${doctor.name || 'new doctor'}`}
-                      className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
-                    >
-                      ✕
-                    </button>
+                        placeholder="Qualification"
+                        aria-label={`Qualification for ${doctor.name || 'new doctor'}`}
+                        className="mt-1 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                      />
+                    </label>
+                    <label className="doctor-service-field block min-w-0">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Service
+                      </span>
+                      <select
+                        value={doctor.serviceKey}
+                        onChange={(event) => {
+                          const selected = findPredefinedClinicService(event.target.value);
+                          updateDoctor(doctor.id, 'serviceKey', event.target.value);
+                          if (selected) {
+                            updateDoctor(doctor.id, 'serviceName', selected.service_name);
+                          }
+                        }}
+                        aria-label={`Service for ${doctor.name || 'new doctor'}`}
+                        className="mt-1 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                        required
+                      >
+                        <option value="">Select service</option>
+                        {isLegacyService && (
+                          <option value={doctor.serviceKey}>
+                            {doctor.serviceName || doctor.serviceKey} (Current custom service)
+                          </option>
+                        )}
+                        {PREDEFINED_CLINIC_SERVICES.map((service) => (
+                          <option key={service.service_key} value={service.service_key}>
+                            {service.service_name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block min-w-0">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Fee (Rs.)
+                      </span>
+                      <input
+                        type="number"
+                        value={doctor.fee}
+                        onChange={(event) =>
+                          updateDoctor(doctor.id, 'fee', Number(event.target.value) || 0)
+                        }
+                        placeholder="Fee"
+                        aria-label={`Fee for ${doctor.name || 'new doctor'}`}
+                        className="mt-1 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                        min={0}
+                      />
+                    </label>
+                    <div className="flex min-w-0 items-end">
+                      <button
+                        type="button"
+                        onClick={() => removeDoctor(doctor.id)}
+                        aria-label={`Remove ${doctor.name || 'new doctor'}`}
+                        className="doctor-remove-button w-full rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 );
               })}

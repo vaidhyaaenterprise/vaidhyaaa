@@ -14,6 +14,19 @@ interface ApprovedQAProps {
   onDisable: (id: string) => void;
 }
 
+function formatUpdatedDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+}
+
 export function ApprovedQA({ entries, categories, onEdit, onDisable }: ApprovedQAProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<KnowledgeEntry>>({});
@@ -156,7 +169,7 @@ export function ApprovedQA({ entries, categories, onEdit, onDisable }: ApprovedQ
                       {getKnowledgeCategoryDisplayName(entry, categories)}
                     </span>
                     <span>•</span>
-                    <span>Updated {new Date(entry.updatedAt).toLocaleDateString()}</span>
+                    <span>Updated {formatUpdatedDate(entry.updatedAt)}</span>
                   </div>
                   {Array.isArray(entry.alternativePhrases) &&
                     entry.alternativePhrases.length > 0 && (

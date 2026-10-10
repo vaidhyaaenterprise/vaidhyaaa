@@ -202,14 +202,16 @@ export function NotificationSettings({
           <div className="space-y-2">
             {notificationEvents.slice(0, 5).map((event) => (
               <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{event.recipient}</p>
+                <div className="mb-2 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-slate-900">
+                      {event.recipient}
+                    </p>
                     <p className="text-xs text-slate-500">
                       {new Date(event.timestamp).toLocaleString()}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex shrink-0 flex-wrap gap-2">
                     {getChannelBadge(event.channel)}
                     {getStatusBadge(event.status)}
                   </div>

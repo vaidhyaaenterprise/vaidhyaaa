@@ -1,11 +1,24 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import {
   AppError,
   bulkApproveKnowledgeEntriesSchema,
+  createKnowledgeSectionSchema,
   createKnowledgeEntrySchema,
   patchKnowledgeEntrySchema,
+  updateKnowledgeSectionSchema,
   type AuthContext,
 } from '@vaidya/shared';
 
@@ -98,6 +111,87 @@ export class KnowledgeController {
     });
 
     return { knowledge };
+  }
+
+  @Post('manual-template/sections')
+  @Roles('clinic_admin')
+  async createManualSection(
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+    @Body() body: unknown,
+  ) {
+    const auth = getAuthContext(request);
+    if (!auth.clinicId) {
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
+    }
+    const parsed = createKnowledgeSectionSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Section name must contain 1 to 80 characters.');
+    }
+    const section = await this.knowledgeAdmin.createManualSection({
+      clinicId: auth.clinicId,
+      title: parsed.data.title,
+    });
+    return { section };
+  }
+
+  @Patch('manual-template/sections/:sectionKey')
+  @Roles('clinic_admin')
+  async updateManualSection(
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+    @Param('sectionKey') sectionKey: string,
+    @Body() body: unknown,
+  ) {
+    const auth = getAuthContext(request);
+    if (!auth.clinicId) {
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
+    }
+    const parsed = updateKnowledgeSectionSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Section name must contain 1 to 80 characters.');
+    }
+    const section = await this.knowledgeAdmin.updateManualSection({
+      clinicId: auth.clinicId,
+      sectionKey,
+      title: parsed.data.title,
+    });
+    return { section };
+  }
+
+  @Delete('manual-template/sections/:sectionKey')
+  @Roles('clinic_admin')
+  async removeManualSection(
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+    @Param('sectionKey') sectionKey: string,
+  ) {
+    const auth = getAuthContext(request);
+    if (!auth.clinicId) {
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
+    }
+    const result = await this.knowledgeAdmin.removeManualSection({
+      clinicId: auth.clinicId,
+      sectionKey,
+    });
+    return { result };
+  }
+
+  @Delete('manual-template/questions')
+  @Roles('clinic_admin')
+  async removeManualQuestion(
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+    @Query('knowledge_id') knowledgeId: string | undefined,
+  ) {
+    const auth = getAuthContext(request);
+    if (!auth.clinicId) {
+      throw new AppError('FORBIDDEN', 'Clinic context is required.');
+    }
+    if (!knowledgeId?.trim()) {
+      throw new AppError('VALIDATION_ERROR', 'knowledge_id is required.');
+    }
+    const result = await this.knowledgeAdmin.removeManualQuestion({
+      clinicId: auth.clinicId,
+      knowledgeId,
+    });
+    return { result };
   }
 
   @Post('embeddings/regenerate')

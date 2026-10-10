@@ -1,23 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { apiPatch, apiPost } from '@/lib/api/client';
+import { apiDelete, apiPatch, apiPost } from '@/lib/api/client';
 import {
   bulkApproveKnowledgeEntries,
   bulkApproveKnowledgeEntriesInChunks,
+  createManualKnowledgeSection,
   MAX_KNOWLEDGE_BULK_APPROVAL_SIZE,
   patchKnowledgeEntry,
+  removeManualKnowledgeQuestion,
+  removeManualKnowledgeSection,
+  updateManualKnowledgeSection,
 } from '@/lib/api/knowledge';
 
 vi.mock('@/lib/api/client', () => ({
+  apiDelete: vi.fn(),
   apiGet: vi.fn(),
   apiPatch: vi.fn(),
   apiPost: vi.fn(),
 }));
 
+const mockedApiDelete = vi.mocked(apiDelete);
 const mockedApiPost = vi.mocked(apiPost);
 const mockedApiPatch = vi.mocked(apiPatch);
 
 beforeEach(() => {
+  mockedApiDelete.mockReset();
   mockedApiPost.mockReset();
   mockedApiPatch.mockReset();
 });
@@ -77,6 +84,56 @@ describe('knowledge mutation response normalization', () => {
       updated_at: '2026-09-24T17:46:11.997Z',
     });
     expect(result.alternative_phrases_json).toHaveLength(0);
+  });
+});
+
+describe('manual knowledge section API', () => {
+  it('creates and renames sections through the section endpoints', async () => {
+    mockedApiPost.mockResolvedValue({
+      section: {
+        key: 'custom_billing_12345678',
+        title: 'Billing',
+        is_custom: true,
+        questions: [],
+      },
+    });
+    mockedApiPatch.mockResolvedValue({
+      section: {
+        key: 'custom_billing_12345678',
+        title: 'Billing and Receipts',
+        is_custom: true,
+      },
+    });
+
+    await expect(createManualKnowledgeSection('Billing')).resolves.toMatchObject({
+      title: 'Billing',
+    });
+    await expect(
+      updateManualKnowledgeSection('custom_billing_12345678', 'Billing and Receipts'),
+    ).resolves.toMatchObject({ title: 'Billing and Receipts' });
+    expect(mockedApiPost).toHaveBeenCalledWith('/v1/knowledge/manual-template/sections', {
+      title: 'Billing',
+    });
+    expect(mockedApiPatch).toHaveBeenCalledWith(
+      '/v1/knowledge/manual-template/sections/custom_billing_12345678',
+      { title: 'Billing and Receipts' },
+    );
+  });
+
+  it('encodes section keys and virtual question IDs when removing them', async () => {
+    mockedApiDelete.mockResolvedValue({ result: { removed: true } });
+
+    await removeManualKnowledgeSection('custom/section');
+    await removeManualKnowledgeQuestion('template:visit:Can I walk in?');
+
+    expect(mockedApiDelete).toHaveBeenNthCalledWith(
+      1,
+      '/v1/knowledge/manual-template/sections/custom%2Fsection',
+    );
+    expect(mockedApiDelete).toHaveBeenNthCalledWith(
+      2,
+      '/v1/knowledge/manual-template/questions?knowledge_id=template%3Avisit%3ACan%20I%20walk%20in%3F',
+    );
   });
 });
 

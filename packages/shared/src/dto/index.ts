@@ -209,17 +209,21 @@ export {
 
 export {
   bulkApproveKnowledgeEntriesSchema,
+  createKnowledgeSectionSchema,
   createKnowledgeEntrySchema,
   knowledgeEntryResponseSchema,
   knowledgeFileResponseSchema,
   knowledgeTranslationResponseSchema,
   patchKnowledgeEntrySchema,
+  updateKnowledgeSectionSchema,
   type BulkApproveKnowledgeEntriesInput,
+  type CreateKnowledgeSectionInput,
   type CreateKnowledgeEntryInput,
   type KnowledgeEntryResponse,
   type KnowledgeFileResponse,
   type KnowledgeTranslationResponse,
   type PatchKnowledgeEntryInput,
+  type UpdateKnowledgeSectionInput,
 } from './knowledge';
 
 export {

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type Repositories } from '@vaidya/db';
@@ -31,6 +33,7 @@ type ManualTemplateQuestionResponse = ReturnType<
 type ManualTemplateSectionResponse = {
   key: string;
   title: string;
+  is_custom: boolean;
   questions: ManualTemplateQuestionResponse[];
 };
 
@@ -213,17 +216,47 @@ export class KnowledgeAdminService {
   }
 
   async listManualTemplate(clinicId: string) {
-    const existingRows = await this.repos.knowledge.listManualTemplateEntries(clinicId);
+    const [existingRows, sectionRows] = await Promise.all([
+      this.repos.knowledge.listManualTemplateEntries(clinicId),
+      this.repos.knowledge.listKnowledgeSections(clinicId),
+    ]);
     const byTemplateKey = new Map(
       existingRows.filter((row) => row.templateKey).map((row) => [row.templateKey!, row]),
     );
+    const sectionOverrides = new Map(sectionRows.map((row) => [row.sectionKey, row]));
 
     const sections = new Map<string, ManualTemplateSectionResponse>();
+    const catalogTemplateKeys = new Set<string>();
+    const catalogSectionKeys = new Set<string>();
     const now = new Date();
 
     for (const preset of VAIDYA_MANUAL_QA_TEMPLATE) {
+      catalogSectionKeys.add(preset.sectionKey);
+      const sectionOverride = sectionOverrides.get(preset.sectionKey);
+      if (sectionOverride?.active === false || sections.has(preset.sectionKey)) {
+        continue;
+      }
+      sections.set(preset.sectionKey, {
+        key: preset.sectionKey,
+        title: sectionOverride?.title ?? preset.sectionTitle,
+        is_custom: false,
+        questions: [],
+      });
+    }
+
+    for (const preset of VAIDYA_MANUAL_QA_TEMPLATE) {
       const templateKey = `${preset.sectionKey}::${preset.question}`;
+      catalogTemplateKeys.add(templateKey);
+      const sectionOverride = sectionOverrides.get(preset.sectionKey);
+      if (sectionOverride?.active === false) {
+        continue;
+      }
+
       const existing = byTemplateKey.get(templateKey);
+      if (existing?.removedAt) {
+        continue;
+      }
+
       const row = this.toTemplateQuestionResponse({
         row: existing
           ? this.buildManualEntryResponse(existing)
@@ -262,30 +295,77 @@ export class KnowledgeAdminService {
       });
 
       const key = preset.sectionKey;
-      if (!sections.has(key)) {
-        sections.set(key, {
-          key,
-          title: preset.sectionTitle,
+      sections.get(key)!.questions.push(row);
+    }
+
+    const customSectionOverride = sectionOverrides.get('custom');
+    if (customSectionOverride?.active !== false) {
+      sections.set('custom', {
+        key: 'custom',
+        title: customSectionOverride?.title ?? 'Custom Q&A',
+        is_custom: true,
+        questions: [],
+      });
+    }
+
+    for (const sectionRow of sectionRows) {
+      if (!sectionRow.active || sections.has(sectionRow.sectionKey)) {
+        continue;
+      }
+      sections.set(sectionRow.sectionKey, {
+        key: sectionRow.sectionKey,
+        title: sectionRow.title,
+        is_custom: sectionRow.isCustom,
+        questions: [],
+      });
+    }
+
+    for (const existing of existingRows) {
+      if (
+        existing.removedAt ||
+        !existing.sectionKey ||
+        catalogTemplateKeys.has(existing.templateKey ?? '')
+      ) {
+        continue;
+      }
+
+      // Do not reintroduce blank rows imported from the older, larger starter
+      // template. Any answered/approved legacy row remains visible as clinic data.
+      if (
+        existing.templateKey &&
+        existing.answer.trim().length === 0 &&
+        existing.status !== 'approved' &&
+        !existing.qaApproved
+      ) {
+        continue;
+      }
+
+      const sectionOverride = sectionOverrides.get(existing.sectionKey);
+      if (sectionOverride?.active === false) {
+        continue;
+      }
+
+      if (!sections.has(existing.sectionKey)) {
+        const fallbackTitle = existing.sectionKey
+          .split('_')
+          .filter(Boolean)
+          .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+          .join(' ');
+        sections.set(existing.sectionKey, {
+          key: existing.sectionKey,
+          title: sectionOverride?.title ?? (fallbackTitle || 'Custom Section'),
+          is_custom: sectionOverride?.isCustom ?? !catalogSectionKeys.has(existing.sectionKey),
           questions: [],
         });
       }
 
-      sections.get(key)!.questions.push(row);
-    }
-
-    const customRows = existingRows.filter((row) => row.sectionKey === 'custom');
-    if (customRows.length > 0) {
-      sections.set('custom', {
-        key: 'custom',
-        title: 'Custom Q&A',
-        questions: customRows.map((row) =>
-          this.toTemplateQuestionResponse({
-            row: this.buildManualEntryResponse(row),
-            exists: true,
-            serviceNameRequired: false,
-          }),
-        ),
-      });
+      sections.get(existing.sectionKey)!.questions.push(
+        this.toTemplateQuestionResponse({
+          row: this.buildManualEntryResponse(existing),
+          exists: true,
+          serviceNameRequired: existing.category === 'service_specific',
+        }),
+      );
     }
 
     const allQuestions = Array.from(sections.values()).flatMap((section) => section.questions);
@@ -305,6 +385,222 @@ export class KnowledgeAdminService {
       sections: Array.from(sections.values()),
       summary,
     };
+  }
+
+  async createManualSection(input: { clinicId: string; title: string }) {
+    const title = input.title.trim();
+    const sectionRows = await this.repos.knowledge.listKnowledgeSections(input.clinicId);
+    const defaultSections = Array.from(
+      new Map(
+        VAIDYA_MANUAL_QA_TEMPLATE.map((preset) => [
+          preset.sectionKey,
+          { key: preset.sectionKey, title: preset.sectionTitle },
+        ]),
+      ).values(),
+    );
+    defaultSections.push({ key: 'custom', title: 'Custom Q&A' });
+
+    const activeTitles = new Set(
+      defaultSections
+        .filter(
+          (section) => sectionRows.find((row) => row.sectionKey === section.key)?.active !== false,
+        )
+        .map((section) => {
+          const override = sectionRows.find((row) => row.sectionKey === section.key);
+          return (override?.title ?? section.title).trim().toLowerCase();
+        }),
+    );
+    for (const row of sectionRows) {
+      if (row.active) {
+        activeTitles.add(row.title.trim().toLowerCase());
+      }
+    }
+    if (activeTitles.has(title.toLowerCase())) {
+      throw new AppError('CONFLICT', 'A knowledge section with this name already exists.');
+    }
+
+    const slug =
+      title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 40) || 'section';
+    const sectionKey = `custom_${slug}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+    const [created] = await this.repos.knowledge.upsertKnowledgeSection({
+      clinicId: input.clinicId,
+      sectionKey,
+      title,
+      isCustom: true,
+      active: true,
+      sortOrder: 100 + sectionRows.length,
+    });
+    if (!created) {
+      throw new AppError('INTERNAL_ERROR', 'Failed to create the knowledge section.');
+    }
+    return {
+      key: created.sectionKey,
+      title: created.title,
+      is_custom: created.isCustom,
+      questions: [],
+    };
+  }
+
+  async updateManualSection(input: { clinicId: string; sectionKey: string; title: string }) {
+    const sectionRows = await this.repos.knowledge.listKnowledgeSections(input.clinicId);
+    const existingOverride = sectionRows.find((row) => row.sectionKey === input.sectionKey);
+    const defaultTitle =
+      input.sectionKey === 'custom'
+        ? 'Custom Q&A'
+        : VAIDYA_MANUAL_QA_TEMPLATE.find((preset) => preset.sectionKey === input.sectionKey)
+            ?.sectionTitle;
+    if (existingOverride?.active === false || (!existingOverride && !defaultTitle)) {
+      throw new AppError('NOT_FOUND', 'Knowledge section not found.');
+    }
+
+    const title = input.title.trim();
+    const effectiveActiveSections = new Map<string, string>();
+    for (const preset of VAIDYA_MANUAL_QA_TEMPLATE) {
+      if (!effectiveActiveSections.has(preset.sectionKey)) {
+        const override = sectionRows.find((row) => row.sectionKey === preset.sectionKey);
+        if (override?.active !== false) {
+          effectiveActiveSections.set(preset.sectionKey, override?.title ?? preset.sectionTitle);
+        }
+      }
+    }
+    const customOverride = sectionRows.find((row) => row.sectionKey === 'custom');
+    if (customOverride?.active !== false) {
+      effectiveActiveSections.set('custom', customOverride?.title ?? 'Custom Q&A');
+    }
+    for (const row of sectionRows) {
+      if (row.active) {
+        effectiveActiveSections.set(row.sectionKey, row.title);
+      }
+    }
+    const duplicate = Array.from(effectiveActiveSections).some(
+      ([sectionKey, sectionTitle]) =>
+        sectionKey !== input.sectionKey &&
+        sectionTitle.trim().toLowerCase() === title.toLowerCase(),
+    );
+    if (duplicate) {
+      throw new AppError('CONFLICT', 'A knowledge section with this name already exists.');
+    }
+
+    const [updated] = await this.repos.knowledge.upsertKnowledgeSection({
+      clinicId: input.clinicId,
+      sectionKey: input.sectionKey,
+      title,
+      isCustom: existingOverride?.isCustom ?? (input.sectionKey === 'custom' || !defaultTitle),
+      active: true,
+      sortOrder: existingOverride?.sortOrder ?? 0,
+    });
+    if (!updated) {
+      throw new AppError('INTERNAL_ERROR', 'Failed to update the knowledge section.');
+    }
+    return {
+      key: updated.sectionKey,
+      title: updated.title,
+      is_custom: updated.isCustom,
+    };
+  }
+
+  async removeManualSection(input: { clinicId: string; sectionKey: string }) {
+    const [sectionRows, entries] = await Promise.all([
+      this.repos.knowledge.listKnowledgeSections(input.clinicId),
+      this.repos.knowledge.listVisibleSectionEntries(input.clinicId, input.sectionKey),
+    ]);
+    const existingOverride = sectionRows.find((row) => row.sectionKey === input.sectionKey);
+    const defaultTitle =
+      input.sectionKey === 'custom'
+        ? 'Custom Q&A'
+        : VAIDYA_MANUAL_QA_TEMPLATE.find((preset) => preset.sectionKey === input.sectionKey)
+            ?.sectionTitle;
+    if (existingOverride?.active === false || (!existingOverride && !defaultTitle)) {
+      throw new AppError('NOT_FOUND', 'Knowledge section not found.');
+    }
+    if (entries.some((entry) => entry.status === 'approved' || entry.qaApproved)) {
+      throw new AppError(
+        'CONFLICT',
+        'This section contains approved questions. Disable them before removing the section.',
+      );
+    }
+
+    const archived = await this.repos.knowledge.archiveKnowledgeSection({
+      clinicId: input.clinicId,
+      sectionKey: input.sectionKey,
+      title: existingOverride?.title ?? defaultTitle ?? 'Section',
+      isCustom: existingOverride?.isCustom ?? (input.sectionKey === 'custom' || !defaultTitle),
+      active: false,
+      sortOrder: existingOverride?.sortOrder ?? 0,
+    });
+    if (archived.blocked) {
+      throw new AppError(
+        'CONFLICT',
+        'This section contains approved questions. Disable them before removing the section.',
+      );
+    }
+    if (!archived.section) {
+      throw new AppError('INTERNAL_ERROR', 'Failed to remove the knowledge section.');
+    }
+    return { removed: true, section_key: input.sectionKey };
+  }
+
+  async removeManualQuestion(input: { clinicId: string; knowledgeId: string }) {
+    if (input.knowledgeId.startsWith('template:')) {
+      const preset = VAIDYA_MANUAL_QA_TEMPLATE.find(
+        (candidate) =>
+          `template:${candidate.sectionKey}:${candidate.question}` === input.knowledgeId,
+      );
+      if (!preset) {
+        throw new AppError('NOT_FOUND', 'Knowledge question not found.');
+      }
+
+      const templateKey = `${preset.sectionKey}::${preset.question}`;
+      const [existing] = await this.repos.knowledge.findByTemplateKey(input.clinicId, templateKey);
+      if (existing) {
+        if (existing.removedAt) {
+          return { removed: true, knowledge_id: input.knowledgeId };
+        }
+        if (existing.status === 'approved' || existing.qaApproved) {
+          throw new AppError(
+            'CONFLICT',
+            'Approved questions must be disabled before they can be removed.',
+          );
+        }
+        await this.repos.knowledge.removeKnowledgeEntry(input.clinicId, existing.id);
+      } else {
+        await this.repos.knowledge.createKnowledgeEntry({
+          clinicId: input.clinicId,
+          templateKey,
+          sectionKey: preset.sectionKey,
+          question: preset.question,
+          answer: '',
+          category: preset.category,
+          sourceFile: VAIDYA_MANUAL_TEMPLATE_SOURCE,
+          applicable: false,
+          qaApproved: false,
+          status: 'disabled',
+          embeddingStatus: 'not_required',
+          removedAt: new Date(),
+        });
+      }
+      return { removed: true, knowledge_id: input.knowledgeId };
+    }
+
+    const [existing] = await this.repos.knowledge.findKnowledgeEntry(
+      input.clinicId,
+      input.knowledgeId,
+    );
+    if (!existing) {
+      throw new AppError('NOT_FOUND', 'Knowledge question not found.');
+    }
+    if (existing.status === 'approved' || existing.qaApproved) {
+      throw new AppError(
+        'CONFLICT',
+        'Approved questions must be disabled before they can be removed.',
+      );
+    }
+    await this.repos.knowledge.removeKnowledgeEntry(input.clinicId, existing.id);
+    return { removed: true, knowledge_id: existing.id };
   }
 
   async importManualTemplate(input: { clinicId: string }) {

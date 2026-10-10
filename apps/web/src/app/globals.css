@@ -9,7 +9,6 @@
 }
 
 html {
-  overflow-x: clip;
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
@@ -22,13 +21,61 @@ html {
 body {
   @apply min-h-screen bg-page text-slate-900 antialiased;
   min-height: 100dvh;
-  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code {
   @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em];
+}
+
+/* Doctor rows respond to the card width, not the viewport. The card can sit in
+   either one or two page columns depending on the available workspace width. */
+.doctor-management-card {
+  container-name: doctors;
+  container-type: inline-size;
+}
+
+@container doctors (min-width: 28rem) {
+  .doctor-summary-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .doctor-editor-header {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .doctor-add-button {
+    width: auto;
+  }
+
+  .doctor-editor-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .doctor-service-field {
+    grid-column: 1 / -1;
+  }
+}
+
+@container doctors (min-width: 48rem) {
+  .doctor-editor-row {
+    grid-template-columns:
+      minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.35fr) minmax(6rem, 0.65fr)
+      auto;
+  }
+
+  .doctor-service-field {
+    grid-column: auto;
+  }
+
+  .doctor-remove-button {
+    width: auto;
+  }
 }
 
 /* Keep the two-column sign-in screen usable on short laptop and tablet displays. */

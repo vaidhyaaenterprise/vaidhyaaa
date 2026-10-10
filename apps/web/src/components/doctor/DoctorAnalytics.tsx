@@ -4,7 +4,15 @@ import { useState } from 'react';
 
 import { useAuth } from '@/components/auth/AuthProvider';
 
-import { DAILY_DATA, WEEKLY_DATA, MONTHLY_DATA, CONDITIONS, VISIT_TYPES, AGE_GROUPS, type DailyData } from './doctor-data';
+import {
+  DAILY_DATA,
+  WEEKLY_DATA,
+  MONTHLY_DATA,
+  CONDITIONS,
+  VISIT_TYPES,
+  AGE_GROUPS,
+  type DailyData,
+} from './doctor-data';
 
 type GroupBy = 'daily' | 'weekly' | 'monthly';
 type ChartType = 'area' | 'bar' | 'line';
@@ -31,12 +39,13 @@ export function DoctorAnalytics() {
       <div className="mb-5">
         <h1 className="text-[26px] font-black tracking-tight text-slate-900">Patient Analytics</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Visualise patient visits, conditions, and trends for {me?.user.name ?? 'the signed-in doctor'}
+          Visualise patient visits, conditions, and trends for{' '}
+          {me?.user.name ?? 'the signed-in doctor'}
         </p>
       </div>
 
       {/* Stats */}
-      <div className="mb-5 grid grid-cols-2 gap-[14px] lg:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-[14px] xl:grid-cols-4">
         <StatCard label="Total This Month" value={totalThisMonth} sub="+12% vs last month" />
         <StatCard label="New Patients" value={totalNew} sub="of this month's total" />
         <StatCard label="Avg Per Day" value={avgPerDay} sub="across working days" />
@@ -48,7 +57,9 @@ export function DoctorAnalytics() {
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-base font-extrabold text-slate-900">Patient Visit Trends</p>
-            <p className="mt-0.5 text-xs text-slate-500">Total, new, and follow-up patients over time</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Total, new, and follow-up patients over time
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <FilterBox
@@ -64,7 +75,11 @@ export function DoctorAnalytics() {
           </div>
         </div>
         <div className="min-h-[280px]">
-          {chartType === 'bar' ? <BarChart data={data} /> : <LineAreaChart data={data} filled={chartType === 'area'} />}
+          {chartType === 'bar' ? (
+            <BarChart data={data} />
+          ) : (
+            <LineAreaChart data={data} filled={chartType === 'area'} />
+          )}
         </div>
         <div className="mt-[10px] flex flex-wrap justify-center gap-[14px]">
           <LegendDot color="#0f766e" label="Total" />
@@ -74,13 +89,18 @@ export function DoctorAnalytics() {
       </div>
 
       {/* Bottom Grid */}
-      <div className="mb-5 grid gap-4 lg:grid-cols-3">
+      <div
+        data-testid="doctor-analytics-breakdown"
+        className="mb-5 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3 [&>*]:min-w-0"
+      >
         {/* Top Conditions */}
         <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">◉ Top Conditions</p>
-          <div className="grid grid-cols-[150px_1fr] items-center gap-[14px]">
+          <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">
+            ◉ Top Conditions
+          </p>
+          <div className="grid min-w-0 gap-4 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-center">
             <div
-              className="h-[150px] w-[150px] rounded-full"
+              className="mx-auto h-[150px] w-[150px] rounded-full"
               style={{ background: `conic-gradient(${buildConicGradient(CONDITIONS)})` }}
             >
               <div className="flex h-full items-center justify-center">
@@ -91,7 +111,10 @@ export function DoctorAnalytics() {
               {CONDITIONS.slice(0, 5).map(([name, value, color]) => (
                 <div key={name} className="flex items-center justify-between gap-2 text-xs">
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-[10px] w-[10px] rounded-[3px]" style={{ background: color }} />
+                    <span
+                      className="inline-block h-[10px] w-[10px] rounded-[3px]"
+                      style={{ background: color }}
+                    />
                     {name}
                   </span>
                   <strong>{value}</strong>
@@ -103,10 +126,12 @@ export function DoctorAnalytics() {
 
         {/* Visit Type */}
         <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">▥ Visit Type</p>
-          <div className="grid grid-cols-[150px_1fr] items-center gap-[14px]">
+          <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">
+            ▥ Visit Type
+          </p>
+          <div className="grid min-w-0 gap-4 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-center">
             <div
-              className="h-[150px] w-[150px] rounded-full"
+              className="mx-auto h-[150px] w-[150px] rounded-full"
               style={{ background: `conic-gradient(${buildConicGradient(VISIT_TYPES)})` }}
             >
               <div className="flex h-full items-center justify-center">
@@ -117,7 +142,10 @@ export function DoctorAnalytics() {
               {VISIT_TYPES.map(([name, value, color]) => (
                 <div key={name} className="flex items-center justify-between gap-2 text-xs">
                   <span className="flex items-center gap-1.5">
-                    <span className="inline-block h-[10px] w-[10px] rounded-[3px]" style={{ background: color }} />
+                    <span
+                      className="inline-block h-[10px] w-[10px] rounded-[3px]"
+                      style={{ background: color }}
+                    />
                     {name}
                   </span>
                   <strong>{value}</strong>
@@ -129,23 +157,37 @@ export function DoctorAnalytics() {
 
         {/* Age Distribution */}
         <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">👥 Age Distribution</p>
+          <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">
+            👥 Age Distribution
+          </p>
           <AgeDistribution />
         </div>
       </div>
 
       {/* Monthly Summary Table */}
       <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">Monthly Summary</p>
+        <p className="mb-4 flex items-center gap-[7px] text-[15px] font-extrabold text-slate-900">
+          Monthly Summary
+        </p>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>
-                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Month</th>
-                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Total Patients</th>
-                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">New Patients</th>
-                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Follow-ups</th>
-                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Avg / Day</th>
+                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                  Month
+                </th>
+                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                  Total Patients
+                </th>
+                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                  New Patients
+                </th>
+                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                  Follow-ups
+                </th>
+                <th className="border-b border-slate-100 px-3 py-[10px] text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                  Avg / Day
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -165,7 +207,9 @@ export function DoctorAnalytics() {
                         {row.followUp}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-sm text-slate-500">{Math.round(row.patients / workDays)}</td>
+                    <td className="px-3 py-3 text-sm text-slate-500">
+                      {Math.round(row.patients / workDays)}
+                    </td>
                   </tr>
                 );
               })}
@@ -189,10 +233,18 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub: st
   );
 }
 
-function FilterBox<T extends string>({ options, value, onChange }: { options: readonly T[]; value: T; onChange: (v: T) => void }) {
+function FilterBox<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
   return (
     <div className="flex gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-      {options.map(opt => (
+      {options.map((opt) => (
         <button
           key={opt}
           type="button"
@@ -211,16 +263,23 @@ function FilterBox<T extends string>({ options, value, onChange }: { options: re
 }
 
 function BarChart({ data }: { data: DailyData[] }) {
-  const max = Math.max(...data.map(d => d.patients), 1);
+  const max = Math.max(...data.map((d) => d.patients), 1);
   return (
     <div className="flex h-[235px] items-end gap-3 border-b border-slate-100 px-1.5 pt-5">
-      {data.map(d => {
+      {data.map((d) => {
         const totalH = Math.max(8, (d.patients / max) * 205);
         const newH = totalH * (d.patients > 0 ? d.newPatients / d.patients : 0);
         const followH = totalH - newH;
         return (
-          <div key={d.label} className="flex flex-1 flex-col items-center justify-end gap-2" title={`${d.label}: ${d.patients}`}>
-            <div className="flex w-full max-w-[54px] flex-col justify-end overflow-hidden rounded-t-lg bg-slate-200" style={{ height: totalH }}>
+          <div
+            key={d.label}
+            className="flex flex-1 flex-col items-center justify-end gap-2"
+            title={`${d.label}: ${d.patients}`}
+          >
+            <div
+              className="flex w-full max-w-[54px] flex-col justify-end overflow-hidden rounded-t-lg bg-slate-200"
+              style={{ height: totalH }}
+            >
               <div className="bg-teal-700" style={{ height: followH }} />
               <div className="bg-blue-600" style={{ height: newH }} />
             </div>
@@ -233,25 +292,39 @@ function BarChart({ data }: { data: DailyData[] }) {
 }
 
 function LineAreaChart({ data, filled }: { data: DailyData[]; filled: boolean }) {
-  const max = Math.max(...data.map(d => d.patients), 1);
+  const max = Math.max(...data.map((d) => d.patients), 1);
   const points = data.map((d, i) => {
     const x = data.length === 1 ? 40 : 40 + i * (520 / (data.length - 1));
     const y = 220 - (d.patients / max) * 180;
     return { x, y, d };
   });
-  const line = points.map(p => `${p.x},${p.y}`).join(' ');
+  const line = points.map((p) => `${p.x},${p.y}`).join(' ');
 
   return (
-    <svg viewBox="0 0 600 260" role="img" aria-label="Patient trend chart" className="h-[260px] w-full">
+    <svg
+      viewBox="0 0 600 260"
+      role="img"
+      aria-label="Patient trend chart"
+      className="h-[260px] w-full"
+    >
       <line x1="40" y1="40" x2="560" y2="40" stroke="#f1f5f9" strokeWidth="1" />
       <line x1="40" y1="100" x2="560" y2="100" stroke="#f1f5f9" strokeWidth="1" />
       <line x1="40" y1="160" x2="560" y2="160" stroke="#f1f5f9" strokeWidth="1" />
       <line x1="40" y1="220" x2="560" y2="220" stroke="#f1f5f9" strokeWidth="1" />
       {filled && <polygon points={`40,220 ${line} 560,220`} fill="rgba(15,118,110,0.12)" />}
-      <polyline points={line} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline
+        points={line}
+        fill="none"
+        stroke="#0f766e"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       {points.map((p, i) => (
         <circle key={i} cx={p.x} cy={p.y} r="5" fill="#0f766e">
-          <title>{p.d.label}: {p.d.patients} patients</title>
+          <title>
+            {p.d.label}: {p.d.patients} patients
+          </title>
         </circle>
       ))}
       {points.map((p, i) => (
@@ -266,7 +339,10 @@ function LineAreaChart({ data, filled }: { data: DailyData[]; filled: boolean })
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-slate-600">
-      <span className="inline-block h-[10px] w-[10px] rounded-[3px]" style={{ background: color }} />
+      <span
+        className="inline-block h-[10px] w-[10px] rounded-[3px]"
+        style={{ background: color }}
+      />
       {label}
     </span>
   );
@@ -277,7 +353,11 @@ function AgeDistribution() {
   return (
     <div className="flex h-[210px] items-end gap-2">
       {AGE_GROUPS.map(([label, count], idx) => (
-        <div key={label} className="flex flex-1 flex-col items-center justify-end gap-1.5" style={{ height: '100%' }}>
+        <div
+          key={label}
+          className="flex flex-1 flex-col items-center justify-end gap-1.5"
+          style={{ height: '100%' }}
+        >
           <div
             className={`w-full max-w-[34px] rounded-t-[5px] ${idx % 2 === 0 ? 'bg-amber-600' : 'bg-amber-400'}`}
             style={{ height: `${Math.max(8, (count / max) * 180)}px` }}

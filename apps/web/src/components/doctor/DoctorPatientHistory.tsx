@@ -114,11 +114,15 @@ export function DoctorPatientHistory() {
         return;
       }
 
-      const rows = await searchPatientHistory(clinicId, {
-        ...(filter.phone.trim() ? { phone: filter.phone.trim() } : {}),
-        ...(filter.name.trim() ? { name: filter.name.trim() } : {}),
-        ...(age !== undefined ? { age } : {}),
-      }, controller.signal);
+      const rows = await searchPatientHistory(
+        clinicId,
+        {
+          ...(filter.phone.trim() ? { phone: filter.phone.trim() } : {}),
+          ...(filter.name.trim() ? { name: filter.name.trim() } : {}),
+          ...(age !== undefined ? { age } : {}),
+        },
+        controller.signal,
+      );
 
       if (controller.signal.aborted || activeSearchControllerRef.current !== controller) {
         return;
@@ -148,7 +152,8 @@ export function DoctorPatientHistory() {
       <div className="mb-5">
         <h1 className="text-[26px] font-black tracking-tight text-slate-900">Patient History</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Search by phone number, patient name, or age. Click a patient name bar to open full history.
+          Search by phone number, patient name, or age. Click a patient name bar to open full
+          history.
         </p>
       </div>
 
@@ -156,8 +161,11 @@ export function DoctorPatientHistory() {
         onSubmit={onSearch}
         className="mb-5 rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"
       >
-        <div className="grid gap-3 lg:grid-cols-3">
-          <label className="text-xs font-bold uppercase tracking-wide text-slate-500" htmlFor="history-phone">
+        <div className="grid gap-3 xl:grid-cols-3">
+          <label
+            className="text-xs font-bold uppercase tracking-wide text-slate-500"
+            htmlFor="history-phone"
+          >
             Phone
             <input
               id="history-phone"
@@ -168,7 +176,10 @@ export function DoctorPatientHistory() {
             />
           </label>
 
-          <label className="text-xs font-bold uppercase tracking-wide text-slate-500" htmlFor="history-name">
+          <label
+            className="text-xs font-bold uppercase tracking-wide text-slate-500"
+            htmlFor="history-name"
+          >
             Patient Name
             <input
               id="history-name"
@@ -179,7 +190,10 @@ export function DoctorPatientHistory() {
             />
           </label>
 
-          <label className="text-xs font-bold uppercase tracking-wide text-slate-500" htmlFor="history-age">
+          <label
+            className="text-xs font-bold uppercase tracking-wide text-slate-500"
+            htmlFor="history-age"
+          >
             Age
             <input
               id="history-age"
@@ -205,12 +219,13 @@ export function DoctorPatientHistory() {
       </form>
 
       {loading ? (
-        <LoadingState title="Searching patient history" description="Fetching records from clinic database." />
+        <LoadingState
+          title="Searching patient history"
+          description="Fetching records from clinic database."
+        />
       ) : null}
 
-      {!loading && error ? (
-        <ErrorState title="Search failed" description={error} />
-      ) : null}
+      {!loading && error ? <ErrorState title="Search failed" description={error} /> : null}
 
       {!loading && !error && hasSearched && patients.length === 0 ? (
         <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-8 py-12 text-center">
@@ -239,7 +254,9 @@ export function DoctorPatientHistory() {
                       {patient.age !== null ? ` · ${patient.age} yrs` : ''}
                       {patient.gender ? ` · ${patient.gender}` : ''}
                     </p>
-                    <p className={`mt-1 text-xs font-semibold ${latestVisit ? 'text-teal-700' : 'text-slate-400'}`}>
+                    <p
+                      className={`mt-1 text-xs font-semibold ${latestVisit ? 'text-teal-700' : 'text-slate-400'}`}
+                    >
                       {latestVisit ? `Last visited: ${latestVisit}` : 'No completed visit yet'}
                     </p>
                   </div>
@@ -301,20 +318,38 @@ export function DoctorPatientHistory() {
                   <table className="w-full border-collapse">
                     <thead>
                       <tr>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Date</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Phone</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Type</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Doctor</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Service</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Reason</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Examination</th>
-                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">Status</th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Date
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Phone
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Type
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Doctor
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Service
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Reason
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Examination
+                        </th>
+                        <th className="border-b border-slate-100 px-2 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
+                          Status
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {selectedPatient.history.map((row) => (
                         <tr key={`${row.kind}-${row.id}`} className="even:bg-slate-50">
-                          <td className="px-2 py-2 text-sm text-slate-700">{formatDateTime(row.at)}</td>
+                          <td className="px-2 py-2 text-sm text-slate-700">
+                            {formatDateTime(row.at)}
+                          </td>
                           <td className="whitespace-nowrap px-2 py-2 text-sm text-slate-700">
                             {selectedPatient.phone ?? 'No phone'}
                           </td>
@@ -322,8 +357,12 @@ export function DoctorPatientHistory() {
                             {row.kind === 'visit' ? 'Visit' : 'Appointment'}
                           </td>
                           <td className="px-2 py-2 text-sm text-slate-700">{row.doctor_name}</td>
-                          <td className="px-2 py-2 text-sm text-slate-700">{row.clinic_service_name}</td>
-                          <td className="px-2 py-2 text-sm text-slate-700">{row.reason_for_visit}</td>
+                          <td className="px-2 py-2 text-sm text-slate-700">
+                            {row.clinic_service_name}
+                          </td>
+                          <td className="px-2 py-2 text-sm text-slate-700">
+                            {row.reason_for_visit}
+                          </td>
                           <td className="px-2 py-2 text-sm text-slate-700">
                             {row.kind === 'visit' || hasClinicalDetails(row) ? (
                               <div className="space-y-1">
@@ -341,10 +380,14 @@ export function DoctorPatientHistory() {
                                 </p>
                               </div>
                             ) : (
-                              <span className="text-xs font-semibold text-slate-400">Captured after visit</span>
+                              <span className="text-xs font-semibold text-slate-400">
+                                Captured after visit
+                              </span>
                             )}
                           </td>
-                          <td className="px-2 py-2 text-sm text-slate-700">{row.status ?? 'visited'}</td>
+                          <td className="px-2 py-2 text-sm text-slate-700">
+                            {row.status ?? 'visited'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

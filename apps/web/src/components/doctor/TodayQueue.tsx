@@ -213,74 +213,77 @@ export function TodayQueue() {
     activeClinicIdRef.current = clinicId;
   }, [clinicId]);
 
-  const loadQueue = useCallback(async (signal?: AbortSignal) => {
-    const loadSequence = ++queueLoadSequenceRef.current;
-    if (!clinicId) {
-      setPatients([]);
-      setLoadingQueue(false);
-      setQueueError('Clinic context missing. Please re-login.');
-      return;
-    }
-
-    setLoadingQueue(true);
-    setQueueError(null);
-
-    try {
-      const cached = appointmentRowsCacheRef.current;
-      const rows =
-        cached?.clinicId === clinicId
-          ? cached.rows
-          : await fetchAppointments(clinicId, ['confirmed', 'visited'], signal);
-      if (loadSequence !== queueLoadSequenceRef.current || signal?.aborted) {
-        return;
-      }
-      if (cached?.clinicId !== clinicId) {
-        appointmentRowsCacheRef.current = { clinicId, rows };
-      }
-      const dateRows = rows
-        .filter((row) => appointmentDatePart(row.appointment_start) === selectedDate)
-        .sort((left, right) => left.appointment_start.localeCompare(right.appointment_start));
-      const mapped = dateRows.map(mapAppointmentToQueuePatient);
-
-      setPatients((previous) => {
-        const previousStatus = new Map(previous.map((patient) => [patient.id, patient.status]));
-        return mapped.map((patient) => {
-          const lastStatus = previousStatus.get(patient.id);
-          if (
-            patient.status === 'waiting' &&
-            (lastStatus === 'in-progress' || lastStatus === 'skipped')
-          ) {
-            return { ...patient, status: lastStatus };
-          }
-          return patient;
-        });
-      });
-
-      setSelectedId((current) => {
-        if (!current) {
-          return null;
-        }
-        return mapped.some((patient) => patient.id === current && patient.status !== 'visited')
-          ? current
-          : null;
-      });
-    } catch (error) {
-      if (isAbortError(error) || loadSequence !== queueLoadSequenceRef.current) {
-        return;
-      }
-      setQueueError(
-        error instanceof ApiRequestError
-          ? error.apiError.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to load today queue.',
-      );
-    } finally {
-      if (loadSequence === queueLoadSequenceRef.current && !signal?.aborted) {
+  const loadQueue = useCallback(
+    async (signal?: AbortSignal) => {
+      const loadSequence = ++queueLoadSequenceRef.current;
+      if (!clinicId) {
+        setPatients([]);
         setLoadingQueue(false);
+        setQueueError('Clinic context missing. Please re-login.');
+        return;
       }
-    }
-  }, [clinicId, selectedDate]);
+
+      setLoadingQueue(true);
+      setQueueError(null);
+
+      try {
+        const cached = appointmentRowsCacheRef.current;
+        const rows =
+          cached?.clinicId === clinicId
+            ? cached.rows
+            : await fetchAppointments(clinicId, ['confirmed', 'visited'], signal);
+        if (loadSequence !== queueLoadSequenceRef.current || signal?.aborted) {
+          return;
+        }
+        if (cached?.clinicId !== clinicId) {
+          appointmentRowsCacheRef.current = { clinicId, rows };
+        }
+        const dateRows = rows
+          .filter((row) => appointmentDatePart(row.appointment_start) === selectedDate)
+          .sort((left, right) => left.appointment_start.localeCompare(right.appointment_start));
+        const mapped = dateRows.map(mapAppointmentToQueuePatient);
+
+        setPatients((previous) => {
+          const previousStatus = new Map(previous.map((patient) => [patient.id, patient.status]));
+          return mapped.map((patient) => {
+            const lastStatus = previousStatus.get(patient.id);
+            if (
+              patient.status === 'waiting' &&
+              (lastStatus === 'in-progress' || lastStatus === 'skipped')
+            ) {
+              return { ...patient, status: lastStatus };
+            }
+            return patient;
+          });
+        });
+
+        setSelectedId((current) => {
+          if (!current) {
+            return null;
+          }
+          return mapped.some((patient) => patient.id === current && patient.status !== 'visited')
+            ? current
+            : null;
+        });
+      } catch (error) {
+        if (isAbortError(error) || loadSequence !== queueLoadSequenceRef.current) {
+          return;
+        }
+        setQueueError(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : error instanceof Error
+              ? error.message
+              : 'Failed to load today queue.',
+        );
+      } finally {
+        if (loadSequence === queueLoadSequenceRef.current && !signal?.aborted) {
+          setLoadingQueue(false);
+        }
+      }
+    },
+    [clinicId, selectedDate],
+  );
 
   useEffect(() => {
     if (appointmentRowsCacheRef.current?.clinicId === clinicId) {
@@ -537,7 +540,7 @@ export function TodayQueue() {
 
       {/* Hero */}
       <div className="mb-5 rounded-[22px] bg-gradient-to-br from-teal-700 to-slate-900 p-5">
-        <div className="grid items-center gap-[18px] lg:grid-cols-[1.5fr_1fr]">
+        <div className="grid min-w-0 items-center gap-[18px] xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
           <div>
             <h2 className="mb-1.5 text-xl font-black text-white">
               {patients.length} appointments{' '}
@@ -581,7 +584,7 @@ export function TodayQueue() {
 
       {/* Split: Queue + Consultation Panel */}
       <div
-        className={`grid gap-[18px] ${currentConsult ? 'lg:grid-cols-[1fr_1.3fr]' : 'grid-cols-1'}`}
+        className={`grid min-w-0 gap-[18px] ${currentConsult ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]' : 'grid-cols-1'}`}
       >
         {/* Queue Column */}
         <div>
@@ -966,7 +969,7 @@ function ConsultationPanel({
       </div>
 
       {/* Body */}
-      <div className="grid gap-[18px] p-5 lg:grid-cols-2">
+      <div className="grid min-w-0 gap-[18px] p-5 xl:grid-cols-2">
         {/* Visit History */}
         <div>
           <div className="mb-[10px] flex items-center gap-2 text-sm font-extrabold text-slate-900">

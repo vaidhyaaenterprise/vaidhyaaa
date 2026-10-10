@@ -693,7 +693,7 @@ export default function LoginPage() {
                         aria-hidden
                       />
                     ) : null}
-                    <div className="flex w-[88px] flex-col items-center xl:w-[108px] 2xl:w-[118px]">
+                    <div className="flex min-w-0 flex-1 flex-col items-center px-0.5 xl:px-1">
                       <Icon className="h-8 w-8 text-[#0B7A2A] xl:h-10 xl:w-10" />
                       <span className="mt-2 text-[11.5px] font-semibold leading-snug text-[#1c2b45] xl:text-[13px] 2xl:text-[13.5px]">
                         {feature.title}

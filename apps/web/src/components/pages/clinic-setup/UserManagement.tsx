@@ -117,16 +117,17 @@ export function UserManagement() {
   const [credentialModal, setCredentialModal] = useState<CredentialModalState>(null);
   const [deleteTarget, setDeleteTarget] = useState<ClinicUser | null>(null);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [preparingCreate, setPreparingCreate] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const closeCredentialModal = useCallback(() => setCredentialModal(null), []);
   const closeDeleteModal = useCallback(() => setDeleteTarget(null), []);
   const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const loadData = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true): Promise<boolean> => {
       const request = beginLoad();
       if (!request) {
-        return;
+        return false;
       }
       if (!isAdmin || !clinicId) {
         if (request.isCurrent()) {
@@ -135,7 +136,7 @@ export function UserManagement() {
           setDoctors([]);
           setLoading(false);
         }
-        return;
+        return false;
       }
 
       if (showLoading) {
@@ -148,7 +149,7 @@ export function UserManagement() {
           fetchClinicUsers(clinicId, request.signal),
           fetchDoctors(clinicId, request.signal),
         ]);
-        if (!request.isCurrent()) return;
+        if (!request.isCurrent()) return false;
         setUsers(userData.users.map(mapUser));
         setClinicLoginNumber(
           userData.clinic_login_number === null || userData.clinic_login_number === undefined
@@ -156,11 +157,13 @@ export function UserManagement() {
             : String(userData.clinic_login_number),
         );
         setDoctors(doctorData);
+        return true;
       } catch (loadError) {
-        if (!request.isCurrent() || isAbortError(loadError)) return;
+        if (!request.isCurrent() || isAbortError(loadError)) return false;
         const message = apiMessage(loadError, 'Failed to load clinic users.');
         if (showLoading) setError(message);
         else setActionError(message);
+        return false;
       } finally {
         if (showLoading && request.isCurrent()) setLoading(false);
       }
@@ -172,6 +175,7 @@ export function UserManagement() {
     setCredentialModal(null);
     setDeleteTarget(null);
     setUpdatingUserId(null);
+    setPreparingCreate(false);
     setActionError(null);
     setError(null);
     void loadData();
@@ -208,6 +212,7 @@ export function UserManagement() {
     () => users.filter((user) => user.membershipActive && user.accountActive).length,
     [users],
   );
+  const userManagementBusy = preparingCreate || updatingUserId !== null;
 
   const refreshAfterMutation = async () => {
     if (!isActive()) {
@@ -215,6 +220,23 @@ export function UserManagement() {
     }
     setActionError(null);
     await loadData(false);
+  };
+
+  const handleOpenCreate = async () => {
+    if (!clinicLoginNumber || preparingCreate || updatingUserId || !isActive()) return;
+
+    setActionError(null);
+    setPreparingCreate(true);
+    try {
+      const refreshed = await loadData(false);
+      if (refreshed && isActive()) {
+        setCredentialModal({ kind: 'create' });
+      }
+    } finally {
+      if (isActive()) {
+        setPreparingCreate(false);
+      }
+    }
   };
 
   const handleCreate = async (payload: CreateClinicUserLoginPayload) => {
@@ -262,7 +284,7 @@ export function UserManagement() {
   };
 
   const toggleUserActive = async (user: ClinicUser) => {
-    if (!clinicId || updatingUserId || !isActive()) return;
+    if (!clinicId || preparingCreate || updatingUserId || !isActive()) return;
     setUpdatingUserId(user.id);
     setActionError(null);
     try {
@@ -307,7 +329,7 @@ export function UserManagement() {
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 bg-gradient-to-br from-white via-white to-teal-50/60 p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -320,17 +342,15 @@ export function UserManagement() {
           </div>
           <button
             type="button"
-            onClick={() => {
-              setActionError(null);
-              setCredentialModal({ kind: 'create' });
-            }}
-            disabled={!clinicLoginNumber}
+            onClick={() => void handleOpenCreate()}
+            disabled={!clinicLoginNumber || userManagementBusy}
+            aria-busy={preparingCreate}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-teal-700/20 transition hover:-translate-y-0.5 hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
           >
             <span className="h-4 w-4">
               <PlusIcon />
             </span>
-            Add login
+            {preparingCreate ? 'Refreshing…' : 'Add login'}
           </button>
         </div>
 
@@ -423,6 +443,7 @@ export function UserManagement() {
                   <button
                     type="button"
                     aria-label={`Edit credentials for ${user.username ?? user.name}`}
+                    disabled={userManagementBusy}
                     onClick={() =>
                       setCredentialModal({
                         kind: 'edit',
@@ -435,7 +456,7 @@ export function UserManagement() {
                         },
                       })
                     }
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     <span className="h-3.5 w-3.5">
                       <EditIcon />
@@ -447,7 +468,7 @@ export function UserManagement() {
                     aria-label={`${user.membershipActive ? 'Pause' : 'Restore'} access for ${user.username ?? user.name}`}
                     onClick={() => void toggleUserActive(user)}
                     disabled={
-                      updatingUserId !== null ||
+                      userManagementBusy ||
                       (user.membershipActive && protectsAccess) ||
                       (!user.membershipActive && !user.accountActive)
                     }
@@ -472,7 +493,7 @@ export function UserManagement() {
                     type="button"
                     aria-label={`Delete login for ${user.username ?? user.name}`}
                     onClick={() => setDeleteTarget(user)}
-                    disabled={protectsAccess}
+                    disabled={protectsAccess || userManagementBusy}
                     title={
                       protectsAccess
                         ? isCurrentUser

@@ -64,15 +64,18 @@ export function TemplateCoverageDisplay() {
   const [filter, setFilter] = useState<'all' | 'missing'>('all');
   const [templates] = useState<TemplateCoverage[]>(MOCK_TEMPLATES);
 
-  const filtered = filter === 'missing' ? templates.filter((t) => !t.taTanglishExists || !t.englishExists) : templates;
+  const filtered =
+    filter === 'missing'
+      ? templates.filter((t) => !t.taTanglishExists || !t.englishExists)
+      : templates;
   const missingCount = templates.filter((t) => !t.taTanglishExists || !t.englishExists).length;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                 Internal
               </span>
@@ -119,8 +122,8 @@ export function TemplateCoverageDisplay() {
         </div>
       </div>
 
-      <div className="max-h-96 overflow-y-auto p-1">
-        <table className="w-full">
+      <div className="max-h-96 overflow-auto p-1">
+        <table className="w-full min-w-[36rem]">
           <thead>
             <tr className="text-left text-xs font-bold uppercase tracking-wider text-slate-500">
               <th className="px-4 py-2.5">Template key</th>

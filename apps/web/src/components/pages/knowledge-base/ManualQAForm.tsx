@@ -6,9 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import {
+  createManualKnowledgeSection,
   createManualKnowledgeEntry,
   fetchManualKnowledgeTemplate,
   patchKnowledgeEntry,
+  removeManualKnowledgeQuestion,
+  removeManualKnowledgeSection,
+  updateManualKnowledgeSection,
   type CreateManualKnowledgeEntryPayload,
   type ManualTemplateApiResponse,
   type ManualTemplateQuestionApiRow,
@@ -18,6 +22,17 @@ import {
 import type { Category } from './types';
 
 type SaveMode = 'draft' | 'approve';
+
+type TemplateQuestionBaseline = {
+  question: string;
+  answer: string;
+  category: string;
+  serviceName: string;
+  applicable: boolean;
+  qaApproved: boolean;
+  status: string;
+  uiStatus: TemplateUiStatus;
+};
 
 type TemplateDraftQuestion = {
   id: string;
@@ -36,6 +51,7 @@ type TemplateDraftQuestion = {
   sourceFile: string;
   sourcePage: number | undefined;
   alternativePhrases: string[];
+  baseline: TemplateQuestionBaseline;
   dirty: boolean;
   errorMessage: string | null;
   duplicateWarning: boolean;
@@ -44,6 +60,7 @@ type TemplateDraftQuestion = {
 type TemplateDraftSection = {
   key: string;
   title: string;
+  isCustom: boolean;
   questions: TemplateDraftQuestion[];
 };
 
@@ -103,15 +120,18 @@ function inferUiStatus(row: {
 }
 
 function mapApiQuestion(row: ManualTemplateQuestionApiRow): TemplateDraftQuestion {
+  const category = row.category ?? 'general';
+  const serviceName = row.service_name ?? '';
+
   return {
     id: row.id,
     question: row.question,
     answer: row.answer,
-    category: row.category ?? 'general',
+    category,
     templateKey: row.template_key ?? undefined,
     sectionKey: row.section_key ?? 'custom',
     status: row.status,
-    serviceName: row.service_name ?? '',
+    serviceName,
     serviceNameRequired: row.service_name_required,
     applicable: row.applicable,
     qaApproved: row.qa_approved,
@@ -120,6 +140,16 @@ function mapApiQuestion(row: ManualTemplateQuestionApiRow): TemplateDraftQuestio
     sourceFile: row.source_file ?? '',
     sourcePage: row.source_page ?? undefined,
     alternativePhrases: row.alternative_phrases_json,
+    baseline: {
+      question: row.question,
+      answer: row.answer,
+      category,
+      serviceName,
+      applicable: row.applicable,
+      qaApproved: row.qa_approved,
+      status: row.status,
+      uiStatus: row.ui_status,
+    },
     dirty: false,
     errorMessage: null,
     duplicateWarning: false,
@@ -133,6 +163,28 @@ function markQuestionEdited(
   >,
 ): TemplateDraftQuestion {
   const updated = { ...question, ...changes };
+  const baseline = updated.baseline;
+  const contentChanged =
+    updated.question.trim() !== baseline.question.trim() ||
+    updated.answer.trim() !== baseline.answer.trim() ||
+    updated.category.trim() !== baseline.category.trim() ||
+    updated.serviceName.trim() !== baseline.serviceName.trim();
+  const applicableChanged = updated.applicable !== baseline.applicable;
+  const hasAnswer = updated.answer.trim().length > 0;
+  const dirty = applicableChanged || (contentChanged && hasAnswer);
+
+  if (!contentChanged && !applicableChanged) {
+    return {
+      ...updated,
+      qaApproved: baseline.qaApproved,
+      status: baseline.status,
+      uiStatus: baseline.uiStatus,
+      dirty: false,
+      errorMessage: null,
+      duplicateWarning: false,
+    };
+  }
+
   return {
     ...updated,
     qaApproved: false,
@@ -142,7 +194,7 @@ function markQuestionEdited(
         : 'needs_update'
       : 'disabled',
     uiStatus: updated.applicable ? 'draft' : 'inactive',
-    dirty: true,
+    dirty,
     errorMessage: null,
     duplicateWarning: false,
   };
@@ -152,6 +204,7 @@ function mapTemplate(template: ManualTemplateApiResponse): TemplateDraftSection[
   return template.sections.map((section) => ({
     key: section.key,
     title: section.title,
+    isCustom: section.is_custom ?? section.key === 'custom',
     questions: section.questions.map(mapApiQuestion),
   }));
 }
@@ -295,8 +348,13 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const [sections, setSections] = useState<TemplateDraftSection[]>([]);
   const [activeSectionKey, setActiveSectionKey] = useState<string | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
-  const [savingQuestionId, setSavingQuestionId] = useState<string | null>(null);
   const [batchSaving, setBatchSaving] = useState(false);
+  const [questionActionId, setQuestionActionId] = useState<string | null>(null);
+  const [sectionActionKey, setSectionActionKey] = useState<string | null>(null);
+  const [addingSection, setAddingSection] = useState(false);
+  const [newSectionTitle, setNewSectionTitle] = useState('');
+  const [renamingSectionKey, setRenamingSectionKey] = useState<string | null>(null);
+  const [renamedSectionTitle, setRenamedSectionTitle] = useState('');
   const [banner, setBanner] = useState<FormBanner | null>(null);
   const openRef = useRef(isOpen);
   openRef.current = isOpen;
@@ -337,6 +395,13 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
 
   const approvedQuestionsInActiveSection = useMemo(
     () => activeSection?.questions.filter((question) => question.uiStatus === 'approved') ?? [],
+    [activeSection],
+  );
+
+  const activeSectionHasPersistedApprovedQuestions = useMemo(
+    () =>
+      activeSection?.questions.some((question) => question.baseline.uiStatus === 'approved') ??
+      false,
     [activeSection],
   );
 
@@ -386,26 +451,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       current ? (byOriginalId.get(current)?.question.id ?? current) : current,
     );
   }, []);
-
-  const selectedQuestionContext = useMemo(() => {
-    if (!activeSection || !selectedQuestionId) {
-      return null;
-    }
-    const question = activeSection.questions.find((item) => item.id === selectedQuestionId);
-    if (!question) {
-      return null;
-    }
-    return {
-      sectionKey: activeSection.key,
-      question,
-      questionIndex: activeSection.questions.findIndex((item) => item.id === selectedQuestionId),
-    };
-  }, [activeSection, selectedQuestionId]);
-
-  const selectedQuestion = selectedQuestionContext?.question ?? null;
-  const selectedQuestionSectionKey = selectedQuestionContext?.sectionKey ?? null;
-  const selectedQuestionSaving =
-    selectedQuestion !== null && savingQuestionId === selectedQuestion.id;
 
   const loadTemplate = useCallback(async () => {
     if (!openRef.current) {
@@ -488,14 +533,20 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       activeLoadControllerRef.current?.abort();
       activeLoadControllerRef.current = null;
       loadSequenceRef.current += 1;
-      setSavingQuestionId(null);
       setBatchSaving(false);
+      setQuestionActionId(null);
+      setSectionActionKey(null);
       return;
     }
     openRef.current = true;
     const formContextSequence = ++formContextSequenceRef.current;
-    setSavingQuestionId(null);
     setBatchSaving(false);
+    setQuestionActionId(null);
+    setSectionActionKey(null);
+    setAddingSection(false);
+    setNewSectionTitle('');
+    setRenamingSectionKey(null);
+    setRenamedSectionTitle('');
     setBanner(null);
     void loadTemplate();
     return () => {
@@ -539,18 +590,17 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     setSelectedQuestionId(activeSection.questions[0]?.id ?? null);
   }, [activeSection, selectedQuestionId]);
 
-  const handleAddCustomQuestion = () => {
-    const newQuestionId = `custom:new:${Date.now().toString()}`;
+  const handleAddQuestion = (sectionKey: string) => {
+    const newQuestionId = `${sectionKey}:new:${Date.now().toString()}`;
 
     setSections((current) => {
-      const customIndex = current.findIndex((section) => section.key === 'custom');
       const newQuestion: TemplateDraftQuestion = {
         id: newQuestionId,
         question: '',
         answer: '',
         category: 'general',
         templateKey: undefined,
-        sectionKey: 'custom',
+        sectionKey,
         status: 'needs_update',
         serviceName: '',
         serviceNameRequired: false,
@@ -561,24 +611,23 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
         sourceFile: '',
         sourcePage: undefined,
         alternativePhrases: [],
+        baseline: {
+          question: '',
+          answer: '',
+          category: 'general',
+          serviceName: '',
+          applicable: true,
+          qaApproved: false,
+          status: 'needs_update',
+          uiStatus: 'draft',
+        },
         dirty: false,
         errorMessage: null,
         duplicateWarning: false,
       };
 
-      if (customIndex === -1) {
-        return [
-          ...current,
-          {
-            key: 'custom',
-            title: 'Custom Q&A',
-            questions: [newQuestion],
-          },
-        ];
-      }
-
-      return current.map((section, index) =>
-        index !== customIndex
+      return current.map((section) =>
+        section.key !== sectionKey
           ? section
           : {
               ...section,
@@ -587,7 +636,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       );
     });
 
-    setActiveSectionKey('custom');
+    setActiveSectionKey(sectionKey);
     setSelectedQuestionId(newQuestionId);
   };
 
@@ -596,17 +645,202 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       setSelectedQuestionId(null);
     }
     setSections((current) =>
-      current
-        .map((section) =>
-          section.key !== sectionKey
-            ? section
-            : {
-                ...section,
-                questions: section.questions.filter((question) => question.id !== questionId),
-              },
-        )
-        .filter((section) => section.key !== 'custom' || section.questions.length > 0),
+      current.map((section) =>
+        section.key !== sectionKey
+          ? section
+          : {
+              ...section,
+              questions: section.questions.filter((question) => question.id !== questionId),
+            },
+      ),
     );
+  };
+
+  const handleRemoveQuestion = async (sectionKey: string, questionId: string) => {
+    const question = sections
+      .find((section) => section.key === sectionKey)
+      ?.questions.find((item) => item.id === questionId);
+    if (
+      !question ||
+      question.baseline.uiStatus === 'approved' ||
+      question.uiStatus === 'approved'
+    ) {
+      setBanner({
+        tone: 'warning',
+        message: 'Approved questions must be made inactive and saved before removal.',
+      });
+      return;
+    }
+
+    if (!question.exists && !question.templateKey) {
+      handleRemoveUnsavedQuestion(sectionKey, questionId);
+      return;
+    }
+
+    if (!window.confirm('Remove this question from the section?')) {
+      return;
+    }
+
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
+    if (!targetClinicId) {
+      return;
+    }
+    setQuestionActionId(questionId);
+    setBanner(null);
+    try {
+      await removeManualKnowledgeQuestion(questionId);
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
+      handleRemoveUnsavedQuestion(sectionKey, questionId);
+      setBanner({ tone: 'success', message: 'Question removed successfully.' });
+      await onSaved?.();
+    } catch (error) {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setBanner({
+          tone: 'warning',
+          message:
+            error instanceof ApiRequestError
+              ? error.apiError.message
+              : 'Failed to remove the question.',
+        });
+      }
+    } finally {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setQuestionActionId(null);
+      }
+    }
+  };
+
+  const handleCreateSection = async () => {
+    const title = newSectionTitle.trim();
+    if (!clinicId || !title || sectionActionKey) {
+      return;
+    }
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
+    setSectionActionKey('new');
+    setBanner(null);
+    try {
+      const section = await createManualKnowledgeSection(title);
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
+      setSections((current) => [
+        ...current,
+        {
+          key: section.key,
+          title: section.title,
+          isCustom: section.is_custom ?? true,
+          questions: [],
+        },
+      ]);
+      setActiveSectionKey(section.key);
+      setSelectedQuestionId(null);
+      setAddingSection(false);
+      setNewSectionTitle('');
+      setBanner({ tone: 'success', message: 'Section added successfully.' });
+    } catch (error) {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setBanner({
+          tone: 'warning',
+          message:
+            error instanceof ApiRequestError
+              ? error.apiError.message
+              : 'Failed to add the section.',
+        });
+      }
+    } finally {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setSectionActionKey(null);
+      }
+    }
+  };
+
+  const handleRenameSection = async (sectionKey: string) => {
+    const title = renamedSectionTitle.trim();
+    if (!clinicId || !title || sectionActionKey) {
+      return;
+    }
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
+    setSectionActionKey(sectionKey);
+    setBanner(null);
+    try {
+      const section = await updateManualKnowledgeSection(sectionKey, title);
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
+      setSections((current) =>
+        current.map((item) => (item.key === sectionKey ? { ...item, title: section.title } : item)),
+      );
+      setRenamingSectionKey(null);
+      setRenamedSectionTitle('');
+      setBanner({ tone: 'success', message: 'Section name updated successfully.' });
+    } catch (error) {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setBanner({
+          tone: 'warning',
+          message:
+            error instanceof ApiRequestError
+              ? error.apiError.message
+              : 'Failed to rename the section.',
+        });
+      }
+    } finally {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setSectionActionKey(null);
+      }
+    }
+  };
+
+  const handleRemoveSection = async (sectionKey: string) => {
+    const section = sections.find((item) => item.key === sectionKey);
+    if (!clinicId || !section || sectionActionKey) {
+      return;
+    }
+    if (section.questions.some((question) => question.baseline.uiStatus === 'approved')) {
+      setBanner({
+        tone: 'warning',
+        message: 'Disable all approved questions before removing this section.',
+      });
+      return;
+    }
+    if (!window.confirm(`Remove the “${section.title}” section?`)) {
+      return;
+    }
+
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
+    const fallbackSectionKey = sections.find((item) => item.key !== sectionKey)?.key ?? null;
+    setSectionActionKey(sectionKey);
+    setBanner(null);
+    try {
+      await removeManualKnowledgeSection(sectionKey);
+      if (!isActiveFormContext(targetClinicId, contextSequence)) {
+        return;
+      }
+      setSections((current) => current.filter((item) => item.key !== sectionKey));
+      setActiveSectionKey((current) => (current === sectionKey ? fallbackSectionKey : current));
+      setSelectedQuestionId(null);
+      setBanner({ tone: 'success', message: 'Section removed successfully.' });
+      await onSaved?.();
+    } catch (error) {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setBanner({
+          tone: 'warning',
+          message:
+            error instanceof ApiRequestError
+              ? error.apiError.message
+              : 'Failed to remove the section.',
+        });
+      }
+    } finally {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        setSectionActionKey(null);
+      }
+    }
   };
 
   const handleApplicableChange = (sectionKey: string, questionId: string, applicable: boolean) => {
@@ -615,75 +849,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     );
   };
 
-  const saveQuestion = async (sectionKey: string, questionId: string, mode: SaveMode) => {
-    if (!clinicId) {
-      return;
-    }
-    const targetClinicId = clinicId;
-    const contextSequence = formContextSequenceRef.current;
-
-    const section = sections.find((item) => item.key === sectionKey);
-    const question = section?.questions.find((item) => item.id === questionId);
-    if (!question) {
-      return;
-    }
-
-    const validationError = validateQuestion(question, mode);
-    if (validationError) {
-      applyQuestionPatch(sectionKey, questionId, (current) => ({
-        ...current,
-        errorMessage: validationError,
-        duplicateWarning: false,
-      }));
-      return;
-    }
-
-    setSavingQuestionId(questionId);
-    setBanner(null);
-    applyQuestionPatch(sectionKey, questionId, (current) => ({
-      ...current,
-      errorMessage: null,
-      duplicateWarning: false,
-    }));
-
-    try {
-      const result = await persistQuestion({ sectionKey, question }, mode, targetClinicId);
-
-      if (!isActiveFormContext(targetClinicId, contextSequence)) {
-        return;
-      }
-
-      applySavedQuestions([result]);
-      setBanner({
-        tone: 'success',
-        message:
-          mode === 'approve'
-            ? 'Question saved, activated, and approved successfully.'
-            : result.question.applicable
-              ? 'Active draft saved successfully.'
-              : 'Question saved as inactive.',
-      });
-      await onSaved?.();
-    } catch (error) {
-      if (!isActiveFormContext(targetClinicId, contextSequence)) {
-        return;
-      }
-      const { duplicateWarning, message } = getQuestionSaveError(error);
-
-      applyQuestionPatch(sectionKey, questionId, (current) => ({
-        ...current,
-        errorMessage: message,
-        duplicateWarning,
-      }));
-    } finally {
-      if (isActiveFormContext(targetClinicId, contextSequence)) {
-        setSavingQuestionId(null);
-      }
-    }
-  };
-
-  const saveAndApproveEditedQuestions = async () => {
-    if (!clinicId || batchSaving || savingQuestionId !== null) {
+  const saveEditedQuestions = async (requestedMode: SaveMode) => {
+    if (!clinicId || batchSaving) {
       return;
     }
 
@@ -702,7 +869,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
 
     const validationErrors = new Map<string, string>();
     const validQuestions = editedQuestions.flatMap((location) => {
-      const mode: SaveMode = location.question.applicable ? 'approve' : 'draft';
+      const mode: SaveMode =
+        requestedMode === 'approve' && location.question.applicable ? 'approve' : 'draft';
       const validationError = validateQuestion(location.question, mode);
       if (validationError) {
         validationErrors.set(location.question.id, validationError);
@@ -730,7 +898,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     if (validQuestions.length === 0) {
       setBanner({
         tone: 'warning',
-        message: `${validationErrors.size} edited question${validationErrors.size === 1 ? '' : 's'} need${validationErrors.size === 1 ? 's' : ''} correction before approval.`,
+        message: `${validationErrors.size} edited question${validationErrors.size === 1 ? '' : 's'} need${validationErrors.size === 1 ? 's' : ''} correction before ${requestedMode === 'approve' ? 'approval' : 'saving'}.`,
       });
       return;
     }
@@ -782,7 +950,12 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       }
 
       const approvedCount = savedResults.filter((result) => result.mode === 'approve').length;
-      const inactiveSavedCount = savedResults.filter((result) => result.mode === 'draft').length;
+      const draftSavedCount = savedResults.filter(
+        (result) => result.mode === 'draft' && result.question.applicable,
+      ).length;
+      const inactiveSavedCount = savedResults.filter(
+        (result) => !result.question.applicable,
+      ).length;
       const issueCount = validationErrors.size + saveErrors.size;
       const firstIssue = editedQuestions.find(
         ({ question }) => validationErrors.has(question.id) || saveErrors.has(question.id),
@@ -794,6 +967,9 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       const successfulParts = [
         approvedCount > 0
           ? `${approvedCount} question${approvedCount === 1 ? '' : 's'} approved`
+          : null,
+        draftSavedCount > 0
+          ? `${draftSavedCount} question${draftSavedCount === 1 ? '' : 's'} saved as draft`
           : null,
         inactiveSavedCount > 0
           ? `${inactiveSavedCount} inactive question${inactiveSavedCount === 1 ? '' : 's'} saved`
@@ -823,57 +999,37 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-2 sm:p-4">
       <div className="flex h-[94vh] w-full max-w-[1280px] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="border-b border-slate-200 bg-gradient-to-r from-cyan-50 via-white to-emerald-50 px-6 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
+          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
               <h3 className="text-xl font-black text-slate-900">Manual Knowledge Template</h3>
               <p className="mt-1 text-sm text-slate-600">
-                Fill clinic-approved answers section by section. Medical advice is blocked and
-                duplicates are checked before save.
+                Add and manage clinic-approved questions and answers section by section.
               </p>
             </div>
-            <div className="flex max-w-[640px] flex-col items-end gap-2">
-              <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:items-end lg:max-w-[640px]">
+              <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!selectedQuestion || !selectedQuestionSectionKey) {
-                      return;
-                    }
-                    void saveQuestion(selectedQuestionSectionKey, selectedQuestion.id, 'draft');
-                  }}
-                  disabled={
-                    batchSaving ||
-                    selectedQuestionSaving ||
-                    !selectedQuestion ||
-                    !selectedQuestionSectionKey ||
-                    loading
-                  }
+                  onClick={() => void saveEditedQuestions('draft')}
+                  disabled={batchSaving || dirtyQuestionCount === 0 || loading}
                   className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Draft
+                  {batchSaving
+                    ? 'Saving edited questions...'
+                    : `Save Draft (${dirtyQuestionCount})`}
                 </button>
                 <button
                   type="button"
-                  onClick={() => void saveAndApproveEditedQuestions()}
-                  disabled={
-                    batchSaving || savingQuestionId !== null || dirtyQuestionCount === 0 || loading
-                  }
+                  onClick={() => void saveEditedQuestions('approve')}
+                  disabled={batchSaving || dirtyQuestionCount === 0 || loading}
                   className="rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {batchSaving
                     ? 'Saving edited questions...'
                     : `Save & Approve Edited (${dirtyQuestionCount})`}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddCustomQuestion}
-                  disabled={batchSaving || savingQuestionId !== null}
-                  className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
-                >
-                  + Add Custom Q&A
                 </button>
                 <button
                   type="button"
@@ -914,9 +1070,58 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
           ) : (
             <div className="grid h-full min-h-0 grid-cols-1 md:grid-cols-[270px_1fr]">
               <aside className="h-full min-h-0 overflow-y-auto border-r border-slate-200 bg-slate-50 p-3">
-                <p className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Sections
-                </p>
+                <div className="mb-2 flex items-center justify-between gap-2 px-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Sections
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAddingSection(true)}
+                    disabled={batchSaving || sectionActionKey !== null}
+                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+                  >
+                    + Add section
+                  </button>
+                </div>
+                {addingSection && (
+                  <div className="mb-3 rounded-xl border border-emerald-200 bg-white p-2">
+                    <label
+                      htmlFor="new-knowledge-section"
+                      className="mb-1 block text-[11px] font-bold text-slate-600"
+                    >
+                      Section name
+                    </label>
+                    <input
+                      id="new-knowledge-section"
+                      value={newSectionTitle}
+                      maxLength={80}
+                      onChange={(event) => setNewSectionTitle(event.target.value)}
+                      disabled={sectionActionKey !== null}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none"
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateSection()}
+                        disabled={!newSectionTitle.trim() || sectionActionKey !== null}
+                        className="rounded-lg bg-emerald-700 px-2.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-60"
+                      >
+                        {sectionActionKey === 'new' ? 'Adding...' : 'Add'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddingSection(false);
+                          setNewSectionTitle('');
+                        }}
+                        disabled={sectionActionKey !== null}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   {sections.map((section) => {
                     const progress = sectionProgress(section);
@@ -956,23 +1161,87 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                   </div>
                 ) : (
                   <>
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                      <div>
-                        <h4 className="text-lg font-black text-slate-900">{activeSection.title}</h4>
-                        <p className="text-sm text-slate-500">
-                          Save &amp; Approve Edited processes valid changes across every section.
+                    <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                      <div className="min-w-0 flex-1">
+                        {renamingSectionKey === activeSection.key ? (
+                          <div className="flex max-w-xl flex-wrap items-center gap-2">
+                            <input
+                              aria-label="Section name"
+                              value={renamedSectionTitle}
+                              maxLength={80}
+                              onChange={(event) => setRenamedSectionTitle(event.target.value)}
+                              disabled={sectionActionKey !== null}
+                              className="min-w-[220px] flex-1 rounded-xl border border-cyan-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void handleRenameSection(activeSection.key)}
+                              disabled={!renamedSectionTitle.trim() || sectionActionKey !== null}
+                              className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-60"
+                            >
+                              {sectionActionKey === activeSection.key ? 'Saving...' : 'Save name'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRenamingSectionKey(null);
+                                setRenamedSectionTitle('');
+                              }}
+                              disabled={sectionActionKey !== null}
+                              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <h4 className="text-lg font-black text-slate-900">
+                            {activeSection.title}
+                          </h4>
+                        )}
+                        <p className="mt-1 text-sm text-slate-500">
+                          Draft and approval actions process valid edits across every section.
                         </p>
                       </div>
-                      {activeSection.key === 'custom' && (
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <button
                           type="button"
-                          onClick={handleAddCustomQuestion}
-                          disabled={batchSaving || savingQuestionId !== null}
+                          onClick={() => handleAddQuestion(activeSection.key)}
+                          disabled={batchSaving || sectionActionKey !== null}
                           className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
                         >
-                          + Add Another Custom Row
+                          + Add question
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenamingSectionKey(activeSection.key);
+                            setRenamedSectionTitle(activeSection.title);
+                          }}
+                          disabled={batchSaving || sectionActionKey !== null}
+                          className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800 hover:bg-cyan-100 disabled:opacity-60"
+                        >
+                          Rename section
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveSection(activeSection.key)}
+                          disabled={
+                            batchSaving ||
+                            sectionActionKey !== null ||
+                            activeSectionHasPersistedApprovedQuestions
+                          }
+                          title={
+                            activeSectionHasPersistedApprovedQuestions
+                              ? 'Disable approved questions before removing this section.'
+                              : undefined
+                          }
+                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {sectionActionKey === activeSection.key
+                            ? 'Removing...'
+                            : 'Remove section'}
+                        </button>
+                      </div>
                     </div>
 
                     <section
@@ -1009,8 +1278,10 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                       {activeSection.questions.map((question, index) => {
                         const statusConfig = STATUS_CONFIG[question.uiStatus];
                         const isSelected = selectedQuestionId === question.id;
-                        const showInlineRemove =
-                          !question.exists && question.sectionKey === 'custom';
+                        const removalRequiresDisable =
+                          question.baseline.uiStatus === 'approved' ||
+                          question.uiStatus === 'approved';
+                        const removingQuestion = questionActionId === question.id;
                         const hasLegacyServiceName =
                           question.serviceName.length > 0 &&
                           !PREDEFINED_CLINIC_SERVICES.some(
@@ -1051,7 +1322,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 <button
                                   type="button"
                                   aria-pressed={question.applicable}
-                                  disabled={batchSaving || savingQuestionId !== null}
+                                  disabled={batchSaving}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     handleApplicableChange(
@@ -1085,7 +1356,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                       }),
                                     )
                                   }
-                                  disabled={batchSaving || savingQuestionId !== null}
+                                  disabled={batchSaving}
                                   rows={2}
                                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
                                 />
@@ -1104,7 +1375,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                       }),
                                     )
                                   }
-                                  disabled={batchSaving || savingQuestionId !== null}
+                                  disabled={batchSaving}
                                   rows={3}
                                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
                                 />
@@ -1127,7 +1398,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                           }),
                                       )
                                     }
-                                    disabled={batchSaving || savingQuestionId !== null}
+                                    disabled={batchSaving}
                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
                                   >
                                     {availableCategories.map((category) => (
@@ -1163,7 +1434,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                           }),
                                       )
                                     }
-                                    disabled={batchSaving || savingQuestionId !== null}
+                                    disabled={batchSaving}
                                     required={question.serviceNameRequired}
                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/10"
                                   >
@@ -1202,21 +1473,28 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 </div>
                               )}
 
-                              {showInlineRemove && (
-                                <div className="flex justify-end">
-                                  <button
-                                    type="button"
-                                    disabled={batchSaving || savingQuestionId !== null}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleRemoveUnsavedQuestion(activeSection.key, question.id);
-                                    }}
-                                    className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
-                                  >
-                                    Remove custom row
-                                  </button>
-                                </div>
-                              )}
+                              <div className="flex items-center justify-end gap-2">
+                                {removalRequiresDisable && (
+                                  <span className="text-[11px] font-semibold text-slate-500">
+                                    Make inactive and save before removal.
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={
+                                    batchSaving ||
+                                    questionActionId !== null ||
+                                    removalRequiresDisable
+                                  }
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleRemoveQuestion(activeSection.key, question.id);
+                                  }}
+                                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {removingQuestion ? 'Removing...' : 'Remove question'}
+                                </button>
+                              </div>
                             </div>
                           </article>
                         );

@@ -152,8 +152,7 @@ export function HomePageContent() {
   const [doctorServiceMappings, setDoctorServiceMappings] = useState<
     Array<{ doctorId: string; serviceId: string }>
   >([]);
-  const [manualReferenceStatus, setManualReferenceStatus] =
-    useState<ManualReferenceStatus>('idle');
+  const [manualReferenceStatus, setManualReferenceStatus] = useState<ManualReferenceStatus>('idle');
   const [manualReferenceError, setManualReferenceError] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState('unknown');
   const [now, setNow] = useState(() => new Date());
@@ -193,14 +192,15 @@ export function HomePageContent() {
       }
       setActionError(null);
       try {
-        const settingsRequest = includeSettings && isAdmin
-          ? fetchClinicSettings(clinicId, signal).catch((error: unknown) => {
-              if (isAbortError(error)) {
-                throw error;
-              }
-              return null;
-            })
-          : Promise.resolve(null);
+        const settingsRequest =
+          includeSettings && isAdmin
+            ? fetchClinicSettings(clinicId, signal).catch((error: unknown) => {
+                if (isAbortError(error)) {
+                  throw error;
+                }
+                return null;
+              })
+            : Promise.resolve(null);
         const [appointments, settings] = await Promise.all([
           fetchAppointments(clinicId, ['pending_confirmation', 'confirmed'], signal),
           settingsRequest,
@@ -520,7 +520,7 @@ export function HomePageContent() {
       ) : (
         <>
           <div className="mb-6 rounded-[22px] bg-gradient-to-br from-brand-700 to-slate-900 p-6 text-white shadow-card">
-            <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr] lg:items-center">
+            <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] xl:items-center">
               <div>
                 <h2 className="text-xl font-black">
                   {effectiveRole === 'doctor'
@@ -560,7 +560,7 @@ export function HomePageContent() {
             </p>
           ) : null}
 
-          <div className="grid gap-5 lg:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-3 [&>*]:min-w-0">
             <section
               aria-labelledby="needs-action-heading"
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
@@ -579,9 +579,11 @@ export function HomePageContent() {
                     onCancel={handleCancel}
                   />
                 ))}
-                {actionableTodayPending.length === 0 && callbacks === 0 && emergencyAlerts === 0 && (
-                  <p className="text-sm text-slate-500">No pending actions for today</p>
-                )}
+                {actionableTodayPending.length === 0 &&
+                  callbacks === 0 &&
+                  emergencyAlerts === 0 && (
+                    <p className="text-sm text-slate-500">No pending actions for today</p>
+                  )}
               </div>
             </section>
 

@@ -126,9 +126,7 @@ export function JobHealthDashboard() {
     const controller = new AbortController();
     loadControllerRef.current = controller;
     const isCurrentLoad = () =>
-      mountedRef.current &&
-      !controller.signal.aborted &&
-      loadSequenceRef.current === sequence;
+      mountedRef.current && !controller.signal.aborted && loadSequenceRef.current === sequence;
 
     setLoading(true);
     setError(null);
@@ -142,10 +140,17 @@ export function JobHealthDashboard() {
       setHealth({
         queueMode: 'inline',
         redisConnected: false,
-        pendingJobs: countByStatus(data.health, 'pending') + countByStatus(data.health, 'processing'),
+        pendingJobs:
+          countByStatus(data.health, 'pending') + countByStatus(data.health, 'processing'),
         failedJobs: countByStatus(data.health, 'failed'),
-        lastRunSlotGeneration: latestRunForType(data.recent_runs as ApiJobRunRow[], 'GENERATE_SLOTS'),
-        lastRunHoldExpiry: latestRunForType(data.recent_runs as ApiJobRunRow[], 'EXPIRE_SLOT_HOLDS'),
+        lastRunSlotGeneration: latestRunForType(
+          data.recent_runs as ApiJobRunRow[],
+          'GENERATE_SLOTS',
+        ),
+        lastRunHoldExpiry: latestRunForType(
+          data.recent_runs as ApiJobRunRow[],
+          'EXPIRE_SLOT_HOLDS',
+        ),
         lastRunRecordingCleanup: latestRunForType(
           data.recent_runs as ApiJobRunRow[],
           'CLEANUP_EXPIRED_RECORDINGS',
@@ -184,7 +189,10 @@ export function JobHealthDashboard() {
   if (!isPlatformAdmin) {
     return (
       <>
-        <PageHeader title="Job health" description="Background job processing status and run history." />
+        <PageHeader
+          title="Job health"
+          description="Background job processing status and run history."
+        />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Platform admin only.</p>
         </div>
@@ -195,7 +203,10 @@ export function JobHealthDashboard() {
   if (loading) {
     return (
       <>
-        <PageHeader title="Job health" description="Background job processing status and run history." />
+        <PageHeader
+          title="Job health"
+          description="Background job processing status and run history."
+        />
         <LoadingState title="Loading job health" description="Fetching from the platform API." />
       </>
     );
@@ -204,7 +215,10 @@ export function JobHealthDashboard() {
   if (error) {
     return (
       <>
-        <PageHeader title="Job health" description="Background job processing status and run history." />
+        <PageHeader
+          title="Job health"
+          description="Background job processing status and run history."
+        />
         <ErrorState title="Could not load job health" description={error}>
           <button
             type="button"
@@ -225,7 +239,7 @@ export function JobHealthDashboard() {
         description="Background job processing status and run history."
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <HealthCard
           label="Queue mode"
           value={health.queueMode === 'bullmq' ? 'BullMQ' : 'Inline'}
@@ -236,23 +250,15 @@ export function JobHealthDashboard() {
           value={health.redisConnected ? 'Yes' : 'No'}
           ok={health.redisConnected}
         />
-        <HealthCard
-          label="Pending jobs"
-          value={health.pendingJobs}
-          ok={health.pendingJobs === 0}
-        />
-        <HealthCard
-          label="Failed jobs"
-          value={health.failedJobs}
-          ok={health.failedJobs === 0}
-        />
+        <HealthCard label="Pending jobs" value={health.pendingJobs} ok={health.pendingJobs === 0} />
+        <HealthCard label="Failed jobs" value={health.failedJobs} ok={health.failedJobs === 0} />
       </div>
 
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
           Last scheduled run
         </h3>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <HealthCard
             label="Slot generation"
             value={
@@ -295,7 +301,9 @@ export function JobHealthDashboard() {
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
           <h3 className="text-lg font-bold text-slate-900">Job run history</h3>
-          <p className="mt-0.5 text-sm text-slate-500">Recent execution logs for background jobs.</p>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Recent execution logs for background jobs.
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">

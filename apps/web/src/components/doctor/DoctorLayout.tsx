@@ -42,8 +42,10 @@ export function DoctorLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <DoctorNavContext.Provider value={{ activeSection, setActiveSection, patientCount, setPatientCount }}>
-      <div className="grid min-h-screen lg:grid-cols-[272px_1fr]">
+    <DoctorNavContext.Provider
+      value={{ activeSection, setActiveSection, patientCount, setPatientCount }}
+    >
+      <div className="grid min-h-screen w-full max-w-full lg:grid-cols-[272px_minmax(0,1fr)]">
         {/* Sidebar */}
         <aside className="hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:bg-[#0b1220] lg:px-[22px] lg:py-[22px] lg:text-slate-200">
           {/* Brand */}
@@ -61,7 +63,11 @@ export function DoctorLayout({ children }: { children: ReactNode }) {
           <div className="mb-[18px] rounded-[18px] border border-white/[0.09] bg-white/[0.06] p-[14px]">
             <div className="mb-2 flex items-center gap-[10px]">
               <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-700 to-blue-600 text-[15px] font-extrabold text-white">
-                {doctorName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                {doctorName
+                  .split(' ')
+                  .map((n) => n[0])
+                  .join('')
+                  .slice(0, 2)}
               </div>
               <div>
                 <p className="text-sm font-bold text-white">{doctorName}</p>
@@ -139,7 +145,8 @@ export function DoctorLayout({ children }: { children: ReactNode }) {
                 On Duty
               </div>
               <p className="mt-1.5 text-xs leading-relaxed text-teal-100/80">
-                Morning shift · 9:00 AM – 1:00 PM<br />
+                Morning shift · 9:00 AM – 1:00 PM
+                <br />
                 Next: Evening 5:00 – 9:00 PM
               </p>
             </div>

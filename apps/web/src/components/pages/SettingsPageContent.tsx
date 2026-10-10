@@ -423,7 +423,7 @@ export function SettingsPageContent() {
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         {isAdmin && agentSettings && notificationSettings && (
           <>
             <AgentSettings settings={agentSettings} onUpdateSettings={handleUpdateAgentSettings} />

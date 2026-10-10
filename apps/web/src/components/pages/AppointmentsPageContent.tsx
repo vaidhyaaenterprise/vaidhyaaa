@@ -682,10 +682,10 @@ export function AppointmentsPageContent() {
       />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex gap-2">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <button
             onClick={() => setSelectedDate('')}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"
+            className="min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"
           >
             Today
           </button>
@@ -731,7 +731,7 @@ export function AppointmentsPageContent() {
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <PendingAppointments
           appointments={visiblePending}
           emptyMessage={pendingEmptyMessage}

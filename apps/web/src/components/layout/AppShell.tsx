@@ -16,7 +16,7 @@ export function AppShell({ children }: AppShellProps) {
   const signedInName = me?.user.name ?? 'Signed-in user';
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
+    <div className="grid min-h-screen w-full max-w-full lg:grid-cols-[280px_minmax(0,1fr)]">
       <aside className="hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:bg-sidebar lg:px-[22px] lg:py-[22px] lg:text-slate-200">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-400 to-blue-600 text-xl font-black text-white">

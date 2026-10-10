@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from '@/lib/api/client';
+import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api/client';
 
 export type KnowledgeEntryApiRow = {
   id: string;
@@ -108,6 +108,7 @@ export type ManualTemplateQuestionApiRow = KnowledgeEntryApiRow & {
 export type ManualTemplateSectionApiRow = {
   key: string;
   title: string;
+  is_custom?: boolean;
   questions: ManualTemplateQuestionApiRow[];
 };
 
@@ -255,6 +256,34 @@ export async function fetchManualKnowledgeTemplate(signal?: AbortSignal) {
 export async function createManualKnowledgeEntry(payload: CreateManualKnowledgeEntryPayload) {
   const data = await apiPost<{ knowledge: KnowledgeEntryWireRow }>('/v1/knowledge/manual', payload);
   return normalizeKnowledgeEntryApiRow(data.knowledge);
+}
+
+export async function createManualKnowledgeSection(title: string) {
+  const data = await apiPost<{ section: ManualTemplateSectionApiRow }>(
+    '/v1/knowledge/manual-template/sections',
+    { title },
+  );
+  return data.section;
+}
+
+export async function updateManualKnowledgeSection(sectionKey: string, title: string) {
+  const data = await apiPatch<{ section: Omit<ManualTemplateSectionApiRow, 'questions'> }>(
+    `/v1/knowledge/manual-template/sections/${encodeURIComponent(sectionKey)}`,
+    { title },
+  );
+  return data.section;
+}
+
+export async function removeManualKnowledgeSection(sectionKey: string) {
+  return apiDelete<{ result: { removed: boolean; section_key: string } }>(
+    `/v1/knowledge/manual-template/sections/${encodeURIComponent(sectionKey)}`,
+  );
+}
+
+export async function removeManualKnowledgeQuestion(knowledgeId: string) {
+  return apiDelete<{ result: { removed: boolean; knowledge_id: string } }>(
+    `/v1/knowledge/manual-template/questions?knowledge_id=${encodeURIComponent(knowledgeId)}`,
+  );
 }
 
 export async function regenerateKnowledgeEmbeddings(clinicId: string) {

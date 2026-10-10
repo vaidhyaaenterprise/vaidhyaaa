@@ -18,9 +18,11 @@ export function PageHeader({
   showAgentToggle = false,
 }: PageHeaderProps) {
   return (
-    <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div>
-        <h1 className="text-[clamp(1.25rem,2.5vw,_2rem)] font-black tracking-tight text-slate-900">{title}</h1>
+    <header className="mb-6 flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <div className="min-w-0">
+        <h1 className="text-[clamp(1.25rem,2.5vw,_2rem)] font-black tracking-tight text-slate-900">
+          {title}
+        </h1>
         <p className="mt-1 text-sm text-slate-500">{description}</p>
       </div>
       {(showAgentToggle || actions) && (

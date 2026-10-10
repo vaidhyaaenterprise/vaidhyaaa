@@ -179,8 +179,8 @@ export function ClinicHours() {
 
   if (!isAdmin) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Clinic working hours</h3>
         </div>
         <p className="text-sm text-slate-500">Only admins can edit clinic hours.</p>
@@ -190,7 +190,7 @@ export function ClinicHours() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading clinic hours" description="Fetching from the API." />
       </div>
     );
@@ -198,7 +198,7 @@ export function ClinicHours() {
 
   if (error && !isEditing) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load clinic hours" description={error}>
           <button
             type="button"
@@ -213,8 +213,11 @@ export function ClinicHours() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div
+      data-testid="clinic-hours-card"
+      className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-900">Clinic working hours</h3>
         {!isEditing && (
           <button
@@ -235,10 +238,10 @@ export function ClinicHours() {
             return (
               <div
                 key={day}
-                className="flex justify-between rounded-lg border border-slate-200 bg-slate-50 p-3"
+                className="flex min-w-0 flex-col gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
               >
-                <span className="w-24 font-bold text-slate-900">{day}</span>
-                <span className="text-sm text-slate-600">
+                <span className="shrink-0 font-bold text-slate-900 sm:w-24">{day}</span>
+                <span className="min-w-0 break-words text-sm text-slate-600 sm:text-right">
                   {dayHours.map((h) => `${h.startTime} - ${h.endTime}`).join(', ')}
                 </span>
               </div>
@@ -272,7 +275,7 @@ export function ClinicHours() {
 
               return (
                 <div key={day} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-2 flex items-center justify-between">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <span className="font-bold text-slate-900">{day}</span>
                     <button
                       onClick={() => addTimeSlot(day)}
@@ -286,25 +289,38 @@ export function ClinicHours() {
                   ) : (
                     <div className="space-y-2">
                       {daySlots.map((slot) => (
-                        <div key={slot.id} className="flex gap-2">
-                          <input
-                            type="time"
-                            value={slot.startTime}
-                            onChange={(e) => updateTimeSlot(slot.id, 'startTime', e.target.value)}
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                          />
-                          <span className="py-1.5 text-slate-500">to</span>
-                          <input
-                            type="time"
-                            value={slot.endTime}
-                            onChange={(e) => updateTimeSlot(slot.id, 'endTime', e.target.value)}
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                          />
+                        <div
+                          key={slot.id}
+                          className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                        >
+                          <label className="block min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              Start
+                            </span>
+                            <input
+                              type="time"
+                              value={slot.startTime}
+                              onChange={(e) => updateTimeSlot(slot.id, 'startTime', e.target.value)}
+                              className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                            />
+                          </label>
+                          <label className="block min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              End
+                            </span>
+                            <input
+                              type="time"
+                              value={slot.endTime}
+                              onChange={(e) => updateTimeSlot(slot.id, 'endTime', e.target.value)}
+                              className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                            />
+                          </label>
                           <button
+                            type="button"
                             onClick={() => removeTimeSlot(slot.id)}
-                            className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
+                            className="w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 sm:w-auto"
                           >
-                            ✕
+                            Remove
                           </button>
                         </div>
                       ))}

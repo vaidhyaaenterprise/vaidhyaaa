@@ -332,8 +332,8 @@ export function HolidaySetup() {
 
   if (!isAdmin) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Holiday setup</h3>
         </div>
         <p className="text-sm text-slate-500">Only admins can manage holidays.</p>
@@ -343,7 +343,7 @@ export function HolidaySetup() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading holidays" description="Fetching from the API." />
       </div>
     );
@@ -351,7 +351,7 @@ export function HolidaySetup() {
 
   if (error && !isEditing) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load holidays" description={error}>
           <button
             type="button"
@@ -366,8 +366,8 @@ export function HolidaySetup() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-900">Holiday setup</h3>
         {!isEditing && (
           <button
@@ -390,24 +390,26 @@ export function HolidaySetup() {
               .map((holiday) => (
                 <div
                   key={holiday.id}
-                  className="flex justify-between rounded-lg border border-slate-200 bg-slate-50 p-3"
+                  className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between"
                 >
-                  <div>
-                    <p className="font-bold text-slate-900">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-bold text-slate-900">
                       {new Date(holiday.date).toLocaleDateString('en-IN', {
                         day: 'numeric',
                         month: 'short',
                         year: 'numeric',
                       })}
                     </p>
-                    <p className="text-sm text-slate-500">{holiday.reason || 'No reason set'}</p>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    <p className="break-words text-sm text-slate-500">
+                      {holiday.reason || 'No reason set'}
+                    </p>
+                    <p className="break-words text-xs font-semibold uppercase tracking-wide text-slate-400">
                       {scopeLabel(holiday)}
                     </p>
                   </div>
                   <button
                     onClick={() => void toggleHolidayActive(holiday.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100"
+                    className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
                   >
                     Disable
                   </button>
@@ -438,23 +440,25 @@ export function HolidaySetup() {
           <div className="space-y-3">
             {tempHolidays.map((holiday) => (
               <div key={holiday.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-3 flex flex-wrap gap-2">
+                <div className="mb-3 grid min-w-0 gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-end">
                   <input
                     type="date"
                     value={holiday.date}
                     onChange={(event) => updateHoliday(holiday.id, { date: event.target.value })}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                    aria-label="Holiday date"
+                    className="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                   />
                   <input
                     type="text"
                     value={holiday.reason}
                     onChange={(event) => updateHoliday(holiday.id, { reason: event.target.value })}
                     placeholder="Reason"
-                    className="min-w-[220px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                    aria-label="Holiday reason"
+                    className="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                   />
                   <button
                     onClick={() => removeHoliday(holiday.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
+                    className="w-full shrink-0 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 sm:w-auto"
                   >
                     Remove
                   </button>

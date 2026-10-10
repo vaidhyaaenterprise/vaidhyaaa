@@ -3,8 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ManualQAForm } from './ManualQAForm';
 import {
+  createManualKnowledgeSection,
   fetchManualKnowledgeTemplate,
   patchKnowledgeEntry,
+  removeManualKnowledgeQuestion,
+  removeManualKnowledgeSection,
+  updateManualKnowledgeSection,
   type KnowledgeEntryApiRow,
   type ManualTemplateApiResponse,
   type ManualTemplateQuestionApiRow,
@@ -33,13 +37,21 @@ vi.mock('@/hooks/useActiveClinicId', () => ({
 }));
 
 vi.mock('@/lib/api/knowledge', () => ({
+  createManualKnowledgeSection: vi.fn(),
   createManualKnowledgeEntry: vi.fn(),
   fetchManualKnowledgeTemplate: vi.fn(),
   patchKnowledgeEntry: vi.fn(),
+  removeManualKnowledgeQuestion: vi.fn(),
+  removeManualKnowledgeSection: vi.fn(),
+  updateManualKnowledgeSection: vi.fn(),
 }));
 
+const mockedCreateSection = vi.mocked(createManualKnowledgeSection);
 const mockedFetchTemplate = vi.mocked(fetchManualKnowledgeTemplate);
 const mockedPatchKnowledgeEntry = vi.mocked(patchKnowledgeEntry);
+const mockedRemoveQuestion = vi.mocked(removeManualKnowledgeQuestion);
+const mockedRemoveSection = vi.mocked(removeManualKnowledgeSection);
+const mockedUpdateSection = vi.mocked(updateManualKnowledgeSection);
 
 function templateQuestion(
   overrides: Partial<ManualTemplateQuestionApiRow> = {},
@@ -91,6 +103,10 @@ beforeEach(() => {
   activeClinicId = CLINIC_ID;
   mockedFetchTemplate.mockReset().mockResolvedValue(EMPTY_TEMPLATE);
   mockedPatchKnowledgeEntry.mockReset();
+  mockedCreateSection.mockReset();
+  mockedRemoveQuestion.mockReset();
+  mockedRemoveSection.mockReset();
+  mockedUpdateSection.mockReset();
 });
 
 afterEach(() => {
@@ -98,6 +114,168 @@ afterEach(() => {
 });
 
 describe('ManualQAForm activation and approval', () => {
+  it('adds and removes questions inside the selected section', async () => {
+    mockedFetchTemplate.mockResolvedValue({
+      source: 'manual-template',
+      sections: [
+        {
+          key: 'payment',
+          title: 'Payment',
+          questions: [
+            templateQuestion({
+              exists: false,
+              applicable: true,
+              status: 'needs_update',
+              ui_status: 'draft',
+            }),
+          ],
+        },
+      ],
+      summary: {
+        total: 1,
+        completed: 1,
+        approved: 0,
+        pending: 1,
+        not_applicable: 0,
+      },
+    });
+    mockedRemoveQuestion.mockResolvedValue({
+      result: { removed: true, knowledge_id: KNOWLEDGE_ID },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <ManualQAForm
+        isOpen
+        onClose={vi.fn()}
+        categories={[{ id: 'payment', name: 'Payment', description: 'Payment policies' }]}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: '+ Add question' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Add Custom Q&A/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Medical advice/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/duplicates are checked/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove question' }));
+    await waitFor(() => expect(mockedRemoveQuestion).toHaveBeenCalledWith(KNOWLEDGE_ID));
+    expect(screen.queryByDisplayValue('Is UPI accepted?')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add question' }));
+    expect(screen.getByText('New row')).toBeInTheDocument();
+    expect(screen.getByText('Question removed successfully.')).toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  it('adds, renames, and removes a clinic-defined section', async () => {
+    mockedFetchTemplate.mockResolvedValue({
+      source: 'manual-template',
+      sections: [{ key: 'custom', title: 'Custom Q&A', is_custom: true, questions: [] }],
+      summary: {
+        total: 0,
+        completed: 0,
+        approved: 0,
+        pending: 0,
+        not_applicable: 0,
+      },
+    });
+    mockedCreateSection.mockResolvedValue({
+      key: 'custom_billing_12345678',
+      title: 'Billing Details',
+      is_custom: true,
+      questions: [],
+    });
+    mockedUpdateSection.mockResolvedValue({
+      key: 'custom_billing_12345678',
+      title: 'Billing and Receipts',
+      is_custom: true,
+    });
+    mockedRemoveSection.mockResolvedValue({
+      result: { removed: true, section_key: 'custom_billing_12345678' },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <ManualQAForm
+        isOpen
+        onClose={vi.fn()}
+        categories={[{ id: 'billing', name: 'Billing', description: 'Billing policies' }]}
+      />,
+    );
+
+    await screen.findByRole('heading', { name: 'Custom Q&A' });
+    fireEvent.click(screen.getByRole('button', { name: '+ Add section' }));
+    fireEvent.change(screen.getByLabelText('Section name'), {
+      target: { value: 'Billing Details' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    expect(await screen.findByRole('heading', { name: 'Billing Details' })).toBeInTheDocument();
+    expect(mockedCreateSection).toHaveBeenCalledWith('Billing Details');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename section' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Section name' }), {
+      target: { value: 'Billing and Receipts' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Billing and Receipts' }),
+    ).toBeInTheDocument();
+    expect(mockedUpdateSection).toHaveBeenCalledWith(
+      'custom_billing_12345678',
+      'Billing and Receipts',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove section' }));
+    await waitFor(() =>
+      expect(mockedRemoveSection).toHaveBeenCalledWith('custom_billing_12345678'),
+    );
+    expect(screen.queryByRole('heading', { name: 'Billing and Receipts' })).not.toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  it('requires an approved question to be disabled and saved before removal', async () => {
+    mockedFetchTemplate.mockResolvedValue({
+      source: 'manual-template',
+      sections: [
+        {
+          key: 'payment',
+          title: 'Payment',
+          questions: [
+            templateQuestion({
+              applicable: true,
+              qa_approved: true,
+              status: 'approved',
+              ui_status: 'approved',
+            }),
+          ],
+        },
+      ],
+      summary: {
+        total: 1,
+        completed: 1,
+        approved: 1,
+        pending: 0,
+        not_applicable: 0,
+      },
+    });
+
+    render(
+      <ManualQAForm
+        isOpen
+        onClose={vi.fn()}
+        categories={[{ id: 'payment', name: 'Payment', description: 'Payment policies' }]}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Remove question' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove section' })).toBeDisabled();
+    expect(screen.getByText('Make inactive and save before removal.')).toBeInTheDocument();
+    expect(mockedRemoveQuestion).not.toHaveBeenCalled();
+    expect(mockedRemoveSection).not.toHaveBeenCalled();
+  });
+
   it('reactivates an inactive question and lists it under the selected section after approval', async () => {
     mockedFetchTemplate.mockResolvedValue({
       source: 'manual-template',
@@ -254,7 +432,151 @@ describe('ManualQAForm activation and approval', () => {
     expect(screen.getByText('1 inactive question saved successfully.')).toBeInTheDocument();
   });
 
-  it('approves every valid edited question and leaves invalid edits for correction', async () => {
+  it('does not count an empty or reverted answer as an edited question', async () => {
+    mockedFetchTemplate.mockResolvedValue({
+      source: 'manual-template',
+      sections: [
+        {
+          key: 'payment',
+          title: 'Payment',
+          questions: [
+            templateQuestion({
+              applicable: true,
+              qa_approved: true,
+              status: 'approved',
+              ui_status: 'approved',
+            }),
+          ],
+        },
+      ],
+      summary: {
+        total: 1,
+        completed: 1,
+        approved: 1,
+        pending: 0,
+        not_applicable: 0,
+      },
+    });
+
+    render(
+      <ManualQAForm
+        isOpen
+        onClose={vi.fn()}
+        categories={[{ id: 'payment', name: 'Payment', description: 'Payment policies' }]}
+      />,
+    );
+
+    const answer = await screen.findByDisplayValue('Yes, UPI payments are accepted.');
+    fireEvent.change(answer, { target: { value: '' } });
+
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Draft (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save & Approve Edited (0)' })).toBeDisabled();
+
+    fireEvent.change(answer, { target: { value: 'UPI and card payments are accepted.' } });
+    expect(screen.getByRole('button', { name: 'Save & Approve Edited (1)' })).toBeEnabled();
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+    fireEvent.change(answer, { target: { value: 'Yes, UPI payments are accepted.' } });
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Draft (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save & Approve Edited (0)' })).toBeDisabled();
+    expect(mockedPatchKnowledgeEntry).not.toHaveBeenCalled();
+  });
+
+  it('saves every edited question across sections as drafts', async () => {
+    const secondQuestion = templateQuestion({
+      id: SECOND_KNOWLEDGE_ID,
+      question: 'Are cards accepted?',
+      answer: 'Cards are accepted.',
+      template_key: 'services::Are cards accepted?',
+      section_key: 'services',
+      applicable: true,
+      status: 'needs_update',
+      ui_status: 'draft',
+    });
+    mockedFetchTemplate.mockResolvedValue({
+      source: 'manual-template',
+      sections: [
+        {
+          key: 'payment',
+          title: 'Payment',
+          questions: [
+            templateQuestion({ applicable: true, status: 'needs_update', ui_status: 'draft' }),
+          ],
+        },
+        {
+          key: 'services',
+          title: 'Services',
+          questions: [secondQuestion],
+        },
+      ],
+      summary: {
+        total: 2,
+        completed: 2,
+        approved: 0,
+        pending: 2,
+        not_applicable: 0,
+      },
+    });
+    mockedPatchKnowledgeEntry.mockImplementation(async (knowledgeId, patch) =>
+      knowledgeRow({
+        id: knowledgeId,
+        question: String(patch.question),
+        answer: String(patch.answer),
+        applicable: true,
+        qa_approved: false,
+        status: 'pending_review',
+        embedding_status: 'not_required',
+      }),
+    );
+    const onSaved = vi.fn();
+
+    render(
+      <ManualQAForm
+        isOpen
+        onClose={vi.fn()}
+        categories={[{ id: 'payment', name: 'Payment', description: 'Payment policies' }]}
+        onSaved={onSaved}
+      />,
+    );
+
+    fireEvent.change(await screen.findByDisplayValue('Yes, UPI payments are accepted.'), {
+      target: { value: 'UPI is accepted.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Services/ }));
+    fireEvent.change(screen.getByDisplayValue('Cards are accepted.'), {
+      target: { value: 'Credit and debit cards are accepted.' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft (2)' }));
+
+    await waitFor(() => expect(mockedPatchKnowledgeEntry).toHaveBeenCalledTimes(2));
+    expect(mockedPatchKnowledgeEntry).toHaveBeenCalledWith(
+      KNOWLEDGE_ID,
+      expect.objectContaining({
+        answer: 'UPI is accepted.',
+        applicable: true,
+        qa_approved: false,
+        status: 'pending_review',
+      }),
+      CLINIC_ID,
+    );
+    expect(mockedPatchKnowledgeEntry).toHaveBeenCalledWith(
+      SECOND_KNOWLEDGE_ID,
+      expect.objectContaining({
+        answer: 'Credit and debit cards are accepted.',
+        applicable: true,
+        qa_approved: false,
+        status: 'pending_review',
+      }),
+      CLINIC_ID,
+    );
+    expect(screen.getByText('2 questions saved as draft successfully.')).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledOnce();
+  });
+
+  it('approves every valid edited question and ignores answerless changes', async () => {
     const secondQuestion = templateQuestion({
       id: SECOND_KNOWLEDGE_ID,
       question: 'Are cards accepted?',
@@ -340,7 +662,7 @@ describe('ManualQAForm activation and approval', () => {
       target: { value: 'Credit and debit cards are accepted.' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Save & Approve Edited \(3\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Save & Approve Edited \(2\)/ }));
 
     await waitFor(() => expect(mockedPatchKnowledgeEntry).toHaveBeenCalledTimes(2));
     expect(mockedPatchKnowledgeEntry).toHaveBeenCalledWith(
@@ -362,12 +684,10 @@ describe('ManualQAForm activation and approval', () => {
       CLINIC_ID,
     );
     expect(
-      screen.getByText('Answer is required before approving this question.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('2 questions approved. 1 edited question still needs attention.'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Save & Approve Edited \(1\)/ })).toBeEnabled();
+      screen.queryByText('Answer is required before approving this question.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('2 questions approved successfully.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save & Approve Edited \(0\)/ })).toBeDisabled();
     expect(onSaved).toHaveBeenCalledOnce();
   });
 });

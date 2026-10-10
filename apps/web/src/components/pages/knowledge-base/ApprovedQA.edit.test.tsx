@@ -42,6 +42,7 @@ describe('ApprovedQA edit save', () => {
     renderApproved(onEdit);
 
     expect(screen.queryByText(/^english$/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Updated 01/10/2026')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     fireEvent.change(screen.getAllByRole('textbox')[1]!, {
       target: { value: 'Yes, you can.' },

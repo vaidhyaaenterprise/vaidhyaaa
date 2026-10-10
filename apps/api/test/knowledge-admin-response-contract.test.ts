@@ -40,6 +40,96 @@ function knowledgeRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('KnowledgeAdminService response contract', () => {
+  it('rejects removal of an approved question until it is disabled', async () => {
+    const findKnowledgeEntry = vi
+      .fn()
+      .mockResolvedValue([
+        knowledgeRow({ status: 'approved', qaApproved: true, applicable: true }),
+      ]);
+    const removeKnowledgeEntry = vi.fn();
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    Reflect.set(service, 'repos', {
+      knowledge: { findKnowledgeEntry, removeKnowledgeEntry },
+    });
+
+    await expect(
+      service.removeManualQuestion({ clinicId: CLINIC_ID, knowledgeId: KNOWLEDGE_ID }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'Approved questions must be disabled before they can be removed.',
+    });
+    expect(removeKnowledgeEntry).not.toHaveBeenCalled();
+  });
+
+  it('removes a question after it has been disabled', async () => {
+    const findKnowledgeEntry = vi
+      .fn()
+      .mockResolvedValue([
+        knowledgeRow({ status: 'disabled', qaApproved: false, applicable: false }),
+      ]);
+    const removeKnowledgeEntry = vi.fn().mockResolvedValue([knowledgeRow()]);
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    Reflect.set(service, 'repos', {
+      knowledge: { findKnowledgeEntry, removeKnowledgeEntry },
+    });
+
+    await expect(
+      service.removeManualQuestion({ clinicId: CLINIC_ID, knowledgeId: KNOWLEDGE_ID }),
+    ).resolves.toEqual({ removed: true, knowledge_id: KNOWLEDGE_ID });
+    expect(removeKnowledgeEntry).toHaveBeenCalledWith(CLINIC_ID, KNOWLEDGE_ID);
+  });
+
+  it('rejects section removal while it contains an approved question', async () => {
+    const archiveKnowledgeSection = vi.fn();
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    Reflect.set(service, 'repos', {
+      knowledge: {
+        listKnowledgeSections: vi.fn().mockResolvedValue([]),
+        listVisibleSectionEntries: vi
+          .fn()
+          .mockResolvedValue([knowledgeRow({ status: 'approved', qaApproved: true })]),
+        archiveKnowledgeSection,
+      },
+    });
+
+    await expect(
+      service.removeManualSection({ clinicId: CLINIC_ID, sectionKey: 'communication' }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message:
+        'This section contains approved questions. Disable them before removing the section.',
+    });
+    expect(archiveKnowledgeSection).not.toHaveBeenCalled();
+  });
+
+  it('archives a section and its unapproved questions together', async () => {
+    const archiveKnowledgeSection = vi.fn().mockResolvedValue({
+      blocked: false,
+      section: { sectionKey: 'communication' },
+    });
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    Reflect.set(service, 'repos', {
+      knowledge: {
+        listKnowledgeSections: vi.fn().mockResolvedValue([]),
+        listVisibleSectionEntries: vi
+          .fn()
+          .mockResolvedValue([knowledgeRow({ status: 'disabled', qaApproved: false })]),
+        archiveKnowledgeSection,
+      },
+    });
+
+    await expect(
+      service.removeManualSection({ clinicId: CLINIC_ID, sectionKey: 'communication' }),
+    ).resolves.toEqual({ removed: true, section_key: 'communication' });
+    expect(archiveKnowledgeSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clinicId: CLINIC_ID,
+        sectionKey: 'communication',
+        active: false,
+      }),
+    );
+  });
+
   it('returns the same snake_case shape after patching a manual-template entry', async () => {
     const existing = knowledgeRow({ status: 'approved' });
     const updated = knowledgeRow({

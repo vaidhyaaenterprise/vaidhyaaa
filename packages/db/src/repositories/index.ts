@@ -1,4 +1,4 @@
-import { eq, desc, and, or } from 'drizzle-orm';
+import { eq, desc, and, isNull, or } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -88,6 +88,7 @@ export {
   normalizeQuestionSignature,
   type KnowledgeEntryRow,
   type KnowledgeEmbeddingStatusSummary,
+  type KnowledgeSectionRow,
   type ManualTemplateEntryRow,
   type KnowledgeVectorSearchRow,
 } from './knowledge.repository';
@@ -197,7 +198,9 @@ export class ClinicalRepository {
     return this.db
       .select()
       .from(clinicKnowledgeBase)
-      .where(eq(clinicKnowledgeBase.clinicId, clinicId));
+      .where(
+        and(eq(clinicKnowledgeBase.clinicId, clinicId), isNull(clinicKnowledgeBase.removedAt)),
+      );
   }
 
   getDoctorFeeInfo(clinicId: string, doctorId: string) {
@@ -228,7 +231,11 @@ export class ClinicalRepository {
       .select()
       .from(clinicKnowledgeBase)
       .where(
-        and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.status, 'approved')),
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.status, 'approved'),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
       );
 
     let best: (typeof rows)[number] | null = null;

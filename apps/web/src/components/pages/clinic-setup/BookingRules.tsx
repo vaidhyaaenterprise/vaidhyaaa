@@ -477,7 +477,7 @@ export function BookingRules() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading booking rules" description="Fetching from the API." />
       </div>
     );
@@ -485,7 +485,7 @@ export function BookingRules() {
 
   if (error) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load booking rules" description={error}>
           <button
             type="button"
@@ -501,7 +501,7 @@ export function BookingRules() {
 
   if (!rules || !tempRules) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-3 text-lg font-bold text-slate-900">Booking rules</h3>
         <p className="text-sm text-slate-500">No active doctor-specific booking rule found.</p>
       </div>
@@ -510,8 +510,8 @@ export function BookingRules() {
 
   return (
     <>
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Booking rules</h3>
           {isAdmin && !isEditing && (
             <button
@@ -549,51 +549,53 @@ export function BookingRules() {
 
         {!isEditing ? (
           <div className="space-y-3">
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Doctor</span>
-              <span className="text-sm font-bold text-slate-900">{rules.doctorName}</span>
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
+                {rules.doctorName}
+              </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Slot duration</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.slotDurationMinutes} minutes
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Capacity per slot</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.capacityPerSlot} patient(s)
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Booking horizon</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.bookingHorizonDays} days
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Edit cutoff</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.manualEditCutoffBeforeStartMinutes} minutes before start
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Max edit shift</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.manualEditMaxShiftMinutes} minutes
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Effective from</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.effectiveFrom ?? 'Today'}
               </span>
             </div>
             {isAdmin && (
-              <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+              <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                 <span className="text-sm font-semibold text-slate-600">Doctor service edit</span>
                 <span
-                  className={`text-sm font-bold ${rules.allowDoctorServiceEdit ? 'text-green-600' : 'text-slate-500'}`}
+                  className={`min-w-0 break-words text-sm font-bold sm:text-right ${rules.allowDoctorServiceEdit ? 'text-green-600' : 'text-slate-500'}`}
                 >
                   {rules.allowDoctorServiceEdit ? 'Enabled' : 'Disabled'}
                 </span>
