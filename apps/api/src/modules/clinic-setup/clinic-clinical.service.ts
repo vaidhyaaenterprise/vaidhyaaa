@@ -144,7 +144,7 @@ export class ClinicClinicalService {
   }
 
   async listDoctors(clinicId: string) {
-    const rows = await this.repos.clinicalSetup.listDoctors(clinicId);
+    const rows = await this.repos.clinicalSetup.listActiveDoctors(clinicId);
     return rows.map((row) => ({
       id: row.id,
       clinic_id: row.clinicId,
@@ -556,15 +556,11 @@ export class ClinicClinicalService {
   }
 
   async deleteDoctor(clinicId: string, doctorId: string) {
-    // Cascade: delete booking rules, then mappings, then schedules, then the doctor
-    await this.repos.clinicalSetup.deleteBookingRulesForDoctor(clinicId, doctorId);
-    await this.repos.clinicalSetup.deleteDoctorServiceMappingsForDoctor(clinicId, doctorId);
-    await this.repos.clinicalSetup.deleteDoctorSchedulesForDoctor(clinicId, doctorId);
-    const [deleted] = await this.repos.clinicalSetup.deleteDoctor(clinicId, doctorId);
-    if (!deleted) {
+    const archived = await this.repos.clinicalSetup.archiveDoctor(clinicId, doctorId);
+    if (!archived) {
       throw new AppError('NOT_FOUND', 'Doctor not found.');
     }
-    return { deleted: true };
+    return { deleted: true, archived: true };
   }
 
   async deleteClinicService(clinicId: string, serviceId: string) {

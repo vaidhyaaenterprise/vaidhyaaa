@@ -211,16 +211,6 @@ export function DoctorManagement() {
         }
       }
 
-      for (const doctorId of deletedDoctorIds) {
-        if (!isActive()) {
-          return;
-        }
-        await deleteDoctor(clinicId, doctorId);
-        if (!isActive()) {
-          return;
-        }
-      }
-
       const serviceIdByKey = new Map(services.map((service) => [service.key, service.id]));
       const selectedServiceKeys = [...new Set(doctorsToSave.map((doctor) => doctor.serviceKey))];
       const activeServiceKeys = new Set(
@@ -380,6 +370,19 @@ export function DoctorManagement() {
           if (!isActive()) {
             return;
           }
+        }
+      }
+
+      // Archive removed doctors only after all new/updated doctors and their
+      // service mappings have saved successfully. This keeps the clinic's current
+      // availability intact if creating the replacement doctor fails.
+      for (const doctorId of deletedDoctorIds) {
+        if (!isActive()) {
+          return;
+        }
+        await deleteDoctor(clinicId, doctorId);
+        if (!isActive()) {
+          return;
         }
       }
 

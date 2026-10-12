@@ -276,4 +276,36 @@ describe('DoctorManagement predefined services', () => {
       active: false,
     });
   });
+
+  it('saves a replacement doctor before archiving the removed doctor', async () => {
+    render(<DoctorManagement />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Dr. Merp' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ Add doctor' }));
+
+    fireEvent.change(screen.getByLabelText('Doctor name'), {
+      target: { value: 'Dr. Replacement' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Service for Dr. Replacement' }), {
+      target: { value: 'general_consultation' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Fee for Dr. Replacement' }), {
+      target: { value: '900' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedCreateDoctorService).toHaveBeenCalledWith(CLINIC_ID, {
+        doctor_id: '00000000-0000-0000-0000-000000000202',
+        clinic_service_id: GENERAL_SERVICE_ID,
+        consultation_fee_amount: 900,
+        active: true,
+      });
+      expect(mockedDeleteDoctor).toHaveBeenCalledWith(CLINIC_ID, DOCTOR_ID);
+    });
+
+    expect(mockedCreateDoctorService.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedDeleteDoctor.mock.invocationCallOrder[0]!,
+    );
+  });
 });

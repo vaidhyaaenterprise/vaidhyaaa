@@ -1580,7 +1580,7 @@ describe('C08 web API to DB connectivity', () => {
     expect(activatedClinic?.active).toBe(true);
   });
 
-  it('13. delete doctor-service/service/doctor endpoints mutate DB', async () => {
+  it('13. delete mapping/service endpoints and archive doctor endpoint mutate DB', async () => {
     expect(createdMappingId).toBeTruthy();
     expect(createdServiceId).toBeTruthy();
     expect(createdDoctorId).toBeTruthy();
@@ -1620,11 +1620,12 @@ describe('C08 web API to DB connectivity', () => {
     });
     expect(deleteDoctorResponse.statusCode).toBe(200);
 
-    const [doctorCount] = await sql<{ count: number }[]>`
-      SELECT count(*)::int AS count
+    const [doctorState] = await sql<{ count: number; active: boolean | null }[]>`
+      SELECT count(*)::int AS count, bool_or(active) AS active
       FROM doctors
       WHERE id = ${createdDoctorId}::uuid
     `;
-    expect(doctorCount?.count).toBe(0);
+    expect(doctorState?.count).toBe(1);
+    expect(doctorState?.active).toBe(false);
   });
 });

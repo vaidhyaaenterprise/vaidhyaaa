@@ -8,6 +8,8 @@ import {
   clinicHolidays,
   clinicHours,
   clinicServices,
+  clinicUsers,
+  doctorBlockedSlots,
   doctorSchedules,
   doctorServiceBookingRules,
   doctorServices,
@@ -520,6 +522,13 @@ export class ClinicalSetupRepository {
     return this.db.select().from(doctors).where(eq(doctors.clinicId, clinicId));
   }
 
+  listActiveDoctors(clinicId: string) {
+    return this.db
+      .select()
+      .from(doctors)
+      .where(and(eq(doctors.clinicId, clinicId), eq(doctors.active, true)));
+  }
+
   listServices(clinicId: string) {
     return this.db.select().from(clinicServices).where(eq(clinicServices.clinicId, clinicId));
   }
@@ -532,11 +541,68 @@ export class ClinicalSetupRepository {
       .limit(1);
   }
 
-  deleteDoctor(clinicId: string, doctorId: string) {
-    return this.db
-      .delete(doctors)
-      .where(and(eq(doctors.clinicId, clinicId), eq(doctors.id, doctorId)))
-      .returning();
+  /**
+   * Removes a doctor from active clinic operations without deleting the row.
+   *
+   * Doctor IDs are referenced by appointments, visits, slots and audit/history
+   * records. A hard delete is therefore both unsafe and rejected by the database
+   * once the doctor has activity. Keep the profile for those historical joins and
+   * atomically disable every entry point that could create new availability.
+   */
+  archiveDoctor(clinicId: string, doctorId: string) {
+    return this.db.transaction(async (transaction) => {
+      const [doctor] = await transaction
+        .select()
+        .from(doctors)
+        .where(and(eq(doctors.clinicId, clinicId), eq(doctors.id, doctorId)))
+        .limit(1);
+
+      if (!doctor) {
+        return null;
+      }
+
+      const now = new Date();
+
+      const [archivedDoctor] = await transaction
+        .update(doctors)
+        .set({ active: false, updatedAt: now })
+        .where(and(eq(doctors.clinicId, clinicId), eq(doctors.id, doctorId)))
+        .returning();
+
+      await transaction
+        .update(doctorServices)
+        .set({ active: false, updatedAt: now })
+        .where(and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.doctorId, doctorId)));
+
+      await transaction
+        .update(doctorServiceBookingRules)
+        .set({ active: false, updatedAt: now })
+        .where(
+          and(
+            eq(doctorServiceBookingRules.clinicId, clinicId),
+            eq(doctorServiceBookingRules.doctorId, doctorId),
+          ),
+        );
+
+      await transaction
+        .update(doctorSchedules)
+        .set({ active: false, updatedAt: now })
+        .where(and(eq(doctorSchedules.clinicId, clinicId), eq(doctorSchedules.doctorId, doctorId)));
+
+      await transaction
+        .update(doctorBlockedSlots)
+        .set({ active: false, updatedAt: now })
+        .where(
+          and(eq(doctorBlockedSlots.clinicId, clinicId), eq(doctorBlockedSlots.doctorId, doctorId)),
+        );
+
+      await transaction
+        .update(clinicUsers)
+        .set({ active: false, updatedAt: now })
+        .where(and(eq(clinicUsers.clinicId, clinicId), eq(clinicUsers.doctorId, doctorId)));
+
+      return archivedDoctor ?? null;
+    });
   }
 
   deleteClinicService(clinicId: string, serviceId: string) {
@@ -553,37 +619,11 @@ export class ClinicalSetupRepository {
       .returning();
   }
 
-  deleteDoctorServiceMappingsForDoctor(clinicId: string, doctorId: string) {
-    return this.db
-      .delete(doctorServices)
-      .where(and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.doctorId, doctorId)))
-      .returning();
-  }
-
   deleteDoctorServiceMappingsForService(clinicId: string, serviceId: string) {
     return this.db
       .delete(doctorServices)
       .where(
         and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.clinicServiceId, serviceId)),
-      )
-      .returning();
-  }
-
-  deleteDoctorSchedulesForDoctor(clinicId: string, doctorId: string) {
-    return this.db
-      .delete(doctorSchedules)
-      .where(and(eq(doctorSchedules.clinicId, clinicId), eq(doctorSchedules.doctorId, doctorId)))
-      .returning();
-  }
-
-  deleteBookingRulesForDoctor(clinicId: string, doctorId: string) {
-    return this.db
-      .delete(doctorServiceBookingRules)
-      .where(
-        and(
-          eq(doctorServiceBookingRules.clinicId, clinicId),
-          eq(doctorServiceBookingRules.doctorId, doctorId),
-        ),
       )
       .returning();
   }
