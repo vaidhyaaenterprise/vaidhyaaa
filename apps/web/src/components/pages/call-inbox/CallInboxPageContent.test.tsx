@@ -48,6 +48,7 @@ function inboxRow(
     created_callback_request_id: null,
     created_emergency_incident_id: null,
     appointment_action_request_id: null,
+    appointment_start: outcome === 'appointment_booked' ? '2026-10-15 09:30:00' : null,
     source_status: null,
   };
 }
@@ -83,6 +84,7 @@ describe('CallInboxPageContent', () => {
     expect(screen.getByText('Inquiry summary')).toBeInTheDocument();
     expect(screen.getByText('Callback summary')).toBeInTheDocument();
     expect(screen.getByText('Emergency summary')).toBeInTheDocument();
+    expect(screen.queryByText('5:00')).not.toBeInTheDocument();
     expect(mockedFetchCallInbox).toHaveBeenCalledWith(
       CLINIC_ID,
       [],
@@ -101,6 +103,11 @@ describe('CallInboxPageContent', () => {
     fireEvent.click(await screen.findByText('Booked summary'));
 
     expect(screen.getByText('Call details')).toBeInTheDocument();
+    expect(screen.queryByText('Action needed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm')).not.toBeInTheDocument();
+    expect(screen.queryByText('Linked appointment')).not.toBeInTheDocument();
+    expect(screen.getByText('Appointment date and time')).toBeInTheDocument();
+    expect(screen.getByText('15 Oct 2026 at 9:30 AM')).toBeInTheDocument();
     expect(screen.queryByText('Recording')).not.toBeInTheDocument();
     expect(screen.queryByText('Transcript')).not.toBeInTheDocument();
     expect(

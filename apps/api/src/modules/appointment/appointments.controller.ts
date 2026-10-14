@@ -7,6 +7,7 @@ import {
   markAppointmentVisitedSchema,
   rescheduleAppointmentSchema,
   resolveAppointmentActionRequestSchema,
+  updateAppointmentPatientNameSchema,
   type AuthContext,
 } from '@vaidya/shared';
 
@@ -177,6 +178,27 @@ export class AppointmentsController {
       actorUserId: auth.userId,
     });
     return { appointment };
+  }
+
+  @Patch(':appointmentId/patient-name')
+  @Roles('clinic_admin')
+  async updatePatientName(
+    @Param('clinicId') clinicId: string,
+    @Param('appointmentId') appointmentId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = updateAppointmentPatientNameSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Patient name must contain 2 to 120 characters.');
+    }
+    const auth = getAuthContext(request);
+    return this.appointmentAdminService.updatePatientName({
+      clinicId,
+      appointmentId,
+      patientName: parsed.data.patient_name,
+      actorUserId: auth.userId,
+    });
   }
 
   @Patch(':appointmentId/reschedule')

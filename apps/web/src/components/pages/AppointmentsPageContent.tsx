@@ -31,6 +31,7 @@ import {
   markAppointmentVisited,
   rescheduleAppointment,
   resolveAppointmentActionRequest,
+  updateAppointmentPatientName,
 } from '@/lib/api/appointments';
 import { ApiRequestError } from '@/lib/api/client';
 import {
@@ -508,12 +509,28 @@ export function AppointmentsPageContent() {
 
   const handleCancel = async (id: string) => {
     if (!clinicId) {
-      return;
+      throw new Error('Select a clinic before cancelling an appointment.');
     }
     const targetClinicId = clinicId;
     await cancelAppointment(targetClinicId, id);
     if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
       await loadAppointments({ showLoading: false, includeActivity: isAdmin });
+    }
+  };
+
+  const handleEditPatientName = async (appointmentId: string, patientName: string) => {
+    if (!clinicId) {
+      throw new Error('Select a clinic before editing a patient name.');
+    }
+    const targetClinicId = clinicId;
+    await updateAppointmentPatientName(targetClinicId, appointmentId, patientName);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      await loadAppointments({
+        showLoading: false,
+        includeAppointments: true,
+        includeActionRequests: isAdmin,
+        includeActivity: isAdmin,
+      });
     }
   };
 
@@ -731,30 +748,33 @@ export function AppointmentsPageContent() {
         </p>
       )}
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
+      <div className="portal-card-grid gap-4">
         <PendingAppointments
           appointments={visiblePending}
           emptyMessage={pendingEmptyMessage}
-          bookingRules={bookingRules}
           onConfirm={(id) => void handleConfirm(id)}
           onEditTime={handleEditTime}
-          onCancel={(id) => void handleCancel(id)}
+          onCancel={handleCancel}
+          onEditPatientName={handleEditPatientName}
           onViewHistory={handleViewHistory}
         />
         <ConfirmedAppointments
           appointments={visibleConfirmed}
-          bookingRules={bookingRules}
           minimumEditDate={clinicDate ?? undefined}
           onEditTime={handleEditTime}
-          onCancel={(id) => void handleCancel(id)}
+          onCancel={handleCancel}
+          onEditPatientName={handleEditPatientName}
           onMarkVisited={handleMarkVisited}
           onViewHistory={handleViewHistory}
         />
-        <MissedAppointments appointments={visibleMissed} />
+        <MissedAppointments
+          appointments={visibleMissed}
+          onEditPatientName={handleEditPatientName}
+        />
         <VisitedPatients
           appointments={visibleVisited}
-          bookingRules={bookingRules}
           onViewHistory={handleViewHistory}
+          onEditPatientName={handleEditPatientName}
         />
         {isAdmin && (
           <RescheduleCancelRequests
@@ -763,6 +783,7 @@ export function AppointmentsPageContent() {
             onApproveReschedule={handleApproveReschedule}
             onRejectRequest={handleRejectRequest}
             onCancelAppointment={handleCancelAppointment}
+            onEditPatientName={handleEditPatientName}
           />
         )}
       </div>

@@ -10,6 +10,7 @@ import {
   fetchAvailableAppointmentSlots,
   markAppointmentVisited,
   rescheduleAppointment,
+  updateAppointmentPatientName,
 } from '@/lib/api/appointments';
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
@@ -48,6 +49,7 @@ vi.mock('@/lib/api/appointments', () => ({
   markAppointmentVisited: vi.fn(),
   rescheduleAppointment: vi.fn(),
   resolveAppointmentActionRequest: vi.fn(),
+  updateAppointmentPatientName: vi.fn(),
 }));
 
 vi.mock('@/lib/api/clinic-clinical', () => ({
@@ -65,12 +67,22 @@ vi.mock('@/lib/api/clinic-settings', () => ({
 vi.mock('@/components/pages/appointments/PendingAppointments', () => ({
   PendingAppointments: ({
     appointments,
+    onEditPatientName,
   }: {
     appointments: Array<{ id: string; patientName: string }>;
+    onEditPatientName: (id: string, patientName: string) => Promise<void>;
   }) => (
     <section aria-label="Pending confirmation">
       {appointments.map((appointment) => (
-        <p key={appointment.id}>{appointment.patientName}</p>
+        <div key={appointment.id}>
+          <p>{appointment.patientName}</p>
+          <button
+            type="button"
+            onClick={() => void onEditPatientName(appointment.id, 'Updated Patient Name')}
+          >
+            Rename {appointment.patientName}
+          </button>
+        </div>
       ))}
     </section>
   ),
@@ -152,6 +164,7 @@ function appointmentRow(
     doctor_name: 'Doctor',
     clinic_service_id: '00000000-0000-0000-0000-000000000301',
     service_name: 'Consultation',
+    created_at: `${date}T03:30:00.000Z`,
     appointment_start: `${date} ${time}`,
     appointment_end: `${date} ${time === '09:00:00' ? '09:30:00' : '10:30:00'}`,
     reason_for_visit: 'Checkup',
@@ -195,6 +208,7 @@ const mockedFetchAppointmentActivity = vi.mocked(fetchAppointmentActivity);
 const mockedFetchAvailableAppointmentSlots = vi.mocked(fetchAvailableAppointmentSlots);
 const mockedMarkAppointmentVisited = vi.mocked(markAppointmentVisited);
 const mockedRescheduleAppointment = vi.mocked(rescheduleAppointment);
+const mockedUpdateAppointmentPatientName = vi.mocked(updateAppointmentPatientName);
 const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
 const mockedFetchDoctors = vi.mocked(fetchDoctors);
 const mockedFetchServices = vi.mocked(fetchServices);
@@ -221,6 +235,11 @@ beforeEach(() => {
   mockedFetchAvailableAppointmentSlots.mockReset();
   mockedMarkAppointmentVisited.mockReset();
   mockedRescheduleAppointment.mockReset();
+  mockedUpdateAppointmentPatientName.mockReset();
+  mockedUpdateAppointmentPatientName.mockResolvedValue({
+    appointment: {},
+    updated_appointment_count: 1,
+  });
   mockedFetchClinicSettings.mockReset();
   mockedFetchClinicSettings.mockResolvedValue({
     clinic_id: CLINIC_ID,
@@ -250,6 +269,33 @@ afterEach(() => {
 });
 
 describe('AppointmentsPageContent', () => {
+  it('persists a patient name and reloads every appointment-related block', async () => {
+    const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
+    mockedFetchAppointments
+      .mockResolvedValueOnce([
+        appointmentRow('patient-name-1', 'Old Patient Name', clinicToday),
+      ])
+      .mockResolvedValueOnce([
+        appointmentRow('patient-name-1', 'Updated Patient Name', clinicToday),
+      ]);
+
+    render(<AppointmentsPageContent />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Old Patient Name' }));
+
+    await waitFor(() => {
+      expect(mockedUpdateAppointmentPatientName).toHaveBeenCalledWith(
+        CLINIC_ID,
+        'patient-name-1',
+        'Updated Patient Name',
+      );
+      expect(mockedFetchAppointments).toHaveBeenCalledTimes(2);
+      expect(mockedFetchAppointmentActionRequests).toHaveBeenCalledTimes(2);
+      expect(mockedFetchAppointmentActivity).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('Updated Patient Name')).toBeInTheDocument();
+  });
+
   it('separates missed confirmations from current and future pending appointments', async () => {
     const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
     mockedFetchAppointments.mockResolvedValue([

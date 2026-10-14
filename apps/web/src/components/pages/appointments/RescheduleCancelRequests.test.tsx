@@ -67,6 +67,7 @@ describe('RescheduleCancelRequests', () => {
         onApproveReschedule={vi.fn().mockResolvedValue(undefined)}
         onRejectRequest={onRejectRequest}
         onCancelAppointment={onCancelAppointment}
+        onEditPatientName={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -86,13 +87,16 @@ describe('RescheduleCancelRequests', () => {
         onApproveReschedule={vi.fn().mockResolvedValue(undefined)}
         onRejectRequest={vi.fn().mockResolvedValue(undefined)}
         onCancelAppointment={vi.fn().mockResolvedValue(undefined)}
+        onEditPatientName={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
     const history = screen.getByRole('region', { name: 'Recent changes' });
     expect(within(history).getByText('Activity patient')).toBeInTheDocument();
     expect(within(history).getByText('Rescheduled')).toBeInTheDocument();
-    expect(within(history).queryByRole('button')).not.toBeInTheDocument();
+    expect(
+      within(history).getByRole('button', { name: 'Edit patient name for Activity patient' }),
+    ).toBeInTheDocument();
   });
 
   it('approves a held requested slot without binding a semantic preference to the time input', async () => {
@@ -105,6 +109,7 @@ describe('RescheduleCancelRequests', () => {
         onApproveReschedule={onApproveReschedule}
         onRejectRequest={vi.fn().mockResolvedValue(undefined)}
         onCancelAppointment={vi.fn().mockResolvedValue(undefined)}
+        onEditPatientName={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 

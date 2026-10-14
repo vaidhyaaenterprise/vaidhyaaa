@@ -78,6 +78,13 @@ function mapClinicUserRows(rows: Awaited<ReturnType<ClinicUsersService['listUser
     role: row.membership.role,
     doctor_id: row.membership.doctorId,
     active: row.membership.active,
+    doctor:
+      row.membership.role === 'doctor'
+        ? {
+            qualification: row.doctorQualification,
+            service_name: row.doctorServiceName,
+          }
+        : null,
     user: {
       id: row.user.id,
       name: row.user.name,

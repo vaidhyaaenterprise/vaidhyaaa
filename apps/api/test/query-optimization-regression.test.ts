@@ -9,6 +9,53 @@ function installPrivateDependency(target: object, name: string, value: unknown):
 }
 
 describe('query optimization regressions', () => {
+  it('returns the booking timestamp in appointment list responses', async () => {
+    const createdAt = new Date('2026-10-12T04:30:00.000Z');
+    const listAppointmentsForClinic = vi.fn().mockResolvedValue([
+      {
+        id: 'appointment-1',
+        patientName: 'Booked Today',
+        patientPhone: '9876543210',
+        doctorId: 'doctor-1',
+        clinicServiceId: 'service-1',
+        appointmentStart: '2026-10-15 09:00:00',
+        appointmentEnd: '2026-10-15 09:30:00',
+        reasonForVisit: 'Checkup',
+        isFollowup: false,
+        routingSource: 'manual_booking',
+        createdByUserId: 'admin-1',
+        status: 'confirmed',
+        createdAt,
+      },
+    ]);
+    const service = Object.create(AppointmentsService.prototype) as AppointmentsService;
+    installPrivateDependency(service, 'repos', {
+      appointmentLifecycle: { listAppointmentsForClinic },
+      clinical: {
+        listDoctors: vi.fn().mockResolvedValue([{ id: 'doctor-1', name: 'Dr. Test' }]),
+        listServices: vi
+          .fn()
+          .mockResolvedValue([{ id: 'service-1', serviceName: 'General Consultation' }]),
+      },
+      patients: { listVisitsByAppointmentIds: vi.fn().mockResolvedValue([]) },
+    });
+
+    const result = await service.listAppointments({
+      clinicId: 'clinic-1',
+      status: ['pending_confirmation', 'confirmed', 'visited'],
+    });
+
+    expect(listAppointmentsForClinic).toHaveBeenCalledWith({
+      clinicId: 'clinic-1',
+      statuses: ['pending_confirmation', 'confirmed', 'visited'],
+    });
+    expect(result[0]).toMatchObject({
+      id: 'appointment-1',
+      created_at: createdAt.toISOString(),
+      status: 'confirmed',
+    });
+  });
+
   it('generates slots for an empty requested date even when other future slots exist', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-20T03:00:00.000Z'));

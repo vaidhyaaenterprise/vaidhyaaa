@@ -34,8 +34,9 @@ export class PatientsRepository {
     clinicId: string,
     patientId: string,
     values: Partial<typeof patients.$inferInsert>,
+    db: Database = this.db,
   ) {
-    return this.db
+    return db
       .update(patients)
       .set({ ...values, updatedAt: new Date() })
       .where(and(eq(patients.clinicId, clinicId), eq(patients.id, patientId)))

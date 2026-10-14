@@ -1,10 +1,12 @@
 'use client';
 
 import { useAuth } from '@/components/auth/AuthProvider';
+import { EditablePatientName } from './EditablePatientName';
 import type { Appointment } from './types';
 
 interface MissedAppointmentsProps {
   appointments: Appointment[];
+  onEditPatientName: (id: string, patientName: string) => Promise<void>;
 }
 
 function formatTime(time: string) {
@@ -19,7 +21,7 @@ function formatDate(date: string) {
   return year && month && day ? `${day}/${month}/${year}` : date;
 }
 
-export function MissedAppointments({ appointments }: MissedAppointmentsProps) {
+export function MissedAppointments({ appointments, onEditPatientName }: MissedAppointmentsProps) {
   const { effectiveRole, clinicRole } = useAuth();
   const currentDoctorId = clinicRole?.doctor_id;
   const visibleAppointments =
@@ -49,7 +51,15 @@ export function MissedAppointments({ appointments }: MissedAppointmentsProps) {
               className="flex flex-col gap-3 bg-rose-50/50 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
             >
               <div>
-                <p className="text-sm font-bold text-slate-900">{appointment.patientName}</p>
+                <EditablePatientName
+                  patientName={appointment.patientName}
+                  onSave={
+                    effectiveRole === 'admin'
+                      ? (patientName) => onEditPatientName(appointment.id, patientName)
+                      : undefined
+                  }
+                  className="text-sm font-bold text-slate-900"
+                />
                 {appointment.patientPhone ? (
                   <p className="mt-0.5 text-xs text-slate-600">{appointment.patientPhone}</p>
                 ) : null}

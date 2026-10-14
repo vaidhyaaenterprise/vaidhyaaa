@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmedAppointments } from './ConfirmedAppointments';
 import { MissedAppointments } from './MissedAppointments';
 import { PendingAppointments } from './PendingAppointments';
-import type { Appointment, BookingRules } from './types';
+import type { Appointment } from './types';
 import { VisitedPatients } from './VisitedPatients';
 
 vi.mock('@/components/auth/AuthProvider', () => ({
@@ -36,15 +36,6 @@ vi.mock('./AppointmentCard', () => ({
   ),
 }));
 
-const bookingRules: BookingRules = {
-  slotDurationMinutes: 30,
-  capacityPerSlot: 1,
-  bookingHorizonDays: 30,
-  manualEditCutoffBeforeStartMinutes: 60,
-  manualEditMaxShiftMinutes: 60,
-  allowDoctorServiceEdit: true,
-};
-
 function appointment(id: string, patientName: string, doctorId: string): Appointment {
   return {
     id,
@@ -54,6 +45,7 @@ function appointment(id: string, patientName: string, doctorId: string): Appoint
     doctorName: doctorId,
     serviceId: 'service-1',
     serviceName: 'Consultation',
+    bookedAt: '2026-09-23T03:30:00.000Z',
     appointmentDate: '2026-09-23',
     appointmentTime: '09:00',
     reasonForVisit: 'Checkup',
@@ -79,10 +71,10 @@ const sections: Array<[string, () => ReactElement]> = [
     () => (
       <PendingAppointments
         appointments={appointments}
-        bookingRules={bookingRules}
         onConfirm={noOp}
         onEditTime={noOpAsync}
-        onCancel={noOp}
+        onCancel={noOpAsync}
+        onEditPatientName={noOpAsync}
         onViewHistory={noOp}
       />
     ),
@@ -92,9 +84,9 @@ const sections: Array<[string, () => ReactElement]> = [
     () => (
       <ConfirmedAppointments
         appointments={appointments}
-        bookingRules={bookingRules}
         onEditTime={noOpAsync}
-        onCancel={noOp}
+        onCancel={noOpAsync}
+        onEditPatientName={noOpAsync}
         onMarkVisited={noOpAsync}
         onViewHistory={noOp}
       />
@@ -105,12 +97,17 @@ const sections: Array<[string, () => ReactElement]> = [
     () => (
       <VisitedPatients
         appointments={appointments}
-        bookingRules={bookingRules}
         onViewHistory={noOp}
+        onEditPatientName={noOpAsync}
       />
     ),
   ],
-  ['missed', () => <MissedAppointments appointments={appointments} />],
+  [
+    'missed',
+    () => (
+      <MissedAppointments appointments={appointments} onEditPatientName={noOpAsync} />
+    ),
+  ],
 ];
 
 afterEach(() => {

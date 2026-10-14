@@ -18,7 +18,7 @@ export function PageHeader({
   showAgentToggle = false,
 }: PageHeaderProps) {
   return (
-    <header className="mb-6 flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <header className="portal-page-header mb-6 flex min-w-0 flex-col gap-4">
       <div className="min-w-0">
         <h1 className="text-[clamp(1.25rem,2.5vw,_2rem)] font-black tracking-tight text-slate-900">
           {title}

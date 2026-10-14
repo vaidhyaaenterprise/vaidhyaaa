@@ -8,7 +8,7 @@ import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchCallInbox, type CallInboxApiRow } from '@/lib/api/clinic-clinical';
 
-import type { Call, CallAction, CallFilters, CallOutcome } from './types';
+import type { Call, CallFilters, CallOutcome } from './types';
 
 const OUTCOME_FILTER_DEBOUNCE_MS = 250;
 
@@ -43,19 +43,6 @@ function matchesFilters(call: Call, filters: CallFilters): boolean {
 
 function outcomesMatch(left: readonly CallOutcome[], right: readonly CallOutcome[]): boolean {
   return left.length === right.length && left.every((outcome, index) => outcome === right[index]);
-}
-
-function mapAction(outcome: CallOutcome): CallAction {
-  switch (outcome) {
-    case 'appointment_booked':
-      return 'confirmation_needed';
-    case 'callback_requested':
-      return 'callback_needed';
-    case 'emergency':
-      return 'emergency_response';
-    default:
-      return 'none';
-  }
 }
 
 export function CallInboxPageContent() {
@@ -95,7 +82,6 @@ export function CallInboxPageContent() {
           duration: row.duration_seconds ?? 0,
           summary: row.summary ?? '',
           outcome,
-          actionNeeded: row.action_needed ?? mapAction(outcome),
           source: 'voice_bot',
         };
         if (row.source_status) {
@@ -115,6 +101,9 @@ export function CallInboxPageContent() {
         }
         if (row.created_appointment_request_id) {
           call.linkedAppointmentId = row.created_appointment_request_id;
+        }
+        if (row.appointment_start) {
+          call.linkedAppointmentStart = row.appointment_start;
         }
         if (row.created_callback_request_id) {
           call.linkedCallbackId = row.created_callback_request_id;
@@ -227,7 +216,7 @@ export function CallInboxPageContent() {
   if (!isAdmin) {
     return (
       <>
-        <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
+        <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Call inbox is admin-only.</p>
         </div>
@@ -238,7 +227,7 @@ export function CallInboxPageContent() {
   if (loading) {
     return (
       <>
-        <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
+        <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
         <LoadingState title="Loading calls" description="Fetching call inbox from the API." />
       </>
     );
@@ -247,7 +236,7 @@ export function CallInboxPageContent() {
   if (error) {
     return (
       <>
-        <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
+        <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
         <ErrorState title="Could not load calls" description={error}>
           <button
             type="button"
@@ -308,42 +297,6 @@ export function CallInboxPageContent() {
     }
   };
 
-  const getActionBadge = (action: string) => {
-    if (action === 'none') return null;
-    switch (action) {
-      case 'confirmation_needed':
-        return (
-          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
-            Confirm
-          </span>
-        );
-      case 'appointment_action_needed':
-        return (
-          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
-            Review
-          </span>
-        );
-      case 'callback_needed':
-        return (
-          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
-            Callback
-          </span>
-        );
-      case 'emergency_response':
-        return (
-          <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
-            Emergency
-          </span>
-        );
-      default:
-        return (
-          <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">
-            {action}
-          </span>
-        );
-    }
-  };
-
   const formatTime = (isoString: string) => {
     const date = new Date(isoString);
     return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
@@ -354,10 +307,19 @@ export function CallInboxPageContent() {
     return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  const formatDuration = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  const formatAppointmentDateTime = (value: string) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(value);
+    if (!match) return value;
+
+    const [, year, month, day, hour, minute] = match;
+    const monthLabel = new Intl.DateTimeFormat('en-IN', {
+      month: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+    const numericHour = Number(hour);
+    const suffix = numericHour >= 12 ? 'PM' : 'AM';
+    const displayHour = numericHour % 12 || 12;
+    return `${day} ${monthLabel} ${year} at ${displayHour}:${minute} ${suffix}`;
   };
 
   const filteredCalls = calls.filter((call) => matchesFilters(call, filters));
@@ -380,7 +342,7 @@ export function CallInboxPageContent() {
 
   return (
     <>
-      <PageHeader title="Call inbox" description="Review call outcomes and required actions." />
+      <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap gap-3">
@@ -392,12 +354,25 @@ export function CallInboxPageContent() {
               aria-controls="call-inbox-outcome-menu"
               aria-expanded={outcomeMenuOpen}
               onClick={() => setOutcomeMenuOpen((open) => !open)}
-              className="flex min-w-48 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
+              className="flex min-h-12 min-w-48 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white py-2 pl-4 pr-3 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
             >
-              <span>{outcomeTriggerLabel}</span>
-              <span aria-hidden="true" className="text-slate-500">
-                ⌄
-              </span>
+              <span className="truncate text-left">{outcomeTriggerLabel}</span>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                fill="none"
+                className={`h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 ${
+                  outcomeMenuOpen ? 'rotate-180' : ''
+                }`}
+              >
+                <path
+                  d="m6 8 4 4 4-4"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
 
             {outcomeMenuOpen && (
@@ -437,7 +412,7 @@ export function CallInboxPageContent() {
         </div>
       </div>
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
+      <div className="portal-card-grid gap-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="mb-4 text-lg font-bold text-slate-900">Call list</h3>
 
@@ -462,9 +437,6 @@ export function CallInboxPageContent() {
                           {formatTime(call.callTime)}
                         </span>
                         <span className="text-xs text-slate-500">{formatDate(call.callTime)}</span>
-                        <span className="text-xs text-slate-500">
-                          {formatDuration(call.duration)}
-                        </span>
                       </div>
                       <p className="text-sm text-slate-600">{call.callerPhone}</p>
                       {call.patientName && (
@@ -473,7 +445,6 @@ export function CallInboxPageContent() {
                     </div>
                     <div className="flex flex-col gap-1">
                       {getOutcomeBadge(call.outcome, call.sourceStatus)}
-                      {getActionBadge(call.actionNeeded)}
                     </div>
                   </div>
                   <p className="text-xs text-slate-500">{call.summary}</p>
@@ -507,29 +478,21 @@ export function CallInboxPageContent() {
                 <p className="text-sm text-slate-700">{selectedCall.summary}</p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Outcome
-                  </h4>
-                  {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
-                </div>
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Action needed
-                  </h4>
-                  {getActionBadge(selectedCall.actionNeeded) || (
-                    <span className="text-sm text-slate-500">None</span>
-                  )}
-                </div>
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Outcome
+                </h4>
+                {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
               </div>
 
-              {selectedCall.linkedAppointmentId && (
+              {selectedCall.linkedAppointmentStart && (
                 <div>
                   <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Linked appointment
+                    Appointment date and time
                   </h4>
-                  <p className="text-sm text-slate-700">{selectedCall.linkedAppointmentId}</p>
+                  <p className="text-sm font-semibold text-slate-700">
+                    {formatAppointmentDateTime(selectedCall.linkedAppointmentStart)}
+                  </p>
                 </div>
               )}
 

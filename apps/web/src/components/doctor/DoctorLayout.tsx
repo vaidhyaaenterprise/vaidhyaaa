@@ -154,7 +154,7 @@ export function DoctorLayout({ children }: { children: ReactNode }) {
         </aside>
 
         {/* Main content */}
-        <main className="min-w-0 overflow-y-auto px-4 py-5 pb-14 sm:px-6 sm:py-7 sm:pb-16 lg:px-8">
+        <main className="portal-main min-w-0 overflow-y-auto px-4 py-5 pb-14 sm:px-6 sm:py-7 sm:pb-16 lg:px-8">
           {children}
         </main>
       </div>

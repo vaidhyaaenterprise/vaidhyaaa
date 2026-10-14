@@ -15,10 +15,12 @@ import {
   fetchDoctorServices,
   fetchDoctors,
   fetchServices,
+  patchDoctor,
   patchDoctorService,
   patchService,
 } from '@/lib/api/clinic-clinical';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { notifyClinicDoctorDetailsUpdated } from './clinicSetupEvents';
 
 type Doctor = {
   id: string;
@@ -308,6 +310,24 @@ export function DoctorManagement() {
           continue;
         }
 
+        const persistedDoctor = doctors.find((entry) => entry.id === doctor.id);
+        if (
+          persistedDoctor &&
+          (persistedDoctor.name !== doctorName ||
+            persistedDoctor.specialization !== doctor.specialization.trim())
+        ) {
+          if (!isActive()) {
+            return;
+          }
+          await patchDoctor(clinicId, doctor.id, {
+            name: doctorName,
+            qualification: doctor.specialization.trim(),
+          });
+          if (!isActive()) {
+            return;
+          }
+        }
+
         const doctorMappings = doctorServiceMappings.filter(
           (mapping) => mapping.doctorId === doctor.id,
         );
@@ -391,6 +411,9 @@ export function DoctorManagement() {
       }
       setIsEditing(false);
       await loadData(false);
+      if (isActive()) {
+        notifyClinicDoctorDetailsUpdated(clinicId);
+      }
     } catch (err) {
       if (!isActive()) {
         return;
@@ -474,6 +497,9 @@ export function DoctorManagement() {
       return;
     }
     await loadData();
+    if (isActive()) {
+      notifyClinicDoctorDetailsUpdated(clinicId);
+    }
   };
 
   if (!isAdmin) {
@@ -514,7 +540,7 @@ export function DoctorManagement() {
   return (
     <div
       data-testid="doctor-management-card"
-      className={`doctor-management-card min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${isEditing ? 'xl:col-span-2' : ''}`}
+      className={`doctor-management-card min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${isEditing ? 'col-span-full' : ''}`}
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-900">Doctors and services</h3>

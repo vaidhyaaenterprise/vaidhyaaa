@@ -86,6 +86,7 @@ vi.mock('@/lib/api/clinic-clinical', () => ({
   fetchDoctors: vi.fn(),
   fetchHolidays: vi.fn(),
   fetchServices: vi.fn(),
+  patchDoctor: vi.fn(),
   patchBookingRule: vi.fn(),
   patchDoctorService: vi.fn(),
   patchHoliday: vi.fn(),

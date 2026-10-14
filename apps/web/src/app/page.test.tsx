@@ -113,12 +113,18 @@ function shiftDate(date: string, days: number): string {
   return shifted.toISOString().slice(0, 10);
 }
 
+function formatTestDate(date: string): string {
+  const [year, month, day] = date.split('-');
+  return `${day}/${month}/${year}`;
+}
+
 function appointmentRow(
   id: string,
   patientName: string,
   date: string,
   time: string,
   status: string,
+  createdAt = `${date}T03:30:00.000Z`,
 ): AppointmentApiRow {
   return {
     id,
@@ -128,6 +134,7 @@ function appointmentRow(
     doctor_name: 'Dr. Test',
     clinic_service_id: SERVICE_ID,
     service_name: 'General Consultation',
+    created_at: createdAt,
     appointment_start: `${date} ${time}:00`,
     appointment_end: `${date} ${time}:00`,
     reason_for_visit: 'Checkup',
@@ -419,9 +426,78 @@ describe('HomePage dashboard', () => {
 
     expect(mockedFetchAppointments).toHaveBeenCalledWith(
       CLINIC_ID,
-      ['pending_confirmation', 'confirmed'],
+      ['pending_confirmation', 'confirmed', 'visited'],
       expect.any(AbortSignal),
     );
+  });
+
+  it("lists only non-cancelled appointments booked on the clinic's current day in the final block", async () => {
+    const today = getClinicDate(new Date(), 'Asia/Kolkata');
+    const yesterday = shiftDate(today, -1);
+    const tomorrow = shiftDate(today, 1);
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow(
+        'booked-later',
+        'Booked Later',
+        tomorrow,
+        '10:30',
+        'confirmed',
+        `${today}T06:00:00.000Z`,
+      ),
+      appointmentRow(
+        'booked-earlier',
+        'Booked Earlier',
+        today,
+        '09:30',
+        'pending_confirmation',
+        `${today}T04:00:00.000Z`,
+      ),
+      appointmentRow(
+        'booked-visited',
+        'Booked Visited',
+        yesterday,
+        '08:30',
+        'visited',
+        `${today}T05:00:00.000Z`,
+      ),
+      appointmentRow(
+        'booked-yesterday',
+        'Booked Yesterday',
+        today,
+        '11:00',
+        'confirmed',
+        `${yesterday}T04:00:00.000Z`,
+      ),
+      appointmentRow(
+        'cancelled-today',
+        'Cancelled Today',
+        today,
+        '12:00',
+        'cancelled',
+        `${today}T07:00:00.000Z`,
+      ),
+    ]);
+
+    render(<HomePageContent />);
+
+    const todayActions = await screen.findByRole('region', { name: "Today's action" });
+    expect(within(todayActions).getByText('Booked Later')).toBeInTheDocument();
+    expect(within(todayActions).getByText('Booked Earlier')).toBeInTheDocument();
+    expect(within(todayActions).getByText('Booked Visited')).toBeInTheDocument();
+    expect(within(todayActions).queryByText('Booked Yesterday')).not.toBeInTheDocument();
+    expect(within(todayActions).queryByText('Cancelled Today')).not.toBeInTheDocument();
+    expect(within(todayActions).getByText('Visited')).toBeInTheDocument();
+    expect(within(todayActions).getByText('Booked Later').closest('li')).toHaveTextContent(
+      `Appointment: ${formatTestDate(tomorrow)} at 10:30 AM`,
+    );
+
+    const names = within(todayActions)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(names[0]).toContain('Booked Later');
+    expect(names[1]).toContain('Booked Visited');
+    expect(names[2]).toContain('Booked Earlier');
+    expect(todayActions.parentElement?.lastElementChild).toBe(todayActions);
   });
 
   it('does not call admin-only settings or appointment actions for a doctor session', async () => {

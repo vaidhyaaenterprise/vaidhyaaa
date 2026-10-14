@@ -42,7 +42,7 @@ type UserCredentialModalProps = {
 
 const inputClassName =
   'w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500';
-const labelClassName = 'mb-1.5 block text-xs font-bold uppercase tracking-[0.12em] text-slate-500';
+const labelClassName = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500';
 
 function EyeIcon({ hidden }: { hidden: boolean }) {
   return hidden ? (
@@ -263,10 +263,10 @@ export function UserCredentialModal({
       >
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5 sm:px-7">
           <div>
-            <p className="mb-1 text-xs font-extrabold uppercase tracking-[0.18em] text-teal-700">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-teal-700">
               Secure clinic access
             </p>
-            <h2 id={titleId} className="text-xl font-extrabold tracking-tight text-slate-950">
+            <h2 id={titleId} className="text-xl font-bold text-slate-900">
               {createdCredentials
                 ? 'Login created successfully'
                 : isEditing
@@ -340,7 +340,7 @@ export function UserCredentialModal({
             <button
               type="button"
               onClick={onClose}
-              className="mt-6 w-full rounded-xl bg-teal-700 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-teal-700/20 transition hover:bg-teal-800"
+              className="mt-6 w-full rounded-xl bg-teal-700 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-teal-700/20 transition hover:bg-teal-800"
             >
               Done
             </button>
@@ -357,7 +357,7 @@ export function UserCredentialModal({
                       type="button"
                       onClick={() => selectRole(option)}
                       aria-pressed={role === option}
-                      className={`rounded-xl px-4 py-2.5 text-sm font-extrabold transition ${
+                      className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${
                         role === option
                           ? 'bg-white text-teal-800 shadow-sm ring-1 ring-slate-200'
                           : 'text-slate-500 hover:text-slate-800'
@@ -376,7 +376,7 @@ export function UserCredentialModal({
                     Role and doctor association cannot be changed
                   </p>
                 </div>
-                <span className="rounded-full bg-teal-100 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider text-teal-800">
+                <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-teal-800">
                   {editingUser?.role === 'admin' ? 'Clinic admin' : 'Doctor'}
                 </span>
               </div>
@@ -436,7 +436,7 @@ export function UserCredentialModal({
                 />
                 <span
                   id="login-suffix-help"
-                  className="flex shrink-0 items-center rounded-r-xl border border-l-0 border-slate-200 bg-slate-100 px-3 text-sm font-extrabold text-slate-600"
+                  className="flex shrink-0 items-center rounded-r-xl border border-l-0 border-slate-200 bg-slate-100 px-3 text-sm font-bold text-slate-600"
                   title="Clinic ID suffix cannot be changed"
                 >
                   .{clinicLoginNumber}
@@ -549,14 +549,14 @@ export function UserCredentialModal({
                 type="button"
                 onClick={onClose}
                 disabled={submitting}
-                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-extrabold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={!canSubmit || submitting}
-                className="rounded-xl bg-teal-700 px-6 py-3 text-sm font-extrabold text-white shadow-lg shadow-teal-700/20 transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+                className="rounded-xl bg-teal-700 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-teal-700/20 transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
               >
                 {submitting ? 'Saving…' : isEditing ? 'Save changes' : 'Create login'}
               </button>

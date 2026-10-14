@@ -70,6 +70,7 @@ export class CallInboxRepository {
         transcriptExpiresAt: calls.transcriptExpiresAt,
         createdAppointmentRequestId: calls.createdAppointmentRequestId,
         createdCallbackRequestId: calls.createdCallbackRequestId,
+        linkedAppointmentStart: appointmentRequests.appointmentStart,
         createdAt: calls.createdAt,
         updatedAt: calls.updatedAt,
       })
@@ -77,6 +78,13 @@ export class CallInboxRepository {
       .leftJoin(
         patients,
         and(eq(patients.clinicId, calls.clinicId), eq(patients.id, calls.patientId)),
+      )
+      .leftJoin(
+        appointmentRequests,
+        and(
+          eq(appointmentRequests.clinicId, calls.clinicId),
+          eq(appointmentRequests.id, calls.createdAppointmentRequestId),
+        ),
       )
       .where(and(...filters))
       .orderBy(desc(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`))
@@ -129,6 +137,7 @@ export class CallInboxRepository {
         patientPhone: appointmentRequests.patientPhone,
         patientId: appointmentRequests.patientId,
         reasonForVisit: appointmentRequests.reasonForVisit,
+        appointmentStart: appointmentRequests.appointmentStart,
       })
       .from(appointmentActionRequests)
       .innerJoin(

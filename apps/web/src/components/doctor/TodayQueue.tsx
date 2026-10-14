@@ -540,7 +540,7 @@ export function TodayQueue() {
 
       {/* Hero */}
       <div className="mb-5 rounded-[22px] bg-gradient-to-br from-teal-700 to-slate-900 p-5">
-        <div className="grid min-w-0 items-center gap-[18px] xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="portal-feature-grid gap-[18px]">
           <div>
             <h2 className="mb-1.5 text-xl font-black text-white">
               {patients.length} appointments{' '}
@@ -584,7 +584,7 @@ export function TodayQueue() {
 
       {/* Split: Queue + Consultation Panel */}
       <div
-        className={`grid min-w-0 gap-[18px] ${currentConsult ? 'xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]' : 'grid-cols-1'}`}
+        className={`portal-workspace-grid gap-[18px] ${currentConsult ? 'has-secondary-panel' : ''}`}
       >
         {/* Queue Column */}
         <div>
@@ -969,7 +969,7 @@ function ConsultationPanel({
       </div>
 
       {/* Body */}
-      <div className="grid min-w-0 gap-[18px] p-5 xl:grid-cols-2">
+      <div className="portal-panel-grid gap-[18px] p-5">
         {/* Visit History */}
         <div>
           <div className="mb-[10px] flex items-center gap-2 text-sm font-extrabold text-slate-900">

@@ -11,7 +11,10 @@ import {
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
-import { fetchDoctors, type DoctorApiRow } from '@/lib/api/clinic-clinical';
+import {
+  fetchDoctors,
+  type DoctorApiRow,
+} from '@/lib/api/clinic-clinical';
 import {
   createClinicUserLogin,
   deleteClinicUserLogin,
@@ -24,6 +27,7 @@ import {
   type UpdateClinicUserLoginPayload,
 } from '@/lib/api/clinic-users';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { CLINIC_DOCTOR_DETAILS_UPDATED_EVENT } from './clinicSetupEvents';
 
 type ClinicUser = {
   id: string;
@@ -33,6 +37,8 @@ type ClinicUser = {
   username: string | null;
   role: 'admin' | 'doctor';
   doctorId: string | null;
+  doctorQualification: string | null;
+  doctorServiceName: string | null;
   membershipActive: boolean;
   accountActive: boolean;
 };
@@ -48,6 +54,8 @@ function mapUser(row: ClinicUserRow): ClinicUser {
     username: row.user.username ?? null,
     role: row.role === 'doctor' ? 'doctor' : 'admin',
     doctorId: row.doctor_id,
+    doctorQualification: row.doctor?.qualification ?? null,
+    doctorServiceName: row.doctor?.service_name ?? null,
     membershipActive: row.active,
     accountActive: row.user.active,
   };
@@ -181,6 +189,20 @@ export function UserManagement() {
     void loadData();
     return cancelLoad;
   }, [cancelLoad, loadData]);
+
+  useEffect(() => {
+    const refreshDoctorDetails = (event: Event) => {
+      const detail = (event as CustomEvent<{ clinicId?: string }>).detail;
+      if (detail?.clinicId === clinicId) {
+        void loadData(false);
+      }
+    };
+
+    window.addEventListener(CLINIC_DOCTOR_DETAILS_UPDATED_EVENT, refreshDoctorDetails);
+    return () => {
+      window.removeEventListener(CLINIC_DOCTOR_DETAILS_UPDATED_EVENT, refreshDoctorDetails);
+    };
+  }, [clinicId, loadData]);
 
   const sortedUsers = useMemo(
     () =>
@@ -329,13 +351,11 @@ export function UserManagement() {
   }
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white font-sans shadow-sm">
       <div className="border-b border-slate-100 bg-gradient-to-br from-white via-white to-teal-50/60 p-5 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h3 className="text-xl font-extrabold tracking-tight text-slate-950">
-              User management
-            </h3>
+            <h3 className="text-lg font-bold text-slate-900">User management</h3>
             <p className="mt-1 max-w-lg text-sm leading-5 text-slate-500">
               Create and manage secure logins for doctors and clinic administrators.
             </p>
@@ -345,7 +365,7 @@ export function UserManagement() {
             onClick={() => void handleOpenCreate()}
             disabled={!clinicLoginNumber || userManagementBusy}
             aria-busy={preparingCreate}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-teal-700/20 transition hover:-translate-y-0.5 hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-teal-700/20 transition hover:-translate-y-0.5 hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
           >
             <span className="h-4 w-4">
               <PlusIcon />
@@ -356,16 +376,16 @@ export function UserManagement() {
 
         <div className="mt-5 grid grid-cols-3 gap-2">
           <div className="rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5">
-            <p className="text-lg font-extrabold text-slate-950">{users.length}</p>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Logins</p>
+            <p className="text-lg font-bold text-slate-900">{users.length}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Logins</p>
           </div>
           <div className="rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5">
-            <p className="text-lg font-extrabold text-emerald-700">{activeCount}</p>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Active</p>
+            <p className="text-lg font-bold text-emerald-700">{activeCount}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active</p>
           </div>
           <div className="rounded-xl border border-slate-200/80 bg-white/90 px-3 py-2.5">
-            <p className="text-lg font-extrabold text-teal-700">#{clinicLoginNumber ?? '—'}</p>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <p className="text-lg font-bold text-teal-700">#{clinicLoginNumber ?? '—'}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Clinic ID
             </p>
           </div>
@@ -382,7 +402,7 @@ export function UserManagement() {
             <button
               type="button"
               onClick={() => setActionError(null)}
-              className="text-xs font-extrabold uppercase tracking-wide"
+              className="text-xs font-bold uppercase tracking-wide"
             >
               Dismiss
             </button>
@@ -407,20 +427,20 @@ export function UserManagement() {
               >
                 <div className="flex min-w-0 items-start gap-3">
                   <div
-                    className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-extrabold ${user.role === 'doctor' ? 'bg-teal-100 text-teal-800' : 'bg-indigo-100 text-indigo-800'}`}
+                    className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-bold ${user.role === 'doctor' ? 'bg-teal-100 text-teal-800' : 'bg-indigo-100 text-indigo-800'}`}
                   >
                     {initials(user.name)}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-sm font-extrabold text-slate-950">{user.name}</p>
+                      <p className="truncate text-sm font-bold text-slate-900">{user.name}</p>
                       {isCurrentUser ? (
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
                           You
                         </span>
                       ) : null}
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${active ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-100 text-slate-500 ring-1 ring-slate-200'}`}
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${active ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-100 text-slate-500 ring-1 ring-slate-200'}`}
                       >
                         {active
                           ? 'Active'
@@ -429,13 +449,29 @@ export function UserManagement() {
                             : 'Account disabled'}
                       </span>
                     </div>
-                    <p className="mt-1 truncate font-mono text-xs font-bold text-teal-700">
+                    <p className="mt-1 truncate text-sm font-semibold text-teal-700">
                       {user.username ?? 'Username not configured'}
                     </p>
-                    <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
                       {user.role === 'admin' ? 'Clinic admin' : 'Doctor login'}
                       {user.email ? ` · ${user.email}` : ''}
                     </p>
+                    {user.role === 'doctor' ? (
+                      <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                        <div className="flex min-w-0 items-baseline gap-1.5">
+                          <dt className="font-semibold text-slate-500">Qualification</dt>
+                          <dd className="truncate text-slate-700">
+                            {user.doctorQualification?.trim() || 'Not specified'}
+                          </dd>
+                        </div>
+                        <div className="flex min-w-0 items-baseline gap-1.5">
+                          <dt className="font-semibold text-slate-500">Service</dt>
+                          <dd className="truncate text-slate-700">
+                            {user.doctorServiceName?.trim() || 'Not assigned'}
+                          </dd>
+                        </div>
+                      </dl>
+                    ) : null}
                   </div>
                 </div>
 
@@ -456,7 +492,7 @@ export function UserManagement() {
                         },
                       })
                     }
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     <span className="h-3.5 w-3.5">
                       <EditIcon />
@@ -481,7 +517,7 @@ export function UserManagement() {
                           ? 'This account is disabled at platform level.'
                           : undefined
                     }
-                    className={`rounded-lg border px-3 py-1.5 text-xs font-extrabold transition disabled:cursor-not-allowed disabled:opacity-45 ${user.membershipActive ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-45 ${user.membershipActive ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
                   >
                     {updatingUserId === user.id
                       ? 'Updating…'
@@ -501,7 +537,7 @@ export function UserManagement() {
                           : 'At least one active clinic admin is required.'
                         : undefined
                     }
-                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-extrabold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <span className="h-3.5 w-3.5">
                       <TrashIcon />
@@ -515,7 +551,7 @@ export function UserManagement() {
 
           {sortedUsers.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-              <p className="text-sm font-extrabold text-slate-800">No clinic logins yet</p>
+              <p className="text-sm font-bold text-slate-800">No clinic logins yet</p>
               <p className="mt-1 text-xs text-slate-500">
                 Add a doctor or clinic-admin login to get started.
               </p>

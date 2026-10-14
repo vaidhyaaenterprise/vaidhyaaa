@@ -127,6 +127,7 @@ export type CallInboxApiRow = {
   created_callback_request_id: string | null;
   created_emergency_incident_id: string | null;
   appointment_action_request_id: string | null;
+  appointment_start: string | null;
   source_status: string | null;
 };
 
@@ -169,6 +170,18 @@ export async function createDoctor(
   payload: { name: string; qualification?: string; registration_number?: string },
 ) {
   const data = await apiPost<{ doctor: DoctorApiRow }>(clinicPath(clinicId, '/doctors'), payload);
+  return data.doctor;
+}
+
+export async function patchDoctor(
+  clinicId: string,
+  doctorId: string,
+  patch: Partial<{ name: string; qualification: string; active: boolean }>,
+) {
+  const data = await apiPatch<{ doctor: DoctorApiRow }>(
+    clinicPath(clinicId, `/doctors/${doctorId}`),
+    patch,
+  );
   return data.doctor;
 }
 

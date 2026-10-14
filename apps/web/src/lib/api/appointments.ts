@@ -15,6 +15,7 @@ export type AppointmentApiRow = {
   routing_source: string | null;
   source: 'agent' | 'manual';
   status: string;
+  created_at: string;
   has_history: boolean;
   visit_reason?: string | null;
   examination_notes?: string | null;
@@ -125,6 +126,17 @@ export async function confirmAppointment(clinicId: string, appointmentId: string
 export async function cancelAppointment(clinicId: string, appointmentId: string) {
   return apiPatch<{ appointment: unknown }>(
     `/v1/clinics/${clinicId}/appointments/${appointmentId}/cancel`,
+  );
+}
+
+export async function updateAppointmentPatientName(
+  clinicId: string,
+  appointmentId: string,
+  patientName: string,
+) {
+  return apiPatch<{ appointment: unknown; updated_appointment_count: number }>(
+    `/v1/clinics/${clinicId}/appointments/${appointmentId}/patient-name`,
+    { patient_name: patientName },
   );
 }
 

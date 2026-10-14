@@ -114,7 +114,7 @@ export function DeleteUserLoginModal({
             <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
           </svg>
         </div>
-        <h2 id={titleId} className="mt-5 text-xl font-extrabold tracking-tight text-slate-950">
+        <h2 id={titleId} className="mt-5 text-xl font-bold text-slate-900">
           Delete this login?
         </h2>
         <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600">
@@ -141,7 +141,7 @@ export function DeleteUserLoginModal({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
           >
             Keep login
           </button>
@@ -149,7 +149,7 @@ export function DeleteUserLoginModal({
             type="button"
             onClick={() => void confirm()}
             disabled={busy}
-            className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 disabled:opacity-50"
+            className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 disabled:opacity-50"
           >
             {busy ? 'Deleting…' : 'Delete login'}
           </button>

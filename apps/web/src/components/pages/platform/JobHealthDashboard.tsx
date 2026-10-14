@@ -239,7 +239,7 @@ export function JobHealthDashboard() {
         description="Background job processing status and run history."
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="portal-stat-grid mb-6 gap-4">
         <HealthCard
           label="Queue mode"
           value={health.queueMode === 'bullmq' ? 'BullMQ' : 'Inline'}
@@ -258,7 +258,7 @@ export function JobHealthDashboard() {
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
           Last scheduled run
         </h3>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="portal-stat-grid gap-4">
           <HealthCard
             label="Slot generation"
             value={

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { EditablePatientName } from './EditablePatientName';
 import type { AppointmentActionRequest, AppointmentActivity } from './types';
 
 interface RescheduleCancelRequestsProps {
@@ -10,6 +11,7 @@ interface RescheduleCancelRequestsProps {
   onApproveReschedule: (requestId: string, newDate: string, newTime: string) => Promise<void>;
   onRejectRequest: (requestId: string) => Promise<void>;
   onCancelAppointment: (requestId: string) => Promise<void>;
+  onEditPatientName: (appointmentId: string, patientName: string) => Promise<void>;
 }
 
 export function RescheduleCancelRequests({
@@ -18,6 +20,7 @@ export function RescheduleCancelRequests({
   onApproveReschedule,
   onRejectRequest,
   onCancelAppointment,
+  onEditPatientName,
 }: RescheduleCancelRequestsProps) {
   const { effectiveRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
@@ -74,6 +77,7 @@ export function RescheduleCancelRequests({
                       onApproveReschedule={onApproveReschedule}
                       onRejectRequest={onRejectRequest}
                       onCancelAppointment={onCancelAppointment}
+                      onEditPatientName={onEditPatientName}
                     />
                   ))}
                 </div>
@@ -97,7 +101,11 @@ export function RescheduleCancelRequests({
         ) : (
           <ul className="space-y-3">
             {activities.map((activity) => (
-              <ActivityCard key={activity.id} activity={activity} />
+              <ActivityCard
+                key={activity.id}
+                activity={activity}
+                onEditPatientName={onEditPatientName}
+              />
             ))}
           </ul>
         )}
@@ -118,7 +126,13 @@ function formatActivityTime(time: string) {
   return `${hour % 12 || 12}:${minutes ?? '00'} ${suffix}`;
 }
 
-function ActivityCard({ activity }: { activity: AppointmentActivity }) {
+function ActivityCard({
+  activity,
+  onEditPatientName,
+}: {
+  activity: AppointmentActivity;
+  onEditPatientName: (appointmentId: string, patientName: string) => Promise<void>;
+}) {
   const previousStart = activity.previousAppointmentDate
     ? `${formatActivityDate(activity.previousAppointmentDate)} at ${formatActivityTime(activity.previousAppointmentTime)}`
     : '';
@@ -130,7 +144,11 @@ function ActivityCard({ activity }: { activity: AppointmentActivity }) {
     <li className="rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="font-bold text-slate-900">{activity.patientName}</p>
+          <EditablePatientName
+            patientName={activity.patientName}
+            onSave={(patientName) => onEditPatientName(activity.appointmentId, patientName)}
+            className="font-bold text-slate-900"
+          />
           {activity.patientPhone ? (
             <p className="mt-0.5 text-sm text-slate-600">{activity.patientPhone}</p>
           ) : null}
@@ -173,6 +191,7 @@ interface RequestCardProps {
   onApproveReschedule: (requestId: string, newDate: string, newTime: string) => Promise<void>;
   onRejectRequest: (requestId: string) => Promise<void>;
   onCancelAppointment: (requestId: string) => Promise<void>;
+  onEditPatientName: (appointmentId: string, patientName: string) => Promise<void>;
 }
 
 function exactTimeInputValue(value: string): string {
@@ -185,6 +204,7 @@ function RequestCard({
   onApproveReschedule,
   onRejectRequest,
   onCancelAppointment,
+  onEditPatientName,
 }: RequestCardProps) {
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [newDate, setNewDate] = useState(request.requestedDate);
@@ -243,7 +263,10 @@ function RequestCard({
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex-1">
-          <h4 className="text-base font-bold text-slate-900">{request.patientName}</h4>
+          <EditablePatientName
+            patientName={request.patientName}
+            onSave={(patientName) => onEditPatientName(request.appointmentId, patientName)}
+          />
           <p className="text-sm text-slate-600">{request.doctorName} · {request.serviceName}</p>
           <p className="mt-1 text-sm text-slate-700">{request.reason}</p>
         </div>

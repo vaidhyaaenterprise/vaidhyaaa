@@ -38,6 +38,7 @@ describe('AppShell', () => {
     );
 
     const sidebar = screen.getByRole('complementary');
+    expect(screen.getByRole('main')).toHaveClass('portal-main');
     const sidebarAccount = within(sidebar).getByRole('region', { name: 'Signed-in account' });
 
     expect(within(sidebarAccount).getByText('Signed in')).toBeInTheDocument();

@@ -5,12 +5,6 @@ export type CallOutcome =
   | 'callback_requested'
   | 'emergency'
   | 'general_inquiry';
-export type CallAction =
-  | 'confirmation_needed'
-  | 'appointment_action_needed'
-  | 'callback_needed'
-  | 'emergency_response'
-  | 'none';
 export type CallLinkType = 'appointment' | 'callback' | 'emergency' | 'none';
 
 export interface Call {
@@ -21,9 +15,9 @@ export interface Call {
   duration: number;
   summary: string;
   outcome: CallOutcome;
-  actionNeeded: CallAction;
   sourceStatus?: string;
   linkedAppointmentId?: string;
+  linkedAppointmentStart?: string;
   linkedCallbackId?: string;
   linkedEmergencyId?: string;
   recordingUrl?: string;

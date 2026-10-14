@@ -29,6 +29,89 @@ code {
   @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em];
 }
 
+/*
+ * Portal layouts must respond to the space left after the desktop sidebar,
+ * not to the browser viewport. These grids use the real content width, so a
+ * laptop or zoomed browser never receives a desktop column count that cannot
+ * fit inside the main panel.
+ */
+.portal-main {
+  container-name: portal;
+  container-type: inline-size;
+  width: 100%;
+  max-width: 100%;
+}
+
+.portal-card-grid,
+.portal-dashboard-grid,
+.portal-stat-grid,
+.portal-breakdown-grid {
+  display: grid;
+  min-width: 0;
+}
+
+.portal-card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr));
+}
+
+.portal-dashboard-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+}
+
+.portal-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+
+.portal-breakdown-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+}
+
+.portal-card-grid > *,
+.portal-dashboard-grid > *,
+.portal-stat-grid > *,
+.portal-breakdown-grid > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.portal-feature-grid,
+.portal-workspace-grid,
+.portal-panel-grid,
+.portal-search-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.portal-page-header {
+  align-items: stretch;
+}
+
+@container portal (min-width: 56rem) {
+  .portal-page-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .portal-feature-grid {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .portal-workspace-grid.has-secondary-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+
+  .portal-panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .portal-search-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 /* Doctor rows respond to the card width, not the viewport. The card can sit in
    either one or two page columns depending on the available workspace width. */
 .doctor-management-card {
@@ -62,7 +145,7 @@ code {
   }
 }
 
-@container doctors (min-width: 48rem) {
+@container doctors (min-width: 56rem) {
   .doctor-editor-row {
     grid-template-columns:
       minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.35fr) minmax(6rem, 0.65fr)

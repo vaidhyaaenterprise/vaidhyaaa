@@ -87,4 +87,25 @@ export class DoctorsRepository {
       .where(and(eq(doctors.clinicId, clinicId), eq(doctors.id, doctorId)))
       .returning();
   }
+
+  updateDoctor(
+    clinicId: string,
+    doctorId: string,
+    values: Partial<Pick<typeof doctors.$inferInsert, 'name' | 'qualification' | 'active'>>,
+    db: Database = this.db,
+  ) {
+    return db
+      .update(doctors)
+      .set({ ...values, updatedAt: new Date() })
+      .where(and(eq(doctors.clinicId, clinicId), eq(doctors.id, doctorId)))
+      .returning();
+  }
+
+  updateLinkedUserName(userId: string, name: string, db: Database = this.db) {
+    return db
+      .update(users)
+      .set({ name, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+  }
 }

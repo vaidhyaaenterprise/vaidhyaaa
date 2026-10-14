@@ -7,6 +7,10 @@ export type ClinicUserRow = {
   role: 'clinic_admin' | 'doctor';
   doctor_id: string | null;
   active: boolean;
+  doctor?: {
+    qualification: string | null;
+    service_name: string | null;
+  } | null;
   user: {
     id: string;
     name: string | null;

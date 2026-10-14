@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
-import { clinicUsers, otpChallenges, users } from '../schema';
+import { clinicUsers, doctors, otpChallenges, users } from '../schema';
 
 export class AuthRepository {
   constructor(private readonly db: Database) {}
@@ -100,9 +100,25 @@ export class AuthRepository {
       .select({
         membership: clinicUsers,
         user: users,
+        doctorQualification: doctors.qualification,
+        doctorServiceName: sql<string | null>`(
+          select cs.service_name
+          from doctor_services ds
+          inner join clinic_services cs
+            on cs.clinic_id = ds.clinic_id
+           and cs.id = ds.clinic_service_id
+          where ds.clinic_id = ${clinicId}
+            and ds.doctor_id = ${clinicUsers.doctorId}
+          order by ds.active desc, ds.updated_at desc
+          limit 1
+        )`,
       })
       .from(clinicUsers)
       .innerJoin(users, eq(clinicUsers.userId, users.id))
+      .leftJoin(
+        doctors,
+        and(eq(doctors.clinicId, clinicUsers.clinicId), eq(doctors.id, clinicUsers.doctorId)),
+      )
       .where(and(eq(clinicUsers.clinicId, clinicId), isNull(clinicUsers.deletedAt)))
       .orderBy(asc(clinicUsers.role), asc(clinicUsers.createdAt));
   }

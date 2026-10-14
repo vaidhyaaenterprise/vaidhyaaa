@@ -10,6 +10,7 @@ import {
   fetchDoctorServices,
   fetchDoctors,
   fetchServices,
+  patchDoctor,
   patchDoctorService,
   patchService,
 } from '@/lib/api/clinic-clinical';
@@ -36,6 +37,7 @@ vi.mock('@/lib/api/clinic-clinical', () => ({
   fetchDoctorServices: vi.fn(),
   fetchDoctors: vi.fn(),
   fetchServices: vi.fn(),
+  patchDoctor: vi.fn(),
   patchDoctorService: vi.fn(),
   patchService: vi.fn(),
 }));
@@ -47,6 +49,7 @@ const mockedDeleteDoctor = vi.mocked(deleteDoctor);
 const mockedFetchDoctorServices = vi.mocked(fetchDoctorServices);
 const mockedFetchDoctors = vi.mocked(fetchDoctors);
 const mockedFetchServices = vi.mocked(fetchServices);
+const mockedPatchDoctor = vi.mocked(patchDoctor);
 const mockedPatchDoctorService = vi.mocked(patchDoctorService);
 const mockedPatchService = vi.mocked(patchService);
 
@@ -112,6 +115,13 @@ beforeEach(() => {
     active: true,
   });
   mockedDeleteDoctor.mockReset().mockResolvedValue(undefined);
+  mockedPatchDoctor.mockReset().mockResolvedValue({
+    id: DOCTOR_ID,
+    name: 'Dr. Merp',
+    qualification: 'MD',
+    user_id: null,
+    active: true,
+  });
   mockedPatchDoctorService.mockReset().mockResolvedValue({
     id: MAPPING_ID,
     doctor_id: DOCTOR_ID,
@@ -132,6 +142,17 @@ afterEach(() => {
 });
 
 describe('DoctorManagement predefined services', () => {
+  it('uses the full setup-grid width while the doctor editor is open', async () => {
+    render(<DoctorManagement />);
+
+    const card = await screen.findByTestId('doctor-management-card');
+    expect(card).not.toHaveClass('col-span-full');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(card).toHaveClass('col-span-full');
+    expect(card).not.toHaveClass('xl:col-span-2');
+  });
+
   it('shows the service with each doctor and removes the separate Services section', async () => {
     render(<DoctorManagement />);
 
@@ -154,6 +175,23 @@ describe('DoctorManagement predefined services', () => {
     ]);
     expect(options.every((option) => !option.textContent?.includes('_'))).toBe(true);
     expect(screen.queryByPlaceholderText('Service name')).not.toBeInTheDocument();
+  });
+
+  it('persists an updated doctor qualification', async () => {
+    render(<DoctorManagement />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    fireEvent.change(screen.getByLabelText('Qualification for Dr. Merp'), {
+      target: { value: 'DM' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedPatchDoctor).toHaveBeenCalledWith(CLINIC_ID, DOCTOR_ID, {
+        name: 'Dr. Merp',
+        qualification: 'DM',
+      });
+    });
   });
 
   it('creates a selected missing service with its exact key and name before mapping a doctor', async () => {

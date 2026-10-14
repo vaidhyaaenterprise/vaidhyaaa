@@ -94,6 +94,30 @@ export class AppointmentLifecycleRepository {
       );
   }
 
+  updatePatientNameForAppointments(
+    clinicId: string,
+    appointmentId: string,
+    patientId: string | null,
+    patientName: string,
+    db: Database = this.db,
+  ) {
+    return db
+      .update(appointmentRequests)
+      .set({ patientName, updatedAt: new Date() })
+      .where(
+        patientId
+          ? and(
+              eq(appointmentRequests.clinicId, clinicId),
+              eq(appointmentRequests.patientId, patientId),
+            )
+          : and(
+              eq(appointmentRequests.clinicId, clinicId),
+              eq(appointmentRequests.id, appointmentId),
+            ),
+      )
+      .returning();
+  }
+
   findPendingActionRequest(input: {
     clinicId: string;
     sessionId: string;

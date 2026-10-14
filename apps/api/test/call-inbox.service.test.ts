@@ -33,7 +33,7 @@ function makeService(data: {
   return { service, callInbox };
 }
 
-function call(id: string, sessionId: string, outcome: string, hour: number) {
+function call(id: string, sessionId: string | null, outcome: string, hour: number) {
   return {
     id,
     clinicId: CLINIC_ID,
@@ -177,6 +177,60 @@ describe('CallInboxService', () => {
     expect(result.items.find((item) => item.source_id === 'action-reschedule')?.action_needed).toBe(
       'appointment_action_needed',
     );
+  });
+
+  it('reconciles legacy unlinked booked calls without returning duplicate records', async () => {
+    const newerRawCall = call('raw-newer', null, 'appointment_booked', 8);
+    const olderRawCall = call('raw-older', null, 'appointment_booked', 7);
+    const { service } = makeService({
+      calls: [newerRawCall, olderRawCall],
+      bookings: [
+        {
+          id: 'booking-newer',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'booking-session-newer',
+          patientPhone: '+91 98765 43210',
+          patientName: 'Newer patient',
+          patientId: null,
+          status: 'pending_confirmation',
+          reasonForVisit: 'Fever and cough',
+          appointmentStart: '2026-10-15 09:30:00',
+          createdAt: date(2),
+          updatedAt: date(2),
+        },
+        {
+          id: 'booking-older',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'booking-session-older',
+          patientPhone: '9876543210',
+          patientName: 'Older patient',
+          patientId: null,
+          status: 'pending_confirmation',
+          reasonForVisit: 'Fever',
+          appointmentStart: '2026-10-14 10:00:00',
+          createdAt: date(1),
+          updatedAt: date(1),
+        },
+      ],
+    });
+
+    const result = await service.list({ clinicId: CLINIC_ID, limit: 200 });
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items.map((item) => item.source_id)).toEqual([
+      'booking-newer',
+      'booking-older',
+    ]);
+    expect(result.items.map((item) => item.call_id)).toEqual(['raw-newer', 'raw-older']);
+    expect(result.items.map((item) => item.occurred_at)).toEqual([
+      date(2).toISOString(),
+      date(1).toISOString(),
+    ]);
+    expect(result.items.map((item) => item.appointment_start)).toEqual([
+      '2026-10-15 09:30:00',
+      '2026-10-14 10:00:00',
+    ]);
+    expect(result.items.every((item) => item.outcome === 'appointment_booked')).toBe(true);
   });
 
   it('applies multiple outcomes with OR semantics', async () => {

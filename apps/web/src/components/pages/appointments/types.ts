@@ -18,6 +18,7 @@ export interface Appointment {
   routingSource: RoutingSource;
   source: AppointmentSource;
   status: AppointmentStatus;
+  bookedAt: string;
   hasHistory: boolean;
   overrideReason?: string;
 }

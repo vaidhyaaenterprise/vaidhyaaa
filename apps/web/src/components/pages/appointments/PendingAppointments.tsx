@@ -2,25 +2,25 @@
 
 import { useAuth } from '@/components/auth/AuthProvider';
 import { AppointmentCard } from './AppointmentCard';
-import type { Appointment, BookingRules } from './types';
+import type { Appointment } from './types';
 
 interface PendingAppointmentsProps {
   appointments: Appointment[];
   emptyMessage?: string;
-  bookingRules: BookingRules;
   onConfirm: (id: string) => void;
   onEditTime: (id: string, newDate: string, newTime: string) => Promise<void>;
-  onCancel: (id: string) => void;
+  onCancel: (id: string) => Promise<void>;
+  onEditPatientName: (id: string, patientName: string) => Promise<void>;
   onViewHistory: (patientPhone: string) => void;
 }
 
 export function PendingAppointments({
   appointments,
   emptyMessage = 'No pending appointments',
-  bookingRules,
   onConfirm,
   onEditTime,
   onCancel,
+  onEditPatientName,
   onViewHistory,
 }: PendingAppointmentsProps) {
   const { effectiveRole, clinicRole } = useAuth();
@@ -67,10 +67,10 @@ export function PendingAppointments({
                 <AppointmentCard
                   key={appointment.id}
                   appointment={appointment}
-                  bookingRules={bookingRules}
                   onConfirm={onConfirm}
                   onEditTime={onEditTime}
                   onCancel={onCancel}
+                  onEditPatientName={onEditPatientName}
                   onViewHistory={onViewHistory}
                 />
               ))}

@@ -81,30 +81,57 @@ export class DoctorsService {
     input: UpdateDoctorInput,
     actorUserId: string,
   ) {
-    if (input.active === undefined) {
-      throw new AppError('VALIDATION_ERROR', 'Doctor update requires at least active field.');
+    if (input.name === undefined && input.qualification === undefined && input.active === undefined) {
+      throw new AppError('VALIDATION_ERROR', 'Doctor update requires at least one field.');
     }
 
     await this.dbService.assertDoctorBelongsToClinic(clinicId, doctorId);
 
-    const [doctor] = await this.repos.doctors.updateDoctorActive(clinicId, doctorId, input.active);
+    const doctor = await this.dbService.withTransaction(async (tx) => {
+      const [updatedDoctor] = await this.repos.doctors.updateDoctor(
+        clinicId,
+        doctorId,
+        {
+          ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+          ...(input.qualification !== undefined
+            ? { qualification: input.qualification.trim() || null }
+            : {}),
+          ...(input.active !== undefined ? { active: input.active } : {}),
+        },
+        tx,
+      );
+
+      if (updatedDoctor?.userId && input.name !== undefined) {
+        await this.repos.doctors.updateLinkedUserName(
+          updatedDoctor.userId,
+          input.name.trim(),
+          tx,
+        );
+      }
+
+      return updatedDoctor;
+    });
 
     if (!doctor) {
       throw new AppError('NOT_FOUND', 'Doctor not found.');
     }
 
-    if (input.active === false) {
-      await this.dbService.insertAuditLog({
-        clinicId,
-        actorUserId,
-        actorType: 'clinic_admin',
-        eventType: 'clinic.doctor.disabled',
-        entityType: 'doctor',
-        entityId: doctorId,
-        newValues: { active: false },
-        source: 'doctors',
-      });
-    }
+    await this.dbService.insertAuditLog({
+      clinicId,
+      actorUserId,
+      actorType: 'clinic_admin',
+      eventType: input.active === false ? 'clinic.doctor.disabled' : 'clinic.doctor.updated',
+      entityType: 'doctor',
+      entityId: doctorId,
+      newValues: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.qualification !== undefined
+          ? { qualification: input.qualification.trim() || null }
+          : {}),
+        ...(input.active !== undefined ? { active: input.active } : {}),
+      },
+      source: 'doctors',
+    });
 
     return doctor;
   }

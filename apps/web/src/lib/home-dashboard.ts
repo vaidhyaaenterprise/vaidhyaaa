@@ -42,6 +42,33 @@ function compareStartAscending(a: Appointment, b: Appointment): number {
   return byStart || a.id.localeCompare(b.id);
 }
 
+function compareBookedDescending(a: Appointment, b: Appointment): number {
+  const byBookedAt = b.bookedAt.localeCompare(a.bookedAt);
+  return byBookedAt || a.id.localeCompare(b.id);
+}
+
+/**
+ * Return non-cancelled appointments created on the requested clinic-local date.
+ * `bookedAt` is an instant, unlike appointmentStart, so it must be converted
+ * through the clinic timezone before comparing calendar dates.
+ */
+export function filterAppointmentsBookedOnClinicDate<T extends Appointment>(
+  appointments: readonly T[],
+  clinicDate: string,
+  timezone: string,
+): T[] {
+  return appointments
+    .filter((appointment) => {
+      if (appointment.status === 'cancelled' || !appointment.bookedAt) {
+        return false;
+      }
+
+      const bookedAt = new Date(appointment.bookedAt);
+      return !Number.isNaN(bookedAt.getTime()) && getClinicDate(bookedAt, timezone) === clinicDate;
+    })
+    .sort(compareBookedDescending);
+}
+
 /**
  * Group active appointments for the Home dashboard using lexical comparisons of
  * clinic-local calendar values. In particular, this deliberately never creates

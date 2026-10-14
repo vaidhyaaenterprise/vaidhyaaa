@@ -41,6 +41,7 @@ export function mapAppointmentRow(row: AppointmentApiRow): Appointment {
     routingSource: (row.routing_source ?? 'voice_bot') as Appointment['routingSource'],
     source: row.source as Appointment['source'],
     status: row.status as Appointment['status'],
+    bookedAt: row.created_at,
     hasHistory: row.has_history,
   };
 }

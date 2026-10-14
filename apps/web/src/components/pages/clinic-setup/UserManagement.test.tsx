@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UserManagement } from '@/components/pages/clinic-setup/UserManagement';
+import { CLINIC_DOCTOR_DETAILS_UPDATED_EVENT } from '@/components/pages/clinic-setup/clinicSetupEvents';
 import { fetchDoctors } from '@/lib/api/clinic-clinical';
 import {
   createClinicUserLogin,
@@ -10,6 +11,7 @@ import {
   enableClinicUser,
   fetchClinicUsers,
   updateClinicUserLogin,
+  type ClinicUserRow,
 } from '@/lib/api/clinic-users';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
@@ -60,7 +62,7 @@ const mockedDeleteClinicUserLogin = vi.mocked(deleteClinicUserLogin);
 const mockedDisableClinicUser = vi.mocked(disableClinicUser);
 const mockedEnableClinicUser = vi.mocked(enableClinicUser);
 
-function clinicUsersResponse() {
+function clinicUsersResponse(): { clinic_login_number: string; users: ClinicUserRow[] } {
   return {
     clinic_login_number: '1003',
     users: [
@@ -87,6 +89,10 @@ function clinicUsersResponse() {
         role: 'doctor' as const,
         doctor_id: DOCTOR_ID,
         active: true,
+        doctor: {
+          qualification: 'MD',
+          service_name: 'General Consultation',
+        },
         user: {
           id: DOCTOR_USER_ID,
           name: 'Dr Existing',
@@ -205,9 +211,39 @@ describe('UserManagement', () => {
     expect(screen.getByText('Dr Existing')).toBeInTheDocument();
     expect(screen.getByText('merp.1003')).toBeInTheDocument();
     expect(screen.getByText('existing.1003')).toBeInTheDocument();
+    expect(screen.getByText('MD')).toBeInTheDocument();
+    expect(screen.getByText('General Consultation')).toBeInTheDocument();
     expect(screen.getByText('#1003')).toBeInTheDocument();
     expect(mockedFetchClinicUsers).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
     expect(mockedFetchDoctors).toHaveBeenCalledWith(CLINIC_ID, expect.any(AbortSignal));
+  });
+
+  it('refreshes qualification and service when doctor setup changes', async () => {
+    const updatedResponse = clinicUsersResponse();
+    const doctorUser = updatedResponse.users.find((user) => user.role === 'doctor');
+    if (!doctorUser) {
+      throw new Error('Expected the clinic user fixture to include a doctor.');
+    }
+    doctorUser.doctor = {
+      qualification: 'DM Cardiology',
+      service_name: 'Cardiology Consultation',
+    };
+    mockedFetchClinicUsers
+      .mockResolvedValueOnce(clinicUsersResponse())
+      .mockResolvedValue(updatedResponse);
+
+    render(<UserManagement />);
+    expect(await screen.findByText('MD')).toBeInTheDocument();
+    expect(screen.getByText('General Consultation')).toBeInTheDocument();
+
+    window.dispatchEvent(
+      new CustomEvent(CLINIC_DOCTOR_DETAILS_UPDATED_EVENT, {
+        detail: { clinicId: CLINIC_ID },
+      }),
+    );
+
+    expect(await screen.findByText('DM Cardiology')).toBeInTheDocument();
+    expect(screen.getByText('Cardiology Consultation')).toBeInTheDocument();
   });
 
   it('refreshes and provisions a newly added doctor using the authoritative doctor id', async () => {

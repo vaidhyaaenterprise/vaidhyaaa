@@ -21,7 +21,11 @@ import {
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
 import { ApiRequestError, isAbortError } from '@/lib/api/client';
-import { getClinicDate, groupHomeAppointments } from '@/lib/home-dashboard';
+import {
+  filterAppointmentsBookedOnClinicDate,
+  getClinicDate,
+  groupHomeAppointments,
+} from '@/lib/home-dashboard';
 import { buildManualAppointmentPayload, DEFAULT_BOOKING_RULES } from '@/lib/manual-appointment';
 
 type ManualReferenceStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -49,6 +53,30 @@ function formatDate(isoDate: string): string {
     return isoDate;
   }
   return `${day}/${month}/${year}`;
+}
+
+function formatInstantTime(instant: string, timezone: string): string {
+  const date = new Date(instant);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: timezone,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date);
+}
+
+function appointmentStatusLabel(status: Appointment['status']): string {
+  if (status === 'pending_confirmation') {
+    return 'Pending';
+  }
+  if (status === 'visited') {
+    return 'Visited';
+  }
+  return 'Confirmed';
 }
 
 type AppointmentActionCardProps = {
@@ -132,6 +160,49 @@ function MissedAppointmentListItem({ appointment }: { appointment: Appointment }
   );
 }
 
+function TodayBookingListItem({
+  appointment,
+  timezone,
+}: {
+  appointment: Appointment;
+  timezone: string;
+}) {
+  const bookedTime = formatInstantTime(appointment.bookedAt, timezone);
+
+  return (
+    <li className="flex min-w-0 flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="break-words text-sm font-bold text-slate-900">{appointment.patientName}</p>
+          <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700">
+            {appointmentStatusLabel(appointment.status)}
+          </span>
+        </div>
+        {appointment.patientPhone ? (
+          <p className="mt-0.5 break-all text-xs text-slate-500">{appointment.patientPhone}</p>
+        ) : null}
+        <p className="mt-1 break-words text-xs text-slate-600">
+          {appointment.doctorName} · {appointment.serviceName}
+        </p>
+        <p className="mt-0.5 break-words text-xs text-slate-600">
+          Appointment: {formatDate(appointment.appointmentDate)} at{' '}
+          <span className="font-semibold">{formatTime(appointment.appointmentTime)}</span>
+        </p>
+        {appointment.reasonForVisit ? (
+          <p className="mt-0.5 break-words text-xs text-slate-500">
+            Reason: {appointment.reasonForVisit}
+          </p>
+        ) : null}
+      </div>
+      {bookedTime ? (
+        <span className="shrink-0 text-xs font-semibold text-slate-500">
+          Booked at {bookedTime}
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
 export function HomePageContent() {
   const { me, effectiveRole, clinicRole } = useAuth();
   const clinicId = useActiveClinicId();
@@ -202,7 +273,7 @@ export function HomePageContent() {
               })
             : Promise.resolve(null);
         const [appointments, settings] = await Promise.all([
-          fetchAppointments(clinicId, ['pending_confirmation', 'confirmed'], signal),
+          fetchAppointments(clinicId, ['pending_confirmation', 'confirmed', 'visited'], signal),
           settingsRequest,
         ]);
 
@@ -426,6 +497,17 @@ export function HomePageContent() {
   const visibleTodayPending = groupedAppointments.todayPending;
   const visibleMissedPending = groupedAppointments.missedPending;
   const visibleTodayAppointments = groupedAppointments.todayAppointments;
+  const visibleTodayBookings = useMemo(
+    () =>
+      clinicDate && clinicProfile?.timezone
+        ? filterAppointmentsBookedOnClinicDate(
+            roleScopedAppointments,
+            clinicDate,
+            clinicProfile.timezone,
+          )
+        : [],
+    [clinicDate, clinicProfile?.timezone, roleScopedAppointments],
+  );
   const actionableTodayPending = isAdmin ? visibleTodayPending : [];
 
   const runAppointmentAction = async (
@@ -520,7 +602,7 @@ export function HomePageContent() {
       ) : (
         <>
           <div className="mb-6 rounded-[22px] bg-gradient-to-br from-brand-700 to-slate-900 p-6 text-white shadow-card">
-            <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] xl:items-center">
+            <div className="portal-feature-grid gap-6">
               <div>
                 <h2 className="text-xl font-black">
                   {effectiveRole === 'doctor'
@@ -536,7 +618,7 @@ export function HomePageContent() {
                               missedActions === 1 ? 'request is' : 'requests are'
                             } listed below.`
                           : ''
-                      } Call stats will appear when the call inbox API is available.`}
+                      }`}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-extrabold">
@@ -560,7 +642,7 @@ export function HomePageContent() {
             </p>
           ) : null}
 
-          <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-3 [&>*]:min-w-0">
+          <div className="portal-dashboard-grid gap-5">
             <section
               aria-labelledby="needs-action-heading"
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
@@ -660,6 +742,31 @@ export function HomePageContent() {
               <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
                 {visibleMissedPending.map((appointment) => (
                   <MissedAppointmentListItem key={appointment.id} appointment={appointment} />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section
+            aria-labelledby="today-actions-heading"
+            className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <h3 id="today-actions-heading" className="mb-1 text-lg font-bold text-slate-900">
+              Today&apos;s action
+            </h3>
+            <p className="mb-4 text-xs text-slate-500">
+              Appointments booked today. Cancelled appointments are not included.
+            </p>
+            {visibleTodayBookings.length === 0 ? (
+              <p className="text-sm text-slate-500">No appointments were booked today</p>
+            ) : (
+              <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/50">
+                {visibleTodayBookings.map((appointment) => (
+                  <TodayBookingListItem
+                    key={appointment.id}
+                    appointment={appointment}
+                    timezone={clinicProfile?.timezone ?? 'Asia/Kolkata'}
+                  />
                 ))}
               </ul>
             )}

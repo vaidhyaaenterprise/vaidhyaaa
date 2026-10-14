@@ -22,6 +22,7 @@ function appointment(
     doctorName: 'Doctor',
     serviceId: 'service-1',
     serviceName: 'Consultation',
+    bookedAt: '2026-09-19T04:00:00.000Z',
     appointmentDate,
     appointmentTime,
     reasonForVisit: 'Checkup',

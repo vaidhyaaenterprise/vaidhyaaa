@@ -37,7 +37,7 @@ export function AppShell({ children }: AppShellProps) {
         <SignedInCard name={signedInName} />
       </aside>
 
-      <main className="min-w-0 px-4 py-4 pb-10 sm:px-6 sm:py-6 sm:pb-12 lg:px-8">
+      <main className="portal-main min-w-0 px-4 py-4 pb-10 sm:px-6 sm:py-6 sm:pb-12 lg:px-8">
         {children}
         <div className="mt-6 lg:hidden">
           <SignedInCard name={signedInName} />

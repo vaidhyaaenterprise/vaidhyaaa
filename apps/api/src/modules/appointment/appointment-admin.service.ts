@@ -278,6 +278,74 @@ export class AppointmentAdminService {
     return appointment;
   }
 
+  async updatePatientName(input: {
+    clinicId: string;
+    appointmentId: string;
+    patientName: string;
+    actorUserId: string;
+  }) {
+    const patientName = input.patientName.trim();
+    const normalizedName = normalizeName(patientName);
+
+    return this.dbService.withTransaction(async (tx) => {
+      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentByIdForUpdate(
+        input.clinicId,
+        input.appointmentId,
+        tx,
+      );
+      if (!appointment) {
+        throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+      }
+
+      if (appointment.patientName === patientName) {
+        return { appointment, updated_appointment_count: 0 };
+      }
+
+      if (appointment.patientId) {
+        const [patient] = await this.repos.patients.updatePatient(
+          input.clinicId,
+          appointment.patientId,
+          { name: patientName, normalizedName },
+          tx,
+        );
+        if (!patient) {
+          throw new AppError('INTERNAL_ERROR', 'Failed to update the patient record.');
+        }
+      }
+
+      const updatedAppointments =
+        await this.repos.appointmentLifecycle.updatePatientNameForAppointments(
+          input.clinicId,
+          appointment.id,
+          appointment.patientId,
+          patientName,
+          tx,
+        );
+      const updatedAppointment = updatedAppointments.find((row) => row.id === appointment.id);
+      if (!updatedAppointment) {
+        throw new AppError('INTERNAL_ERROR', 'Failed to update the appointment patient name.');
+      }
+
+      await this.repos.appointmentLifecycle.insertAppointmentEvent(
+        {
+          clinicId: input.clinicId,
+          appointmentRequestId: appointment.id,
+          eventType: 'appointment.patient_name_updated',
+          actorType: 'clinic_admin',
+          actorUserId: input.actorUserId,
+          oldValuesJson: { patient_name: appointment.patientName },
+          newValuesJson: { patient_name: patientName },
+        },
+        tx,
+      );
+
+      return {
+        appointment: updatedAppointment,
+        updated_appointment_count: updatedAppointments.length,
+      };
+    });
+  }
+
   async markVisited(input: {
     clinicId: string;
     appointmentId: string;

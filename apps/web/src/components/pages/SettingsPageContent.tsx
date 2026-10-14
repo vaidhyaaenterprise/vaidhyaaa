@@ -423,7 +423,7 @@ export function SettingsPageContent() {
         }
       />
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">
+      <div className="portal-card-grid gap-4">
         {isAdmin && agentSettings && notificationSettings && (
           <>
             <AgentSettings settings={agentSettings} onUpdateSettings={handleUpdateAgentSettings} />

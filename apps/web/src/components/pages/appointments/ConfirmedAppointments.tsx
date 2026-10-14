@@ -2,24 +2,24 @@
 
 import { useAuth } from '@/components/auth/AuthProvider';
 import { AppointmentCard } from './AppointmentCard';
-import type { Appointment, BookingRules } from './types';
+import type { Appointment } from './types';
 
 interface ConfirmedAppointmentsProps {
   appointments: Appointment[];
-  bookingRules: BookingRules;
   minimumEditDate?: string | undefined;
   onEditTime: (id: string, newDate: string, newTime: string) => Promise<void>;
-  onCancel: (id: string) => void;
+  onCancel: (id: string) => Promise<void>;
+  onEditPatientName: (id: string, patientName: string) => Promise<void>;
   onMarkVisited: (id: string, visitReason: string) => Promise<void>;
   onViewHistory: (patientPhone: string) => void;
 }
 
 export function ConfirmedAppointments({
   appointments,
-  bookingRules,
   minimumEditDate,
   onEditTime,
   onCancel,
+  onEditPatientName,
   onMarkVisited,
   onViewHistory,
 }: ConfirmedAppointmentsProps) {
@@ -67,10 +67,10 @@ export function ConfirmedAppointments({
                 <AppointmentCard
                   key={appointment.id}
                   appointment={appointment}
-                  bookingRules={bookingRules}
                   minimumEditDate={minimumEditDate}
                   onEditTime={onEditTime}
                   onCancel={onCancel}
+                  onEditPatientName={onEditPatientName}
                   onMarkVisited={onMarkVisited}
                   onViewHistory={onViewHistory}
                 />

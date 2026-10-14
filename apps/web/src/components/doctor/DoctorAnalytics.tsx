@@ -45,7 +45,7 @@ export function DoctorAnalytics() {
       </div>
 
       {/* Stats */}
-      <div className="mb-5 grid grid-cols-2 gap-[14px] xl:grid-cols-4">
+      <div className="portal-stat-grid mb-5 gap-[14px]">
         <StatCard label="Total This Month" value={totalThisMonth} sub="+12% vs last month" />
         <StatCard label="New Patients" value={totalNew} sub="of this month's total" />
         <StatCard label="Avg Per Day" value={avgPerDay} sub="across working days" />
@@ -91,7 +91,7 @@ export function DoctorAnalytics() {
       {/* Bottom Grid */}
       <div
         data-testid="doctor-analytics-breakdown"
-        className="mb-5 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3 [&>*]:min-w-0"
+        className="portal-breakdown-grid mb-5 gap-4"
       >
         {/* Top Conditions */}
         <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">

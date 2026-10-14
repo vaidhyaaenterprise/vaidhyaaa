@@ -2,18 +2,18 @@
 
 import { useAuth } from '@/components/auth/AuthProvider';
 import { AppointmentCard } from './AppointmentCard';
-import type { Appointment, BookingRules } from './types';
+import type { Appointment } from './types';
 
 interface VisitedPatientsProps {
   appointments: Appointment[];
-  bookingRules: BookingRules;
   onViewHistory: (patientPhone: string) => void;
+  onEditPatientName: (id: string, patientName: string) => Promise<void>;
 }
 
 export function VisitedPatients({
   appointments,
-  bookingRules,
   onViewHistory,
+  onEditPatientName,
 }: VisitedPatientsProps) {
   const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
@@ -59,8 +59,8 @@ export function VisitedPatients({
                 <AppointmentCard
                   key={appointment.id}
                   appointment={appointment}
-                  bookingRules={bookingRules}
                   onViewHistory={onViewHistory}
+                  onEditPatientName={onEditPatientName}
                 />
               ))}
             </div>

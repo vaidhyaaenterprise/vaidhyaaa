@@ -28,6 +28,7 @@ export type AppointmentListItem = {
   routing_source: string | null;
   source: 'agent' | 'manual';
   status: string;
+  created_at: string;
   has_history: boolean;
   visit_reason?: string | null;
   examination_notes?: string | null;
@@ -166,6 +167,7 @@ export class AppointmentsService {
         routing_source: row.routingSource,
         source: row.createdByUserId ? ('manual' as const) : ('agent' as const),
         status: row.status,
+        created_at: row.createdAt.toISOString(),
         has_history: false,
         ...(visit ? { visit_reason: visit.reasonForVisit } : {}),
         ...(visit?.examinationNotes !== undefined

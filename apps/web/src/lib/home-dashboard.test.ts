@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Appointment } from '@/components/pages/appointments/types';
-import { getClinicDate, groupHomeAppointments } from '@/lib/home-dashboard';
+import {
+  filterAppointmentsBookedOnClinicDate,
+  getClinicDate,
+  groupHomeAppointments,
+} from '@/lib/home-dashboard';
 
 function appointment(
   id: string,
@@ -17,6 +21,7 @@ function appointment(
     doctorName: 'Dr. Test',
     serviceId: 'service-1',
     serviceName: 'Consultation',
+    bookedAt: '2026-09-19T04:00:00.000Z',
     appointmentDate,
     appointmentTime,
     reasonForVisit: 'Checkup',
@@ -32,6 +37,46 @@ describe('getClinicDate', () => {
   it('uses the clinic timezone across the Asia/Kolkata UTC date boundary', () => {
     expect(getClinicDate(new Date('2026-09-18T18:29:59.000Z'), 'Asia/Kolkata')).toBe('2026-09-18');
     expect(getClinicDate(new Date('2026-09-18T18:30:00.000Z'), 'Asia/Kolkata')).toBe('2026-09-19');
+  });
+});
+
+describe('filterAppointmentsBookedOnClinicDate', () => {
+  it('uses the clinic-local booking date, excludes cancelled records, and sorts newest first', () => {
+    const bookedEarlier = {
+      ...appointment('earlier', '2026-09-25', '09:00', 'confirmed'),
+      bookedAt: '2026-09-18T18:30:00.000Z',
+    };
+    const bookedLater = {
+      ...appointment('later', '2026-09-26', '10:00', 'visited'),
+      bookedAt: '2026-09-19T04:30:00.000Z',
+    };
+    const cancelled = {
+      ...appointment('cancelled', '2026-09-27', '11:00', 'cancelled'),
+      bookedAt: '2026-09-19T05:30:00.000Z',
+    };
+    const bookedPreviousClinicDay = {
+      ...appointment('previous-day', '2026-09-24', '12:00', 'confirmed'),
+      bookedAt: '2026-09-18T18:29:59.000Z',
+    };
+
+    expect(
+      filterAppointmentsBookedOnClinicDate(
+        [bookedEarlier, cancelled, bookedPreviousClinicDay, bookedLater],
+        '2026-09-19',
+        'Asia/Kolkata',
+      ).map(({ id }) => id),
+    ).toEqual(['later', 'earlier']);
+  });
+
+  it('ignores invalid booking timestamps', () => {
+    const invalid = {
+      ...appointment('invalid', '2026-09-19', '09:00', 'confirmed'),
+      bookedAt: 'not-a-date',
+    };
+
+    expect(
+      filterAppointmentsBookedOnClinicDate([invalid], '2026-09-19', 'Asia/Kolkata'),
+    ).toEqual([]);
   });
 });
 

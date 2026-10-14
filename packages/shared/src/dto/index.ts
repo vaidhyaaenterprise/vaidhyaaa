@@ -155,12 +155,14 @@ export {
   markAppointmentVisitedSchema,
   patchAppointmentRequestSchema,
   rescheduleAppointmentSchema,
+  updateAppointmentPatientNameSchema,
   type AppointmentResponse,
   type CreateAppointmentRequestInput,
   type ManualAppointmentCreateInput,
   type MarkAppointmentVisitedInput,
   type PatchAppointmentRequestInput,
   type RescheduleAppointmentInput,
+  type UpdateAppointmentPatientNameInput,
 } from './appointment';
 
 export {

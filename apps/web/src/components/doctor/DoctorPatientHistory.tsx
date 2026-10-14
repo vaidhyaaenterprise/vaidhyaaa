@@ -161,7 +161,7 @@ export function DoctorPatientHistory() {
         onSubmit={onSearch}
         className="mb-5 rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"
       >
-        <div className="grid gap-3 xl:grid-cols-3">
+        <div className="portal-search-grid gap-3">
           <label
             className="text-xs font-bold uppercase tracking-wide text-slate-500"
             htmlFor="history-phone"

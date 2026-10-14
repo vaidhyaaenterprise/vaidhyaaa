@@ -2,26 +2,27 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import type { Appointment, BookingRules } from './types';
+import { EditablePatientName } from './EditablePatientName';
+import type { Appointment } from './types';
 
 interface AppointmentCardProps {
   appointment: Appointment;
-  bookingRules: BookingRules;
   minimumEditDate?: string | undefined;
   onConfirm?: (id: string) => void;
   onEditTime?: (id: string, newDate: string, newTime: string) => Promise<void>;
-  onCancel?: (id: string) => void;
+  onCancel?: (id: string) => Promise<void>;
+  onEditPatientName?: (id: string, patientName: string) => Promise<void>;
   onMarkVisited?: (id: string, visitReason: string) => Promise<void>;
   onViewHistory?: (patientPhone: string) => void;
 }
 
 export function AppointmentCard({
   appointment,
-  bookingRules,
   minimumEditDate,
   onConfirm,
   onEditTime,
   onCancel,
+  onEditPatientName,
   onMarkVisited,
   onViewHistory,
 }: AppointmentCardProps) {
@@ -39,6 +40,9 @@ export function AppointmentCard({
   const [isSavingVisit, setIsSavingVisit] = useState(false);
   const [visitError, setVisitError] = useState<string | null>(null);
   const [visitReason, setVisitReason] = useState('');
+  const [isConfirmingCancellation, setIsConfirmingCancellation] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const canEdit = isAdmin;
   // The confirmation and reschedule lifecycle endpoints are clinic-admin-only.
@@ -92,6 +96,20 @@ export function AppointmentCard({
     }
   };
 
+  const handleCancelAppointment = async () => {
+    if (!onCancel || isCancelling) return;
+    setIsCancelling(true);
+    setCancelError(null);
+    try {
+      await onCancel(appointment.id);
+      setIsConfirmingCancellation(false);
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : 'Unable to cancel the appointment.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   const formatTime = (time: string) => {
     const [hours, minutes] = time.split(':');
     const hour = parseInt(hours ?? '0', 10);
@@ -140,7 +158,14 @@ export function AppointmentCard({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex-1">
           <div className="mb-2 flex items-center gap-2 flex-wrap">
-            <h4 className="text-base font-bold text-slate-900">{appointment.patientName}</h4>
+            <EditablePatientName
+              patientName={appointment.patientName}
+              onSave={
+                isAdmin && onEditPatientName
+                  ? (patientName) => onEditPatientName(appointment.id, patientName)
+                  : undefined
+              }
+            />
             {getVisitTypeBadge()}
             {getSourceBadge()}
           </div>
@@ -212,13 +237,55 @@ export function AppointmentCard({
 
         {(appointment.status === 'pending_confirmation' || appointment.status === 'confirmed') && isAdmin && (
           <button
-            onClick={() => onCancel?.(appointment.id)}
+            onClick={() => {
+              setCancelError(null);
+              setIsConfirmingCancellation(true);
+            }}
             className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
           >
             Cancel
           </button>
         )}
       </div>
+
+      {isConfirmingCancellation ? (
+        <div
+          role="alertdialog"
+          aria-label={`Confirm cancellation for ${appointment.patientName}`}
+          className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3"
+        >
+          <p className="text-sm font-bold text-red-900">Cancel this appointment?</p>
+          <p className="mt-1 text-xs text-red-700">
+            This will cancel the appointment for {appointment.patientName}.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleCancelAppointment()}
+              disabled={isCancelling}
+              className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-800 disabled:cursor-wait disabled:opacity-50"
+            >
+              {isCancelling ? 'Cancelling…' : 'Yes, cancel appointment'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsConfirmingCancellation(false);
+                setCancelError(null);
+              }}
+              disabled={isCancelling}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Keep appointment
+            </button>
+          </div>
+          {cancelError ? (
+            <p role="alert" className="mt-2 text-xs font-semibold text-red-700">
+              {cancelError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {isEditingTime && (
         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -277,10 +344,6 @@ export function AppointmentCard({
               {editTimeError}
             </p>
           )}
-          <p className="text-xs text-slate-500">
-            ⏱ Edit available within {bookingRules.manualEditCutoffBeforeStartMinutes} min of appointment. 
-            Max shift: {bookingRules.manualEditMaxShiftMinutes} min.
-          </p>
         </div>
       )}
 
