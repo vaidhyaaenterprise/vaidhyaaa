@@ -114,6 +114,31 @@ afterEach(() => {
 });
 
 describe('ManualQAForm activation and approval', () => {
+  it('removes an inactive section with legacy approval flags and keeps API errors in the dialog', async () => {
+    mockedFetchTemplate.mockResolvedValue({
+      ...EMPTY_TEMPLATE,
+      sections: [{ key: 'payment', title: 'Payment', questions: [templateQuestion({ qa_approved: true })] }],
+    });
+    mockedRemoveSection
+      .mockRejectedValueOnce(new Error('Request failed'))
+      .mockResolvedValueOnce({ result: { removed: true, section_key: 'payment' } });
+    render(<ManualQAForm isOpen onClose={vi.fn()} categories={[]} />);
+
+    const remove = await screen.findByRole('button', { name: 'Remove section' });
+    expect(remove).toBeEnabled();
+    const approvalPanel = screen.getByRole('region', { name: 'Approved questions in Payment' });
+    expect(within(approvalPanel).getByText('Awaiting first approval')).toBeInTheDocument();
+    expect(within(approvalPanel).queryByText('0')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0 approved/)).not.toBeInTheDocument();
+    fireEvent.click(remove);
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove section' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to remove the section.');
+    expect(screen.getByRole('heading', { name: 'Payment' })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove section' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    expect(screen.queryByRole('heading', { name: 'Payment' })).not.toBeInTheDocument();
+  });
+
   it('adds and removes questions inside the selected section', async () => {
     mockedFetchTemplate.mockResolvedValue({
       source: 'manual-template',
@@ -142,7 +167,6 @@ describe('ManualQAForm activation and approval', () => {
     mockedRemoveQuestion.mockResolvedValue({
       result: { removed: true, knowledge_id: KNOWLEDGE_ID },
     });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(
       <ManualQAForm
@@ -158,13 +182,20 @@ describe('ManualQAForm activation and approval', () => {
     expect(screen.queryByText(/duplicates are checked/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove question' }));
+    const confirmation = screen.getByRole('alertdialog', { name: 'Remove this question?' });
+    expect(mockedRemoveQuestion).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Keep it' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove question' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove question' }));
     await waitFor(() => expect(mockedRemoveQuestion).toHaveBeenCalledWith(KNOWLEDGE_ID));
     expect(screen.queryByDisplayValue('Is UPI accepted?')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '+ Add question' }));
     expect(screen.getByText('New row')).toBeInTheDocument();
-    expect(screen.getByText('Question removed successfully.')).toBeInTheDocument();
-    confirm.mockRestore();
+    expect(screen.getByText(/New question added/)).toBeInTheDocument();
+    expect(screen.getByText(/New question — ready/)).toBeInTheDocument();
+    expect(screen.getAllByRole('textbox')[0]).toHaveFocus();
   });
 
   it('adds, renames, and removes a clinic-defined section', async () => {
@@ -193,7 +224,6 @@ describe('ManualQAForm activation and approval', () => {
     mockedRemoveSection.mockResolvedValue({
       result: { removed: true, section_key: 'custom_billing_12345678' },
     });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(
       <ManualQAForm
@@ -228,11 +258,13 @@ describe('ManualQAForm activation and approval', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove section' }));
+    const confirmation = screen.getByRole('alertdialog', { name: 'Remove this section?' });
+    expect(mockedRemoveSection).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Remove section' }));
     await waitFor(() =>
       expect(mockedRemoveSection).toHaveBeenCalledWith('custom_billing_12345678'),
     );
     expect(screen.queryByRole('heading', { name: 'Billing and Receipts' })).not.toBeInTheDocument();
-    confirm.mockRestore();
   });
 
   it('requires an approved question to be disabled and saved before removal', async () => {

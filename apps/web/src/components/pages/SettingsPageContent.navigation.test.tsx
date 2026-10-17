@@ -7,9 +7,13 @@ import {
   fetchClinicLanguages,
   fetchClinicSubscription,
   fetchClinicUsage,
-  fetchSupportedLanguages,
+  replaceClinicLanguages,
 } from '@/lib/api/clinic-subscription';
-import { fetchClinicSettings, type ClinicSettingsResponse } from '@/lib/api/clinic-settings';
+import {
+  fetchClinicSettings,
+  patchClinicSettings,
+  type ClinicSettingsResponse,
+} from '@/lib/api/clinic-settings';
 
 const FIRST_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 const SECOND_CLINIC_ID = '00000000-0000-0000-0000-000000000002';
@@ -57,6 +61,24 @@ function clinicSettings(clinicId: string): ClinicSettingsResponse {
   };
 }
 
+function clinicLanguages(defaultLanguageCode: 'ta_tanglish' | 'english' = 'ta_tanglish') {
+  return {
+    default_language_code: defaultLanguageCode,
+    languages: [
+      {
+        language_code: 'ta_tanglish',
+        enabled: true,
+        is_default: defaultLanguageCode === 'ta_tanglish',
+      },
+      {
+        language_code: 'english',
+        enabled: true,
+        is_default: defaultLanguageCode === 'english',
+      },
+    ],
+  };
+}
+
 function serviceUnavailable(requestId: string) {
   return new ApiRequestError({
     code: 'INTERNAL_ERROR',
@@ -85,19 +107,28 @@ vi.mock('@/lib/api/clinic-subscription', () => ({
   fetchClinicLanguages: vi.fn(),
   fetchClinicSubscription: vi.fn(),
   fetchClinicUsage: vi.fn(),
-  fetchSupportedLanguages: vi.fn(),
   replaceClinicLanguages: vi.fn(),
 }));
 
 const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
+const mockedPatchClinicSettings = vi.mocked(patchClinicSettings);
+const mockedFetchClinicLanguages = vi.mocked(fetchClinicLanguages);
 const mockedFetchClinicSubscription = vi.mocked(fetchClinicSubscription);
 const mockedFetchClinicUsage = vi.mocked(fetchClinicUsage);
-const mockedFetchClinicLanguages = vi.mocked(fetchClinicLanguages);
-const mockedFetchSupportedLanguages = vi.mocked(fetchSupportedLanguages);
+const mockedReplaceClinicLanguages = vi.mocked(replaceClinicLanguages);
 
 beforeEach(() => {
   activeClinicId = FIRST_CLINIC_ID;
   mockedFetchClinicSettings.mockReset();
+  mockedPatchClinicSettings
+    .mockReset()
+    .mockImplementation(async (clinicId) => clinicSettings(clinicId));
+  mockedFetchClinicLanguages.mockReset().mockResolvedValue(clinicLanguages());
+  mockedReplaceClinicLanguages
+    .mockReset()
+    .mockImplementation(async (_clinicId, payload) =>
+      clinicLanguages(payload.default_language_code === 'english' ? 'english' : 'ta_tanglish'),
+    );
   mockedFetchClinicSubscription.mockReset().mockResolvedValue({
     plan_key: 'pilot',
     plan_name: 'Pilot',
@@ -113,20 +144,6 @@ beforeEach(() => {
     included_voice_minutes: 500,
     voice_call_count: 1,
   });
-  mockedFetchClinicLanguages.mockReset().mockImplementation(async (clinicId) => ({
-    default_language_code: clinicId === FIRST_CLINIC_ID ? 'tamil' : 'english',
-    languages: [
-      {
-        language_code: clinicId === FIRST_CLINIC_ID ? 'tamil' : 'english',
-        enabled: true,
-        is_default: true,
-      },
-    ],
-  }));
-  mockedFetchSupportedLanguages.mockReset().mockResolvedValue([
-    { language_code: 'english', display_name: 'English', enabled_platform_wide: true },
-    { language_code: 'tamil', display_name: 'Tamil', enabled_platform_wide: true },
-  ]);
 });
 
 afterEach(() => {
@@ -138,19 +155,16 @@ describe('SettingsPageContent navigation safety', () => {
     const requiredSettings = deferred<ClinicSettingsResponse>();
     const subscription = deferred<Awaited<ReturnType<typeof fetchClinicSubscription>>>();
     const usage = deferred<Awaited<ReturnType<typeof fetchClinicUsage>>>();
-    const clinicLanguages = deferred<Awaited<ReturnType<typeof fetchClinicLanguages>>>();
     mockedFetchClinicSettings.mockReturnValue(requiredSettings.promise);
     mockedFetchClinicSubscription.mockReturnValue(subscription.promise);
     mockedFetchClinicUsage.mockReturnValue(usage.promise);
-    mockedFetchClinicLanguages.mockReturnValue(clinicLanguages.promise);
 
     render(<SettingsPageContent />);
 
     await waitFor(() => expect(mockedFetchClinicSettings).toHaveBeenCalledOnce());
+    expect(mockedFetchClinicLanguages).not.toHaveBeenCalled();
     expect(mockedFetchClinicSubscription).not.toHaveBeenCalled();
     expect(mockedFetchClinicUsage).not.toHaveBeenCalled();
-    expect(mockedFetchClinicLanguages).not.toHaveBeenCalled();
-    expect(mockedFetchSupportedLanguages).not.toHaveBeenCalled();
 
     await act(async () => {
       requiredSettings.resolve(clinicSettings(FIRST_CLINIC_ID));
@@ -158,11 +172,13 @@ describe('SettingsPageContent navigation safety', () => {
     });
 
     await waitFor(() => {
+      expect(mockedFetchClinicLanguages).toHaveBeenCalledWith(
+        FIRST_CLINIC_ID,
+        expect.any(AbortSignal),
+      );
       expect(mockedFetchClinicSubscription).toHaveBeenCalledOnce();
-      expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
+      expect(mockedFetchClinicUsage).toHaveBeenCalledOnce();
     });
-    expect(mockedFetchClinicUsage).not.toHaveBeenCalled();
-    expect(mockedFetchSupportedLanguages).not.toHaveBeenCalled();
 
     await act(async () => {
       subscription.resolve({
@@ -176,19 +192,6 @@ describe('SettingsPageContent navigation safety', () => {
       });
       await subscription.promise;
     });
-
-    await waitFor(() => expect(mockedFetchClinicUsage).toHaveBeenCalledOnce());
-    expect(mockedFetchSupportedLanguages).not.toHaveBeenCalled();
-
-    await act(async () => {
-      clinicLanguages.resolve({
-        default_language_code: 'tamil',
-        languages: [{ language_code: 'tamil', enabled: true, is_default: true }],
-      });
-      await clinicLanguages.promise;
-    });
-
-    await waitFor(() => expect(mockedFetchSupportedLanguages).toHaveBeenCalledOnce());
 
     await act(async () => {
       usage.resolve({
@@ -213,40 +216,36 @@ describe('SettingsPageContent navigation safety', () => {
     expect(alert).toHaveTextContent('Could not load settings');
     expect(alert).toHaveTextContent('req_settings_terminal');
     expect(mockedFetchClinicSettings).toHaveBeenCalledOnce();
+    expect(mockedFetchClinicLanguages).not.toHaveBeenCalled();
     expect(mockedFetchClinicSubscription).not.toHaveBeenCalled();
     expect(mockedFetchClinicUsage).not.toHaveBeenCalled();
-    expect(mockedFetchClinicLanguages).not.toHaveBeenCalled();
-    expect(mockedFetchSupportedLanguages).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
     expect(await screen.findByText('Agent settings')).toBeInTheDocument();
     expect(mockedFetchClinicSettings).toHaveBeenCalledTimes(2);
+    expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
     expect(mockedFetchClinicSubscription).toHaveBeenCalledOnce();
     expect(mockedFetchClinicUsage).toHaveBeenCalledOnce();
-    expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
-    expect(mockedFetchSupportedLanguages).toHaveBeenCalledOnce();
     expect(screen.queryByText('Could not load settings')).not.toBeInTheDocument();
   });
 
   it('renders required settings with safe fallbacks when every optional request fails', async () => {
     mockedFetchClinicSettings.mockResolvedValue(clinicSettings(FIRST_CLINIC_ID));
+    mockedFetchClinicLanguages.mockRejectedValue(new Error('languages unavailable'));
     mockedFetchClinicSubscription.mockRejectedValue(new Error('subscription unavailable'));
     mockedFetchClinicUsage.mockRejectedValue(new Error('usage unavailable'));
-    mockedFetchClinicLanguages.mockRejectedValue(new Error('clinic languages unavailable'));
-    mockedFetchSupportedLanguages.mockRejectedValue(new Error('language catalog unavailable'));
 
     render(<SettingsPageContent />);
 
     expect(await screen.findByText('Agent settings')).toBeInTheDocument();
-    expect(screen.getByText('Language settings')).toBeInTheDocument();
-    expect(screen.getAllByText('Tanglish').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Language settings')).not.toBeInTheDocument();
+    expect(screen.getByText('Tanglish')).toBeInTheDocument();
     expect(screen.queryByText('Could not load settings')).not.toBeInTheDocument();
     expect(mockedFetchClinicSettings).toHaveBeenCalledOnce();
+    expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
     expect(mockedFetchClinicSubscription).toHaveBeenCalledOnce();
     expect(mockedFetchClinicUsage).toHaveBeenCalledOnce();
-    expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
-    expect(mockedFetchSupportedLanguages).toHaveBeenCalledOnce();
   });
 
   it('aborts cancellable reads and ignores a stale settings response after clinic switch', async () => {
@@ -260,13 +259,12 @@ describe('SettingsPageContent navigation safety', () => {
     const { rerender } = render(<SettingsPageContent />);
     await waitFor(() => expect(mockedFetchClinicSettings).toHaveBeenCalledOnce());
     const firstSettingsSignal = mockedFetchClinicSettings.mock.calls[0]?.[1];
-    expect(mockedFetchClinicLanguages).not.toHaveBeenCalled();
     expect(mockedFetchClinicSubscription).not.toHaveBeenCalled();
 
     activeClinicId = SECOND_CLINIC_ID;
     rerender(<SettingsPageContent />);
 
-    await waitFor(() => expect(screen.getAllByText('English').length).toBeGreaterThan(0));
+    expect(await screen.findByText('Agent settings')).toBeInTheDocument();
     expect(firstSettingsSignal?.aborted).toBe(true);
     expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
     expect(mockedFetchClinicLanguages.mock.calls[0]?.[0]).toBe(SECOND_CLINIC_ID);
@@ -278,8 +276,33 @@ describe('SettingsPageContent navigation safety', () => {
       await firstSettings.promise;
     });
 
-    expect(screen.queryByText('Tamil')).not.toBeInTheDocument();
     expect(screen.queryByText('Could not load settings')).not.toBeInTheDocument();
+  });
+
+  it('defaults to Tanglish and persists a changed language from Agent settings', async () => {
+    mockedFetchClinicSettings.mockResolvedValue(clinicSettings(FIRST_CLINIC_ID));
+
+    render(<SettingsPageContent />);
+
+    expect(await screen.findByText('Agent settings')).toBeInTheDocument();
+    expect(screen.getByText('Tanglish')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]!);
+    const languageSelect = screen.getByRole('combobox', { name: 'Agent language' });
+    expect(languageSelect).toHaveValue('ta_tanglish');
+    fireEvent.change(languageSelect, { target: { value: 'english' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedReplaceClinicLanguages).toHaveBeenCalledWith(FIRST_CLINIC_ID, {
+        default_language_code: 'english',
+        languages: [
+          { language_code: 'ta_tanglish', enabled: true, is_default: false },
+          { language_code: 'english', enabled: true, is_default: true },
+        ],
+      });
+    });
+    expect(await screen.findByText('English')).toBeInTheDocument();
   });
 
   it('aborts optional reads and does not start queued work for the previous clinic', async () => {
@@ -297,34 +320,33 @@ describe('SettingsPageContent navigation safety', () => {
             transcript_retention_days: 30,
           }),
     );
-    mockedFetchClinicLanguages.mockImplementation((clinicId, signal) =>
+    mockedFetchClinicUsage.mockImplementation((clinicId, signal) =>
       clinicId === FIRST_CLINIC_ID
         ? pendingUntilAbort(signal)
         : Promise.resolve({
-            default_language_code: 'english',
-            languages: [{ language_code: 'english', enabled: true, is_default: true }],
+            month: '2026-10',
+            used_voice_minutes: 10,
+            included_voice_minutes: 500,
+            voice_call_count: 1,
           }),
     );
 
     const { rerender } = render(<SettingsPageContent />);
     await waitFor(() => {
       expect(mockedFetchClinicSubscription).toHaveBeenCalledOnce();
-      expect(mockedFetchClinicLanguages).toHaveBeenCalledOnce();
+      expect(mockedFetchClinicUsage).toHaveBeenCalledOnce();
     });
     const firstSubscriptionSignal = mockedFetchClinicSubscription.mock.calls[0]?.[1];
-    const firstLanguagesSignal = mockedFetchClinicLanguages.mock.calls[0]?.[1];
+    const firstUsageSignal = mockedFetchClinicUsage.mock.calls[0]?.[1];
 
     activeClinicId = SECOND_CLINIC_ID;
     rerender(<SettingsPageContent />);
 
     expect(await screen.findByText('Agent settings')).toBeInTheDocument();
     expect(firstSubscriptionSignal?.aborted).toBe(true);
-    expect(firstLanguagesSignal?.aborted).toBe(true);
-    expect(mockedFetchClinicUsage).toHaveBeenCalledTimes(1);
-    expect(mockedFetchClinicUsage.mock.calls[0]?.[0]).toBe(SECOND_CLINIC_ID);
-    expect(mockedFetchSupportedLanguages).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByText('English').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Tamil')).not.toBeInTheDocument();
+    expect(firstUsageSignal?.aborted).toBe(true);
+    expect(mockedFetchClinicUsage).toHaveBeenCalledTimes(2);
+    expect(mockedFetchClinicUsage.mock.calls[1]?.[0]).toBe(SECOND_CLINIC_ID);
     expect(screen.queryByText('Could not load settings')).not.toBeInTheDocument();
   });
 });

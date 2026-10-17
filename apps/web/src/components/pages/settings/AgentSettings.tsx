@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import type { AgentSettings, BookingMode } from './types';
+import type { AgentLanguage, AgentSettings, BookingMode } from './types';
+
+function languageLabel(language: AgentLanguage): string {
+  return language === 'english' ? 'English' : 'Tanglish';
+}
 
 interface AgentSettingsProps {
   settings: AgentSettings;
@@ -57,6 +61,12 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <span className="text-sm font-semibold text-slate-600">Agent language</span>
+            <span className="text-sm font-bold text-slate-900">
+              {languageLabel(settings.language)}
+            </span>
+          </div>
+          <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Booking mode</span>
             <span className="text-sm font-bold text-slate-900">
               {settings.bookingMode === 'pending_confirmation'
@@ -99,6 +109,12 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
               {settings.bookingMode === 'pending_confirmation'
                 ? 'Pending confirmation'
                 : 'Auto confirmation'}
+            </span>
+          </div>
+          <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <span className="text-sm font-semibold text-slate-600">Agent language</span>
+            <span className="text-sm font-bold text-slate-900">
+              {languageLabel(settings.language)}
             </span>
           </div>
           {!settings.onboardingComplete && (
@@ -148,6 +164,29 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             >
               <option value="pending_confirmation">Pending confirmation</option>
               <option value="auto_confirm">Auto confirmation</option>
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="agent-language"
+              className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+            >
+              Agent language
+            </label>
+            <select
+              id="agent-language"
+              value={tempSettings.language}
+              onChange={(event) =>
+                setTempSettings({
+                  ...tempSettings,
+                  language: event.target.value as AgentLanguage,
+                })
+              }
+              className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+            >
+              <option value="ta_tanglish">Tanglish</option>
+              <option value="english">English</option>
             </select>
           </div>
 

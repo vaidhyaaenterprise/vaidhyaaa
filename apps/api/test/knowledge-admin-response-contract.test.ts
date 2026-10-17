@@ -61,11 +61,16 @@ describe('KnowledgeAdminService response contract', () => {
     expect(removeKnowledgeEntry).not.toHaveBeenCalled();
   });
 
-  it('removes a question after it has been disabled', async () => {
+  it.each([
+    { status: 'disabled', qaApproved: false, applicable: false },
+    { status: 'disabled', qaApproved: true, applicable: false },
+    { status: 'approved', qaApproved: true, applicable: false },
+    { status: 'needs_update', qaApproved: true, applicable: true },
+  ])('removes an unapproved question despite legacy flags: %j', async (state) => {
     const findKnowledgeEntry = vi
       .fn()
       .mockResolvedValue([
-        knowledgeRow({ status: 'disabled', qaApproved: false, applicable: false }),
+        knowledgeRow(state),
       ]);
     const removeKnowledgeEntry = vi.fn().mockResolvedValue([knowledgeRow()]);
     const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
@@ -102,7 +107,13 @@ describe('KnowledgeAdminService response contract', () => {
     expect(archiveKnowledgeSection).not.toHaveBeenCalled();
   });
 
-  it('archives a section and its unapproved questions together', async () => {
+  it.each([
+    { status: 'disabled', qaApproved: false, applicable: false },
+    { status: 'disabled', qaApproved: true, applicable: false },
+    { status: 'approved', qaApproved: true, applicable: false },
+    { status: 'needs_update', qaApproved: true, applicable: true },
+    { status: 'approved', qaApproved: true, applicable: true, answer: '   ' },
+  ])('archives a section with no effective approvals: %j', async (state) => {
     const archiveKnowledgeSection = vi.fn().mockResolvedValue({
       blocked: false,
       section: { sectionKey: 'communication' },
@@ -113,7 +124,7 @@ describe('KnowledgeAdminService response contract', () => {
         listKnowledgeSections: vi.fn().mockResolvedValue([]),
         listVisibleSectionEntries: vi
           .fn()
-          .mockResolvedValue([knowledgeRow({ status: 'disabled', qaApproved: false })]),
+          .mockResolvedValue([knowledgeRow(state)]),
         archiveKnowledgeSection,
       },
     });

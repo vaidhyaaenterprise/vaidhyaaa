@@ -9,7 +9,7 @@ vi.mock('@/components/auth/AuthProvider', () => ({
 afterEach(cleanup);
 
 describe('AgentSettings', () => {
-  it('omits answering and fallback controls while saving the remaining settings', async () => {
+  it('edits the agent language while omitting answering and fallback controls', async () => {
     const onUpdateSettings = vi.fn().mockResolvedValue(undefined);
 
     render(
@@ -17,6 +17,7 @@ describe('AgentSettings', () => {
         settings={{
           agentEnabled: false,
           bookingMode: 'pending_confirmation',
+          language: 'ta_tanglish',
           onboardingComplete: true,
         }}
         onUpdateSettings={onUpdateSettings}
@@ -25,6 +26,7 @@ describe('AgentSettings', () => {
 
     expect(screen.queryByText('Answering mode')).not.toBeInTheDocument();
     expect(screen.queryByText('Fallback phone')).not.toBeInTheDocument();
+    expect(screen.getByText('Tanglish')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
@@ -37,12 +39,16 @@ describe('AgentSettings', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Booking mode' }), {
       target: { value: 'auto_confirm' },
     });
+    const languageSelect = screen.getByRole('combobox', { name: 'Agent language' });
+    expect(languageSelect).toHaveValue('ta_tanglish');
+    fireEvent.change(languageSelect, { target: { value: 'english' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(onUpdateSettings).toHaveBeenCalledWith({
         agentEnabled: true,
         bookingMode: 'auto_confirm',
+        language: 'english',
         onboardingComplete: true,
       });
     });

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsPageContent } from '@/components/pages/SettingsPageContent';
@@ -14,7 +14,6 @@ import {
   fetchClinicLanguages,
   fetchClinicSubscription,
   fetchClinicUsage,
-  fetchSupportedLanguages,
 } from '@/lib/api/clinic-subscription';
 import { fetchClinicSettings } from '@/lib/api/clinic-settings';
 
@@ -64,20 +63,18 @@ vi.mock('@/lib/api/clinic-subscription', () => ({
   fetchClinicLanguages: vi.fn(),
   fetchClinicSubscription: vi.fn(),
   fetchClinicUsage: vi.fn(),
-  fetchSupportedLanguages: vi.fn(),
   previewBookingRuleChange: vi.fn(),
   replaceClinicLanguages: vi.fn(),
 }));
 
 const mockedFetchAllDoctorSchedules = vi.mocked(fetchAllDoctorSchedules);
 const mockedFetchBookingRules = vi.mocked(fetchBookingRules);
-const mockedFetchClinicLanguages = vi.mocked(fetchClinicLanguages);
 const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
+const mockedFetchClinicLanguages = vi.mocked(fetchClinicLanguages);
 const mockedFetchClinicSubscription = vi.mocked(fetchClinicSubscription);
 const mockedFetchClinicUsage = vi.mocked(fetchClinicUsage);
 const mockedFetchDoctorSchedules = vi.mocked(fetchDoctorSchedules);
 const mockedFetchDoctors = vi.mocked(fetchDoctors);
-const mockedFetchSupportedLanguages = vi.mocked(fetchSupportedLanguages);
 
 function bookingRule(id: string, doctorId: string) {
   return {
@@ -143,15 +140,9 @@ beforeEach(() => {
     },
   ]);
   mockedFetchClinicSettings.mockReset();
+  mockedFetchClinicLanguages.mockReset();
   mockedFetchClinicSubscription.mockReset();
   mockedFetchClinicUsage.mockReset();
-  mockedFetchClinicLanguages.mockReset().mockResolvedValue({
-    default_language_code: 'english',
-    languages: [{ language_code: 'english', enabled: true, is_default: true }],
-  });
-  mockedFetchSupportedLanguages.mockReset().mockResolvedValue([
-    { language_code: 'english', display_name: 'English', enabled_platform_wide: true },
-  ]);
 });
 
 afterEach(() => {
@@ -190,18 +181,13 @@ describe('doctor-scoped clinic setup requests', () => {
 });
 
 describe('doctor settings requests', () => {
-  it('loads language data without unused subscription and usage requests', async () => {
+  it('does not load admin-only or hidden settings data', async () => {
     render(<SettingsPageContent />);
 
-    expect(await screen.findByText('Language settings')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(mockedFetchClinicLanguages).toHaveBeenCalledWith(
-        ACTIVE_CLINIC_ID,
-        expect.any(AbortSignal),
-      );
-      expect(mockedFetchSupportedLanguages).toHaveBeenCalledOnce();
-    });
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByText('Language settings')).not.toBeInTheDocument();
     expect(mockedFetchClinicSettings).not.toHaveBeenCalled();
+    expect(mockedFetchClinicLanguages).not.toHaveBeenCalled();
     expect(mockedFetchClinicSubscription).not.toHaveBeenCalled();
     expect(mockedFetchClinicUsage).not.toHaveBeenCalled();
   });

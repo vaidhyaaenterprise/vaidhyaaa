@@ -517,7 +517,7 @@ export class KnowledgeAdminService {
     if (existingOverride?.active === false || (!existingOverride && !defaultTitle)) {
       throw new AppError('NOT_FOUND', 'Knowledge section not found.');
     }
-    if (entries.some((entry) => entry.status === 'approved' || entry.qaApproved)) {
+    if (entries.some((entry) => this.toTemplateUiStatus(entry) === 'approved')) {
       throw new AppError(
         'CONFLICT',
         'This section contains approved questions. Disable them before removing the section.',
@@ -560,7 +560,7 @@ export class KnowledgeAdminService {
         if (existing.removedAt) {
           return { removed: true, knowledge_id: input.knowledgeId };
         }
-        if (existing.status === 'approved' || existing.qaApproved) {
+        if (this.toTemplateUiStatus(existing) === 'approved') {
           throw new AppError(
             'CONFLICT',
             'Approved questions must be disabled before they can be removed.',
@@ -593,7 +593,7 @@ export class KnowledgeAdminService {
     if (!existing) {
       throw new AppError('NOT_FOUND', 'Knowledge question not found.');
     }
-    if (existing.status === 'approved' || existing.qaApproved) {
+    if (this.toTemplateUiStatus(existing) === 'approved') {
       throw new AppError(
         'CONFLICT',
         'Approved questions must be disabled before they can be removed.',

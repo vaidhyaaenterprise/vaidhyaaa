@@ -1,4 +1,5 @@
 export type BookingMode = 'pending_confirmation' | 'auto_confirm';
+export type AgentLanguage = 'ta_tanglish' | 'english';
 export type NotificationChannel = 'whatsapp' | 'sms' | 'email' | 'none';
 export type Language = 'ta_tanglish' | 'english' | 'tamil';
 export type SubscriptionStatus = 'trialing' | 'active' | 'manual_free' | 'expired' | 'past_due' | 'canceled';
@@ -6,6 +7,7 @@ export type SubscriptionStatus = 'trialing' | 'active' | 'manual_free' | 'expire
 export interface AgentSettings {
   agentEnabled: boolean;
   bookingMode: BookingMode;
+  language: AgentLanguage;
   onboardingComplete: boolean;
 }
 

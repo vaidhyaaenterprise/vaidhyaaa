@@ -98,10 +98,10 @@ export class KnowledgeRepository {
             eq(clinicKnowledgeBase.clinicId, values.clinicId),
             eq(clinicKnowledgeBase.sectionKey, values.sectionKey),
             isNull(clinicKnowledgeBase.removedAt),
-            or(
-              eq(clinicKnowledgeBase.status, 'approved'),
-              eq(clinicKnowledgeBase.qaApproved, true),
-            ),
+            eq(clinicKnowledgeBase.applicable, true),
+            eq(clinicKnowledgeBase.status, 'approved'),
+            eq(clinicKnowledgeBase.qaApproved, true),
+            drizzleSql`length(trim(${clinicKnowledgeBase.answer})) > 0`,
           ),
         )
         .limit(1);

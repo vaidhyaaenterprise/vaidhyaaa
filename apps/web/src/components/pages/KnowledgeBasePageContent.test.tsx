@@ -103,6 +103,22 @@ describe('KnowledgeBasePageContent bulk refresh behavior', () => {
     expect(mockedSubscribe).not.toHaveBeenCalled();
   });
 
+  it('loads Q&A entries when the supplementary embedding status request fails', async () => {
+    const approved = {
+      ...knowledgeRow('00000000-0000-0000-0000-000000000200'),
+      status: 'approved',
+      qa_approved: true,
+    };
+    mockedFetchEntries.mockResolvedValue([approved]);
+    mockedFetchEmbeddingStatus.mockRejectedValue(new Error('Embedding status unavailable'));
+
+    render(<KnowledgeBasePageContent />);
+
+    expect(await screen.findByText(approved.question)).toBeInTheDocument();
+    expect(screen.queryByText('Could not load knowledge base')).not.toBeInTheDocument();
+    expect(screen.getByText('Approved Q&A loaded from the API.')).toBeInTheDocument();
+  });
+
   it('shows the manual-template category names in the review queue', async () => {
     const visitPolicy = {
       ...knowledgeRow('00000000-0000-0000-0000-000000000201'),

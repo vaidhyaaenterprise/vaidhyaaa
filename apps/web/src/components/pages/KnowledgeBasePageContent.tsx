@@ -163,19 +163,32 @@ export function KnowledgeBasePageContent() {
         setError(null);
       }
       try {
-        const [entries, status] = await Promise.all([
-          fetchKnowledgeEntries(controller.signal),
-          fetchKnowledgeEmbeddingStatus(controller.signal),
-        ]);
+        // Q&A entries are the page's required data. Embedding statistics are
+        // supplementary and must never prevent administrators from managing
+        // otherwise available knowledge entries.
+        const entries = await fetchKnowledgeEntries(controller.signal);
         if (!isCurrentLoad()) {
           return;
         }
         const mapped = entries.map(mapEntry);
         setPendingEntries(mapped.filter(isAnsweredReviewEntry));
         setApprovedEntries(mapped.filter(isApprovedEntry));
-        setEmbeddingStatus(
-          status ? `${status.generated_count}/${status.approved_total} embeddings generated` : null,
-        );
+        setLoading(false);
+
+        try {
+          const status = await fetchKnowledgeEmbeddingStatus(controller.signal);
+          if (isCurrentLoad()) {
+            setEmbeddingStatus(
+              status
+                ? `${status.generated_count}/${status.approved_total} embeddings generated`
+                : null,
+            );
+          }
+        } catch (statusError) {
+          if (isCurrentLoad() && !isAbortError(statusError)) {
+            setEmbeddingStatus(null);
+          }
+        }
       } catch (err) {
         if (showLoading && isCurrentLoad() && !isAbortError(err)) {
           setError(

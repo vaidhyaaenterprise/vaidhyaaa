@@ -20,8 +20,12 @@ import {
 } from '@/lib/api/knowledge';
 
 import type { Category } from './types';
+import { RemovalConfirmation } from './RemovalConfirmation';
 
 type SaveMode = 'draft' | 'approve';
+type RemovalTarget =
+  | { kind: 'section'; sectionKey: string; title: string }
+  | { kind: 'question'; sectionKey: string; questionId: string; title: string };
 
 type TemplateQuestionBaseline = {
   question: string;
@@ -356,6 +360,11 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const [renamingSectionKey, setRenamingSectionKey] = useState<string | null>(null);
   const [renamedSectionTitle, setRenamedSectionTitle] = useState('');
   const [banner, setBanner] = useState<FormBanner | null>(null);
+  const [removalTarget, setRemovalTarget] = useState<RemovalTarget | null>(null);
+  const [removalError, setRemovalError] = useState<string | null>(null);
+  const [newQuestionId, setNewQuestionId] = useState<string | null>(null);
+  const newQuestionRef = useRef<HTMLElement>(null);
+  const questionPaneRef = useRef<HTMLElement>(null);
   const openRef = useRef(isOpen);
   openRef.current = isOpen;
   const activeClinicIdRef = useRef(clinicId);
@@ -363,6 +372,13 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const formContextSequenceRef = useRef(0);
   const activeLoadControllerRef = useRef<AbortController | null>(null);
   const loadSequenceRef = useRef(0);
+
+  useEffect(() => {
+    if (!newQuestionId || !newQuestionRef.current) return;
+    const card = newQuestionRef.current;
+    questionPaneRef.current?.scrollTo?.({ top: 0, behavior: 'smooth' });
+    card.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
+  }, [newQuestionId]);
 
   const isActiveFormContext = useCallback(
     (targetClinicId: string, contextSequence: number) =>
@@ -536,6 +552,9 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       setBatchSaving(false);
       setQuestionActionId(null);
       setSectionActionKey(null);
+      setRemovalTarget(null);
+      setRemovalError(null);
+      setNewQuestionId(null);
       return;
     }
     openRef.current = true;
@@ -548,6 +567,9 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     setRenamingSectionKey(null);
     setRenamedSectionTitle('');
     setBanner(null);
+    setRemovalTarget(null);
+    setRemovalError(null);
+    setNewQuestionId(null);
     void loadTemplate();
     return () => {
       if (formContextSequenceRef.current === formContextSequence) {
@@ -638,6 +660,11 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
 
     setActiveSectionKey(sectionKey);
     setSelectedQuestionId(newQuestionId);
+    setNewQuestionId(newQuestionId);
+    setBanner({
+      tone: 'success',
+      message: 'New question added. Enter a question and answer, then save when ready.',
+    });
   };
 
   const handleRemoveUnsavedQuestion = (sectionKey: string, questionId: string) => {
@@ -656,7 +683,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     );
   };
 
-  const handleRemoveQuestion = async (sectionKey: string, questionId: string) => {
+  const handleRemoveQuestion = async (sectionKey: string, questionId: string, confirmed = false) => {
     const question = sections
       .find((section) => section.key === sectionKey)
       ?.questions.find((item) => item.id === questionId);
@@ -672,12 +699,14 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       return;
     }
 
-    if (!question.exists && !question.templateKey) {
-      handleRemoveUnsavedQuestion(sectionKey, questionId);
-      return;
-    }
-
-    if (!window.confirm('Remove this question from the section?')) {
+    if (!confirmed) {
+      setRemovalError(null);
+      setRemovalTarget({
+        kind: 'question',
+        sectionKey,
+        questionId,
+        title: question.question || 'New question',
+      });
       return;
     }
 
@@ -687,24 +716,26 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       return;
     }
     setQuestionActionId(questionId);
+    setRemovalError(null);
     setBanner(null);
     try {
-      await removeManualKnowledgeQuestion(questionId);
+      if (question.exists || question.templateKey) {
+        await removeManualKnowledgeQuestion(questionId);
+      }
       if (!isActiveFormContext(targetClinicId, contextSequence)) {
         return;
       }
       handleRemoveUnsavedQuestion(sectionKey, questionId);
+      setRemovalTarget(null);
       setBanner({ tone: 'success', message: 'Question removed successfully.' });
       await onSaved?.();
     } catch (error) {
       if (isActiveFormContext(targetClinicId, contextSequence)) {
-        setBanner({
-          tone: 'warning',
-          message:
-            error instanceof ApiRequestError
-              ? error.apiError.message
-              : 'Failed to remove the question.',
-        });
+        setRemovalError(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : 'Failed to remove the question.',
+        );
       }
     } finally {
       if (isActiveFormContext(targetClinicId, contextSequence)) {
@@ -795,7 +826,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     }
   };
 
-  const handleRemoveSection = async (sectionKey: string) => {
+  const handleRemoveSection = async (sectionKey: string, confirmed = false) => {
     const section = sections.find((item) => item.key === sectionKey);
     if (!clinicId || !section || sectionActionKey) {
       return;
@@ -807,7 +838,9 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       });
       return;
     }
-    if (!window.confirm(`Remove the “${section.title}” section?`)) {
+    if (!confirmed) {
+      setRemovalError(null);
+      setRemovalTarget({ kind: 'section', sectionKey, title: section.title });
       return;
     }
 
@@ -815,6 +848,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     const contextSequence = formContextSequenceRef.current;
     const fallbackSectionKey = sections.find((item) => item.key !== sectionKey)?.key ?? null;
     setSectionActionKey(sectionKey);
+    setRemovalError(null);
     setBanner(null);
     try {
       await removeManualKnowledgeSection(sectionKey);
@@ -824,17 +858,16 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       setSections((current) => current.filter((item) => item.key !== sectionKey));
       setActiveSectionKey((current) => (current === sectionKey ? fallbackSectionKey : current));
       setSelectedQuestionId(null);
+      setRemovalTarget(null);
       setBanner({ tone: 'success', message: 'Section removed successfully.' });
       await onSaved?.();
     } catch (error) {
       if (isActiveFormContext(targetClinicId, contextSequence)) {
-        setBanner({
-          tone: 'warning',
-          message:
-            error instanceof ApiRequestError
-              ? error.apiError.message
-              : 'Failed to remove the section.',
-        });
+        setRemovalError(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : 'Failed to remove the section.',
+        );
       }
     } finally {
       if (isActiveFormContext(targetClinicId, contextSequence)) {
@@ -1000,7 +1033,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-2 sm:p-4">
-      <div className="flex h-[94vh] w-full max-w-[1280px] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div inert={removalTarget !== null} className="flex h-[94vh] w-full max-w-[1280px] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="border-b border-slate-200 bg-gradient-to-r from-cyan-50 via-white to-emerald-50 px-6 py-4">
           <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
@@ -1144,17 +1177,22 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                         <p className="mt-0.5 text-[11px] text-slate-500">
                           {section.questions.length} questions
                         </p>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          {progress.approved} approved • {progress.draft} draft •{' '}
-                          {progress.inactive} inactive
-                        </p>
+                        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                          {progress.approved > 0 ? (
+                            <span className="font-bold text-emerald-700">✓ {progress.approved} approved</span>
+                          ) : (
+                            <span className="border-l-2 border-amber-400 pl-2 font-semibold text-amber-800">Awaiting approval</span>
+                          )}
+                          {progress.draft > 0 && <span>{progress.draft} draft</span>}
+                          {progress.inactive > 0 && <span>{progress.inactive} inactive</span>}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
               </aside>
 
-              <section className="h-full min-h-0 overflow-y-auto bg-white p-5">
+              <section ref={questionPaneRef} className="h-full min-h-0 overflow-y-auto bg-white p-5">
                 {!activeSection ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="text-sm text-slate-600">No section selected.</p>
@@ -1194,9 +1232,22 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                             </button>
                           </div>
                         ) : (
-                          <h4 className="text-lg font-black text-slate-900">
-                            {activeSection.title}
-                          </h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="break-words text-lg font-black text-slate-900">{activeSection.title}</h4>
+                            <button
+                              type="button"
+                              aria-label="Rename section"
+                              title="Rename section"
+                              onClick={() => {
+                                setRenamingSectionKey(activeSection.key);
+                                setRenamedSectionTitle(activeSection.title);
+                              }}
+                              disabled={batchSaving || sectionActionKey !== null}
+                              className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 disabled:opacity-50"
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1 12-12a2.8 2.8 0 0 0-4-4L4 15l-1 6Z" /></svg>
+                            </button>
+                          </div>
                         )}
                         <p className="mt-1 text-sm text-slate-500">
                           Draft and approval actions process valid edits across every section.
@@ -1210,17 +1261,6 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                           className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
                         >
                           + Add question
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRenamingSectionKey(activeSection.key);
-                            setRenamedSectionTitle(activeSection.title);
-                          }}
-                          disabled={batchSaving || sectionActionKey !== null}
-                          className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-800 hover:bg-cyan-100 disabled:opacity-60"
-                        >
-                          Rename section
                         </button>
                         <button
                           type="button"
@@ -1246,20 +1286,26 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
 
                     <section
                       aria-label={`Approved questions in ${activeSection.title}`}
-                      className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3"
+                      className={`mb-4 rounded-xl border p-4 ${approvedQuestionsInActiveSection.length === 0 ? 'border-dashed border-amber-300 bg-amber-50/60' : 'border-emerald-200 bg-emerald-50/70'}`}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <h5 className="text-sm font-bold text-emerald-900">Approved questions</h5>
-                        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200">
-                          {approvedQuestionsInActiveSection.length}
-                        </span>
-                      </div>
                       {approvedQuestionsInActiveSection.length === 0 ? (
-                        <p className="mt-2 text-xs text-emerald-800/75">
-                          No approved questions in this section yet.
-                        </p>
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700" aria-hidden="true">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+                          </span>
+                          <div>
+                            <h5 className="text-sm font-bold text-amber-900">Awaiting first approval</h5>
+                            <p className="mt-1 text-xs text-amber-800">No approved questions in this section yet.</p>
+                            <p className="mt-1 text-xs text-amber-800">Add or complete an answer, then save and approve.</p>
+                          </div>
+                        </div>
                       ) : (
-                        <div className="mt-2 flex flex-wrap gap-2">
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <h5 className="text-sm font-bold text-emerald-900">✓ Approved questions</h5>
+                            <span className="text-xs font-bold text-emerald-800">{approvedQuestionsInActiveSection.length} approved</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
                           {approvedQuestionsInActiveSection.map((question) => (
                             <button
                               key={question.id}
@@ -1270,7 +1316,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                               {question.question}
                             </button>
                           ))}
-                        </div>
+                          </div>
+                        </>
                       )}
                     </section>
 
@@ -1291,15 +1338,19 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                         return (
                           <article
                             key={question.id}
+                            ref={question.id === newQuestionId ? newQuestionRef : undefined}
                             onClick={() => setSelectedQuestionId(question.id)}
                             onFocusCapture={() => setSelectedQuestionId(question.id)}
-                            className={`rounded-2xl border bg-white p-4 shadow-sm transition ${
+                            className={`rounded-2xl border p-4 shadow-sm transition ${question.id === newQuestionId && !question.exists ? 'bg-teal-50/40 ring-2 ring-teal-200' : 'bg-white'} ${
                               isSelected
                                 ? 'border-cyan-300 ring-2 ring-cyan-100'
                                 : 'border-slate-200 hover:border-cyan-200'
                             }`}
                           >
-                            <div className="mb-3 flex items-start justify-between gap-3">
+                            {question.id === newQuestionId && !question.exists && (
+                              <div className="mb-4 border-b border-teal-200 pb-3 text-sm font-bold text-teal-800">＋ New question — ready for your content</div>
+                            )}
+                            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                                   Question {index + 1}
@@ -1307,18 +1358,14 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 <p className="text-xs text-slate-500">
                                   {question.exists ? 'Saved row' : 'New row'}
                                 </p>
+                                <div className="mt-2 flex flex-wrap items-center gap-3">
+                                  <span className={`inline-flex items-center gap-1.5 border-l-2 pl-2 text-xs font-semibold ${statusConfig.classes}`}>
+                                    {statusConfig.label}
+                                  </span>
+                                  {question.dirty && <span className="text-xs font-semibold text-amber-700">Unsaved changes</span>}
+                                </div>
                               </div>
                               <div className="flex flex-wrap items-center justify-end gap-2">
-                                {question.dirty && (
-                                  <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800">
-                                    Unsaved changes
-                                  </span>
-                                )}
-                                <span
-                                  className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusConfig.classes}`}
-                                >
-                                  {statusConfig.label}
-                                </span>
                                 <button
                                   type="button"
                                   aria-pressed={question.applicable}
@@ -1331,12 +1378,13 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                       !question.applicable,
                                     );
                                   }}
-                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition ${
+                                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold text-white shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 ${
                                     question.applicable
-                                      ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                                      : 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
+                                      ? 'bg-slate-700 hover:bg-slate-800'
+                                      : 'bg-teal-700 hover:bg-teal-800'
                                   }`}
                                 >
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6 5.5a9 9 0 1 0 12 0" /></svg>
                                   {question.applicable ? 'Make inactive' : 'Make active'}
                                 </button>
                               </div>
@@ -1344,10 +1392,11 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
 
                             <div className="space-y-3">
                               <div>
-                                <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                                <label htmlFor={`question-${question.id}`} className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-500">
                                   Question
                                 </label>
                                 <textarea
+                                  id={`question-${question.id}`}
                                   value={question.question}
                                   onChange={(event) =>
                                     applyQuestionPatch(activeSection.key, question.id, (current) =>
@@ -1507,6 +1556,25 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
           )}
         </div>
       </div>
+      {removalTarget && (
+        <RemovalConfirmation
+          title={removalTarget.kind === 'section' ? 'Remove this section?' : 'Remove this question?'}
+          description={removalTarget.kind === 'section'
+            ? `“${removalTarget.title}” and its draft and inactive questions will be removed from your knowledge template.`
+            : `“${removalTarget.title}” will be removed from this section.`}
+          label={removalTarget.kind === 'section' ? 'Remove section' : 'Remove question'}
+          busy={sectionActionKey !== null || questionActionId !== null}
+          error={removalError}
+          onClose={() => {
+            setRemovalTarget(null);
+            setRemovalError(null);
+          }}
+          onConfirm={() => {
+            if (removalTarget.kind === 'section') void handleRemoveSection(removalTarget.sectionKey, true);
+            else void handleRemoveQuestion(removalTarget.sectionKey, removalTarget.questionId, true);
+          }}
+        />
+      )}
     </div>
   );
 }
