@@ -163,7 +163,7 @@ function mapApiQuestion(row: ManualTemplateQuestionApiRow): TemplateDraftQuestio
 function markQuestionEdited(
   question: TemplateDraftQuestion,
   changes: Partial<
-    Pick<TemplateDraftQuestion, 'question' | 'answer' | 'category' | 'serviceName' | 'applicable'>
+    Pick<TemplateDraftQuestion, 'question' | 'answer' | 'category' | 'serviceName'>
   >,
 ): TemplateDraftQuestion {
   const updated = { ...question, ...changes };
@@ -173,11 +173,10 @@ function markQuestionEdited(
     updated.answer.trim() !== baseline.answer.trim() ||
     updated.category.trim() !== baseline.category.trim() ||
     updated.serviceName.trim() !== baseline.serviceName.trim();
-  const applicableChanged = updated.applicable !== baseline.applicable;
   const hasAnswer = updated.answer.trim().length > 0;
-  const dirty = applicableChanged || (contentChanged && hasAnswer);
+  const dirty = contentChanged && hasAnswer;
 
-  if (!contentChanged && !applicableChanged) {
+  if (!contentChanged) {
     return {
       ...updated,
       qaApproved: baseline.qaApproved,
@@ -353,6 +352,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
   const [activeSectionKey, setActiveSectionKey] = useState<string | null>(null);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [batchSaving, setBatchSaving] = useState(false);
+  const [statusSavingId, setStatusSavingId] = useState<string | null>(null);
+  const statusSaveInFlightRef = useRef(false);
   const [questionActionId, setQuestionActionId] = useState<string | null>(null);
   const [sectionActionKey, setSectionActionKey] = useState<string | null>(null);
   const [addingSection, setAddingSection] = useState(false);
@@ -550,6 +551,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
       activeLoadControllerRef.current = null;
       loadSequenceRef.current += 1;
       setBatchSaving(false);
+      setStatusSavingId(null);
+      statusSaveInFlightRef.current = false;
       setQuestionActionId(null);
       setSectionActionKey(null);
       setRemovalTarget(null);
@@ -560,6 +563,8 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     openRef.current = true;
     const formContextSequence = ++formContextSequenceRef.current;
     setBatchSaving(false);
+    setStatusSavingId(null);
+    statusSaveInFlightRef.current = false;
     setQuestionActionId(null);
     setSectionActionKey(null);
     setAddingSection(false);
@@ -694,7 +699,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     ) {
       setBanner({
         tone: 'warning',
-        message: 'Approved questions must be made inactive and saved before removal.',
+        message: 'Make approved questions inactive before removal.',
       });
       return;
     }
@@ -876,14 +881,78 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
     }
   };
 
-  const handleApplicableChange = (sectionKey: string, questionId: string, applicable: boolean) => {
-    applyQuestionPatch(sectionKey, questionId, (current) =>
-      markQuestionEdited(current, { applicable }),
-    );
+  const handleApplicableChange = async (sectionKey: string, questionId: string, applicable: boolean) => {
+    if (!clinicId || batchSaving || statusSaveInFlightRef.current) return;
+    const question = sections.find((section) => section.key === sectionKey)
+      ?.questions.find((row) => row.id === questionId);
+    if (!question || (!question.exists && !question.templateKey)) return;
+
+    const targetClinicId = clinicId;
+    const contextSequence = formContextSequenceRef.current;
+    statusSaveInFlightRef.current = true;
+    setStatusSavingId(questionId);
+    setBanner(null);
+    applyQuestionPatch(sectionKey, questionId, (current) => ({ ...current, errorMessage: null }));
+    try {
+      // Availability is persisted separately. Never save unsaved answer/content
+      // edits or approve a question as a side effect of activating it.
+      const status: SaveTargetState['status'] = applicable
+        ? question.baseline.answer.trim()
+          ? 'pending_review'
+          : 'needs_update'
+        : 'disabled';
+      const availability = { applicable, qa_approved: false, status };
+      const saved = question.exists
+        ? await patchKnowledgeEntry(question.id, availability, targetClinicId)
+        : await createManualKnowledgeEntry({
+            ...buildQuestionPayload({ ...question, ...question.baseline }, 'draft'),
+            ...availability,
+          });
+      if (!isActiveFormContext(targetClinicId, contextSequence)) return;
+
+      const savedQuestion = mapApiQuestion({
+        ...saved,
+        exists: true,
+        service_name_required: question.serviceNameRequired,
+        ui_status: inferUiStatus({
+          applicable: saved.applicable,
+          qaApproved: saved.qa_approved,
+          answer: saved.answer,
+          status: saved.status,
+        }),
+      });
+      applyQuestionPatch(sectionKey, questionId, (current) => markQuestionEdited(savedQuestion, {
+        question: current.question,
+        answer: current.answer,
+        category: current.category,
+        serviceName: current.serviceName,
+      }));
+      setSelectedQuestionId((current) => current === questionId ? saved.id : current);
+      setBanner({ tone: 'success', message: `Question made ${applicable ? 'active' : 'inactive'} and saved automatically.` });
+      try {
+        await onSaved?.();
+      } catch {
+        if (isActiveFormContext(targetClinicId, contextSequence)) {
+          setBanner({ tone: 'warning', message: 'Availability saved. Refresh the knowledge list to see the latest status.' });
+        }
+      }
+    } catch (error) {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        applyQuestionPatch(sectionKey, questionId, (current) => ({
+          ...current,
+          errorMessage: getQuestionSaveError(error).message,
+        }));
+      }
+    } finally {
+      if (isActiveFormContext(targetClinicId, contextSequence)) {
+        statusSaveInFlightRef.current = false;
+        setStatusSavingId(null);
+      }
+    }
   };
 
   const saveEditedQuestions = async (requestedMode: SaveMode) => {
-    if (!clinicId || batchSaving) {
+    if (!clinicId || batchSaving || statusSaveInFlightRef.current) {
       return;
     }
 
@@ -1047,7 +1116,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                 <button
                   type="button"
                   onClick={() => void saveEditedQuestions('draft')}
-                  disabled={batchSaving || dirtyQuestionCount === 0 || loading}
+                  disabled={batchSaving || statusSavingId !== null || dirtyQuestionCount === 0 || loading}
                   className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {batchSaving
@@ -1057,7 +1126,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                 <button
                   type="button"
                   onClick={() => void saveEditedQuestions('approve')}
-                  disabled={batchSaving || dirtyQuestionCount === 0 || loading}
+                  disabled={batchSaving || statusSavingId !== null || dirtyQuestionCount === 0 || loading}
                   className="rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {batchSaving
@@ -1267,6 +1336,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                           onClick={() => void handleRemoveSection(activeSection.key)}
                           disabled={
                             batchSaving ||
+                            statusSavingId !== null ||
                             sectionActionKey !== null ||
                             activeSectionHasPersistedApprovedQuestions
                           }
@@ -1369,10 +1439,12 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                 <button
                                   type="button"
                                   aria-pressed={question.applicable}
-                                  disabled={batchSaving}
+                                  disabled={batchSaving || statusSavingId !== null || (!question.exists && !question.templateKey)}
+                                  aria-busy={statusSavingId === question.id}
+                                  title={!question.exists && !question.templateKey ? 'Save this new question before changing its availability.' : undefined}
                                   onClick={(event) => {
                                     event.stopPropagation();
-                                    handleApplicableChange(
+                                    void handleApplicableChange(
                                       activeSection.key,
                                       question.id,
                                       !question.applicable,
@@ -1385,7 +1457,7 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                                   }`}
                                 >
                                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6 5.5a9 9 0 1 0 12 0" /></svg>
-                                  {question.applicable ? 'Make inactive' : 'Make active'}
+                                  {statusSavingId === question.id ? 'Saving…' : question.applicable ? 'Make inactive' : 'Make active'}
                                 </button>
                               </div>
                             </div>
@@ -1525,13 +1597,14 @@ export function ManualQAForm({ isOpen, onClose, categories, onSaved }: ManualQAF
                               <div className="flex items-center justify-end gap-2">
                                 {removalRequiresDisable && (
                                   <span className="text-[11px] font-semibold text-slate-500">
-                                    Make inactive and save before removal.
+                                    Make inactive before removal.
                                   </span>
                                 )}
                                 <button
                                   type="button"
                                   disabled={
                                     batchSaving ||
+                                    statusSavingId !== null ||
                                     questionActionId !== null ||
                                     removalRequiresDisable
                                   }

@@ -69,7 +69,7 @@ async function bootstrap(): Promise<void> {
 
   const port = env.PORT ?? env.API_PORT;
   await app.listen(port, '0.0.0.0');
-  logger.log(`Vaidya API listening on port ${port}`, 'Bootstrap');
+  logger.log(`Vaidhyaa API listening on port ${port}`, 'Bootstrap');
 }
 
 bootstrap().catch((error: unknown) => {

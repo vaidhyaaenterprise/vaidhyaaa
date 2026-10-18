@@ -57,9 +57,9 @@ const HIGH_ON_LOVE: ClinicProfile = {
 const UPDATED_CLINIC: ClinicProfile = {
   ...HIGH_ON_LOVE,
   name: 'High on care',
-  primary_phone: '+91 90000 00000',
+  primary_phone: '9000000000',
   address_line1: '42 Clinic Road',
-  address_line2: null,
+  address_line2: 'Near the bus stand',
   city: 'Coimbatore',
   postal_code: '641001',
 };
@@ -216,13 +216,13 @@ describe('ClinicProfileProvider', () => {
       target: { value: '  High on care  ' },
     });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Phone number' }), {
-      target: { value: '  +91 90000 00000  ' },
+      target: { value: '9000000000' },
     });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Address line 1' }), {
       target: { value: '  42 Clinic Road  ' },
     });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Address line 2' }), {
-      target: { value: '   ' },
+      target: { value: '  Near the bus stand  ' },
     });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'City' }), {
       target: { value: '  Coimbatore  ' },
@@ -231,7 +231,7 @@ describe('ClinicProfileProvider', () => {
       target: { value: '  Tamil Nadu  ' },
     });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Postal code' }), {
-      target: { value: '  641001  ' },
+      target: { value: '641001' },
     });
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Country' }), {
       target: { value: '  India  ' },
@@ -243,9 +243,9 @@ describe('ClinicProfileProvider', () => {
         '00000000-0000-0000-0000-000000000111',
         {
           name: 'High on care',
-          primary_phone: '+91 90000 00000',
+          primary_phone: '9000000000',
           address_line1: '42 Clinic Road',
-          address_line2: null,
+          address_line2: 'Near the bus stand',
           city: 'Coimbatore',
           state: 'Tamil Nadu',
           postal_code: '641001',
@@ -254,15 +254,20 @@ describe('ClinicProfileProvider', () => {
       );
     });
     expect(await screen.findByText('High on care')).toBeInTheDocument();
-    expect(screen.getByText('42 Clinic Road, Coimbatore, Tamil Nadu, 641001')).toBeInTheDocument();
-    expect(screen.getByText('Clinic line: +91 90000 00000')).toBeInTheDocument();
+    expect(
+      screen.getByText('42 Clinic Road, Near the bus stand, Coimbatore, Tamil Nadu, 641001'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Clinic line: 9000000000')).toBeInTheDocument();
     expect(screen.getByText('#1003')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Edit clinic details' })).not.toBeInTheDocument();
     expect(clinicApiMock.fetchClinicProfile).toHaveBeenCalledOnce();
   });
 
   it('keeps unsaved values in the dialog and preserves the ready profile when saving fails', async () => {
-    clinicApiMock.fetchClinicProfile.mockResolvedValue(HIGH_ON_LOVE);
+    clinicApiMock.fetchClinicProfile.mockResolvedValue({
+      ...HIGH_ON_LOVE,
+      address_line2: 'Near the park',
+    });
     clinicApiMock.patchClinicProfile.mockRejectedValue(new Error('Clinic update failed.'));
 
     render(

@@ -17,6 +17,7 @@ import { SlotGenerationService } from '../src/modules/slots/slot-generation.serv
 import { SlotHoldExpiryService } from '../src/modules/slots/slot-hold-expiry.service';
 import { SlotHoldService } from '../src/modules/slots/slot-hold.service';
 import { SlotRuleChangeImpactService } from '../src/modules/slots/slot-rule-change-impact.service';
+import { SlotReconciliationService } from '../src/modules/slots/slot-reconciliation.service';
 import { SlotService } from '../src/modules/slots/slot.service';
 
 import { prepareTestDatabase } from './db-setup';
@@ -56,13 +57,13 @@ describe('A03 expanded slot generation and hold jobs', () => {
   let slotService: SlotService;
   let slotHoldExpiry: SlotHoldExpiryService;
   let ruleChange: SlotRuleChangeImpactService;
+  let reconciliation: SlotReconciliationService;
   let jobExecutor: JobExecutorService;
   let muruganRuleId: string;
 
   beforeAll(async () => {
     process.env.DATABASE_URL =
-      process.env.TEST_DATABASE_URL ??
-      'postgresql://postgres:postgres@localhost:5433/vaidya_test';
+      process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test';
     process.env.QUEUE_MODE = 'inline';
     delete process.env.REDIS_URL;
 
@@ -75,6 +76,7 @@ describe('A03 expanded slot generation and hold jobs', () => {
     slotService = app.get(SlotService);
     slotHoldExpiry = app.get(SlotHoldExpiryService);
     ruleChange = app.get(SlotRuleChangeImpactService);
+    reconciliation = app.get(SlotReconciliationService);
     jobExecutor = app.get(JobExecutorService);
 
     const [rule] = await sql<{ id: string }[]>`
@@ -354,7 +356,9 @@ describe('A03 expanded slot generation and hold jobs', () => {
     });
 
     expect(hold.status).toBe('active');
-    expect(hold.holdExpiresAt.getTime()).toBeGreaterThanOrEqual(before + DEFAULT_HOLD_TTL_MS - 1000);
+    expect(hold.holdExpiresAt.getTime()).toBeGreaterThanOrEqual(
+      before + DEFAULT_HOLD_TTL_MS - 1000,
+    );
     expect(hold.holdExpiresAt.getTime()).toBeLessThanOrEqual(before + DEFAULT_HOLD_TTL_MS + 5000);
 
     const appointmentCount = assertRow(
@@ -419,7 +423,9 @@ describe('A03 expanded slot generation and hold jobs', () => {
     `;
 
     const results = await Promise.allSettled(
-      Array.from({ length: 4 }, () => slotHold.holdSlot({ clinicId: SEED.CLINIC_ID, slotId: slot.id })),
+      Array.from({ length: 4 }, () =>
+        slotHold.holdSlot({ clinicId: SEED.CLINIC_ID, slotId: slot.id }),
+      ),
     );
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(3);
@@ -650,9 +656,14 @@ describe('A03 expanded slot generation and hold jobs', () => {
     const slot = await firstFutureMuruganSlot();
     const originalCapacity = slot.capacity_total;
 
-    const result = await ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, originalCapacity + 1);
+    const result = await ruleChange.applyCapacityChange(
+      SEED.CLINIC_ID,
+      muruganRuleId,
+      originalCapacity + 1,
+    );
     expect(result.conflicts).toHaveLength(0);
-    expect(result.updated_slots).toBeGreaterThan(0);
+    expect(result.updated_slots).toBe(0);
+    expect(await reconciliation.drain(SEED.CLINIC_ID)).toBeGreaterThan(0);
 
     const updatedSlot = assertRow(
       (
@@ -665,6 +676,7 @@ describe('A03 expanded slot generation and hold jobs', () => {
     expect(updatedSlot.capacity_total).toBe(originalCapacity + 1);
 
     await ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, originalCapacity);
+    await reconciliation.drain(SEED.CLINIC_ID);
   });
 
   it('14. capacity decrease with no conflict succeeds', async () => {
@@ -673,6 +685,7 @@ describe('A03 expanded slot generation and hold jobs', () => {
 
     const result = await ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, 2);
     expect(result.conflicts).toHaveLength(0);
+    await reconciliation.drain(SEED.CLINIC_ID);
 
     const updatedSlot = assertRow(
       (
@@ -685,6 +698,7 @@ describe('A03 expanded slot generation and hold jobs', () => {
     expect(updatedSlot.capacity_total).toBe(2);
 
     await ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, 3);
+    await reconciliation.drain(SEED.CLINIC_ID);
   });
 
   it('15. capacity decrease with conflict blocks change', async () => {
@@ -724,7 +738,9 @@ describe('A03 expanded slot generation and hold jobs', () => {
     expect(preview.conflicts.length).toBeGreaterThan(0);
     expect(typeof preview.next_safe_implement_from).toBe('string');
 
-    await expect(ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, 1)).rejects.toMatchObject({
+    await expect(
+      ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, 1),
+    ).rejects.toMatchObject({
       code: 'CONFLICTING_APPOINTMENTS',
     });
 
@@ -818,7 +834,8 @@ describe('A03 expanded slot generation and hold jobs', () => {
 
     const result = await ruleChange.applyDurationChange(SEED.CLINIC_ID, muruganRuleId, 30);
     expect(result.conflicts).toHaveLength(0);
-    expect(result.superseded_slots).toBeGreaterThan(0);
+    expect(result.superseded_slots).toBe(0);
+    expect(await reconciliation.drain(SEED.CLINIC_ID)).toBeGreaterThan(0);
 
     const regenerated = await sql<{ minutes: number }[]>`
       SELECT EXTRACT(EPOCH FROM (end_time - start_time)) / 60 AS minutes
@@ -850,7 +867,12 @@ describe('A03 expanded slot generation and hold jobs', () => {
     `;
     expect(updatedRule?.slot_duration_minutes).toBe(30);
 
-    await ruleChange.applyDurationChange(SEED.CLINIC_ID, muruganRuleId, ruleBefore.slot_duration_minutes);
+    await ruleChange.applyDurationChange(
+      SEED.CLINIC_ID,
+      muruganRuleId,
+      ruleBefore.slot_duration_minutes,
+    );
+    await reconciliation.drain(SEED.CLINIC_ID);
   });
 
   it('17. duration change with conflict blocks change', async () => {
@@ -882,7 +904,9 @@ describe('A03 expanded slot generation and hold jobs', () => {
       'rule before blocked duration change',
     );
 
-    await expect(ruleChange.applyDurationChange(SEED.CLINIC_ID, muruganRuleId, 30)).rejects.toMatchObject({
+    await expect(
+      ruleChange.applyDurationChange(SEED.CLINIC_ID, muruganRuleId, 30),
+    ).rejects.toMatchObject({
       code: 'CONFLICTING_APPOINTMENTS',
     });
 
@@ -961,6 +985,7 @@ describe('A03 expanded slot generation and hold jobs', () => {
       implementFrom,
     );
     expect(applied.conflicts).toHaveLength(0);
+    await reconciliation.drain(SEED.CLINIC_ID);
 
     const [nearStatus] = await sql<{ status: string }[]>`
       SELECT status
@@ -1007,7 +1032,9 @@ describe('A03 expanded slot generation and hold jobs', () => {
       reasonForVisit: 'Follow up',
     });
 
-    await expect(ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, 1)).rejects.toMatchObject({
+    await expect(
+      ruleChange.applyCapacityChange(SEED.CLINIC_ID, muruganRuleId, 1),
+    ).rejects.toMatchObject({
       code: 'CONFLICTING_APPOINTMENTS',
     });
 

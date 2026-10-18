@@ -9,6 +9,35 @@ function installPrivateDependency(target: object, name: string, value: unknown):
 }
 
 describe('schedule slot synchronization', () => {
+  it('does not change clinic hours or slots when a doctor schedule blocks the edit', async () => {
+    const replaceClinicHours = vi.fn();
+    const generateSlots = vi.fn();
+    const service = Object.create(ClinicClinicalService.prototype) as ClinicClinicalService;
+    installPrivateDependency(service, 'repos', { clinicalSetup: { replaceClinicHours } });
+    installPrivateDependency(service, 'scheduleChangeImpact', {
+      previewClinicHoursReplace: vi.fn().mockResolvedValue({
+        blocked: true,
+        conflicts: [
+          {
+            reason: 'doctor_schedule_outside_clinic_hours',
+            doctor_schedule: {
+              doctor_name: 'Dr. Test',
+              day_of_week: 1,
+              start_time: '09:00',
+              end_time: '13:00',
+            },
+          },
+        ],
+      }),
+    });
+    installPrivateDependency(service, 'slotGeneration', { generateSlots });
+    await expect(service.replaceClinicHours('clinic-1', { windows: [] })).rejects.toMatchObject({
+      code: 'CONFLICTING_APPOINTMENTS',
+    });
+    expect(replaceClinicHours).not.toHaveBeenCalled();
+    expect(generateSlots).not.toHaveBeenCalled();
+  });
+
   it('honors doctor effective dates, creates new windows, and retires stale open windows', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-20T03:00:00.000Z'));
@@ -234,7 +263,7 @@ describe('schedule slot synchronization', () => {
     }
   });
 
-  it('regenerates every active doctor-service target after clinic hours are replaced', async () => {
+  it('commits clinic hours with a background slot update instead of generating synchronously', async () => {
     const replaceClinicHours = vi.fn().mockResolvedValue([]);
     const generateSlots = vi.fn().mockResolvedValue([]);
     const service = Object.create(ClinicClinicalService.prototype) as ClinicClinicalService;
@@ -242,17 +271,22 @@ describe('schedule slot synchronization', () => {
     installPrivateDependency(service, 'scheduleChangeImpact', {
       previewClinicHoursReplace: vi.fn().mockResolvedValue({ blocked: false, conflicts: [] }),
     });
-    installPrivateDependency(service, 'slotGeneration', { generateSlots });
+    const save = vi.fn(
+      async (_clinicId: string, _scope: unknown, mutate: (repos: unknown) => Promise<unknown>) =>
+        mutate({ clinicalSetup: { replaceClinicHours } }),
+    );
+    installPrivateDependency(service, 'slotReconciliation', { save });
 
     await service.replaceClinicHours('clinic-1', {
       windows: [{ day_of_week: 0, start_time: '09:00', end_time: '13:00', active: true }],
     });
 
     expect(replaceClinicHours).toHaveBeenCalledOnce();
-    expect(generateSlots).toHaveBeenCalledWith({ clinicId: 'clinic-1' });
+    expect(save).toHaveBeenCalledWith('clinic-1', {}, expect.any(Function));
+    expect(generateSlots).not.toHaveBeenCalled();
   });
 
-  it('does not hide a synchronization failure after doctor schedules are replaced', async () => {
+  it('does not report success when the durable slot job cannot be saved', async () => {
     const replaceDoctorSchedules = vi.fn().mockResolvedValue([]);
     const synchronizationFailure = new Error('slot synchronization failed');
     const service = Object.create(ClinicClinicalService.prototype) as ClinicClinicalService;
@@ -260,8 +294,8 @@ describe('schedule slot synchronization', () => {
     installPrivateDependency(service, 'scheduleChangeImpact', {
       previewDoctorSchedulesReplace: vi.fn().mockResolvedValue({ blocked: false, conflicts: [] }),
     });
-    installPrivateDependency(service, 'slotGeneration', {
-      generateSlots: vi.fn().mockRejectedValue(synchronizationFailure),
+    installPrivateDependency(service, 'slotReconciliation', {
+      save: vi.fn().mockRejectedValue(synchronizationFailure),
     });
 
     await expect(

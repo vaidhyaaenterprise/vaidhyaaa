@@ -105,7 +105,8 @@ export class AppointmentsController {
   ) {
     const parsed = manualAppointmentCreateSchema.safeParse(body);
     if (!parsed.success) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid manual appointment payload.');
+      const phoneIssue = parsed.error.issues.find((issue) => issue.path[0] === 'patient_phone');
+      throw new AppError('VALIDATION_ERROR', phoneIssue?.message ?? 'Invalid manual appointment payload.');
     }
     const auth = getAuthContext(request);
     const appointment = await this.appointmentAdminService.createManualAppointment(

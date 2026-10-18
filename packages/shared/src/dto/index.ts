@@ -84,6 +84,7 @@ export {
 
 export {
   clinicProfilePatchSchema,
+  clinicProfileDetailsSchema,
   clinicProfileResponseSchema,
   type ClinicProfilePatchInput,
   type ClinicProfileResponse,
@@ -123,6 +124,7 @@ export {
 
 export {
   bookingRuleResponseSchema,
+  MIN_SLOT_DURATION_MINUTES,
   createBookingRuleSchema,
   updateBookingRuleSchema,
   type BookingRuleResponse,

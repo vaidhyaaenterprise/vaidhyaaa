@@ -106,8 +106,8 @@ type TemplateRegistry = Record<MessageTemplateKey, Record<TemplateLanguageCode, 
 export const CODE_TEMPLATE_REGISTRY: TemplateRegistry = {
   'booking.greeting': {
     ta_tanglish:
-      'Vanakkam. {clinic_name} Vaidya pesuren. Enna problem-ku appointment venum?',
-    english: 'Hello. This is Vaidya from {clinic_name}. What problem do you need the appointment for?',
+      'Vanakkam. {clinic_name} Vaidhyaa pesuren. Enna problem-ku appointment venum?',
+    english: 'Hello. This is Vaidhyaa from {clinic_name}. What problem do you need the appointment for?',
   },
   'booking.ask_problem_or_doctor': {
     ta_tanglish: 'Endha doctor-a paakanum? Illena enna problem-ku appointment venum?',

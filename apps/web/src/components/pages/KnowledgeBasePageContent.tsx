@@ -281,7 +281,7 @@ export function KnowledgeBasePageContent() {
       <>
         <PageHeader
           title="Knowledge base"
-          description="Approved clinic Q&A that trains Vaidya's answers."
+          description="Approved clinic Q&A that trains Vaidhyaa's answers."
         />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Knowledge base is admin-only.</p>

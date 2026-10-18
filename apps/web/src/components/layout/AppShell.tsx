@@ -23,7 +23,7 @@ export function AppShell({ children }: AppShellProps) {
             V
           </div>
           <div>
-            <p className="text-[21px] font-bold text-white">Vaidya</p>
+            <p className="text-[21px] font-bold text-white">Vaidhyaa</p>
             <p className="text-[13px] text-slate-400">AI voice receptionist</p>
           </div>
         </div>

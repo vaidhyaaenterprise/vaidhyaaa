@@ -133,7 +133,7 @@ export class ClinicProfileController {
   ) {
     const parsed = clinicProfilePatchSchema.safeParse(body);
     if (!parsed.success) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid clinic profile payload.', {
+      throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message, {
         fields: parsed.error.issues,
       });
     }

@@ -9,7 +9,7 @@ export function CallInboxPageContent() {
     <>
       <PageHeader
         title="Call inbox"
-        description="Voice calls handled by Vaidya. Receptionist sees outcome, action, recording, and short summary."
+        description="Voice calls handled by Vaidhyaa. Receptionist sees outcome, action, recording, and short summary."
       />
       <PlaceholderPanel
         title="Call inbox"

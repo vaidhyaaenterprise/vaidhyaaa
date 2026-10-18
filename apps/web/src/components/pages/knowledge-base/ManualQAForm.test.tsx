@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ManualQAForm } from './ManualQAForm';
 import {
   createManualKnowledgeSection,
+  createManualKnowledgeEntry,
   fetchManualKnowledgeTemplate,
   patchKnowledgeEntry,
   removeManualKnowledgeQuestion,
@@ -47,6 +48,7 @@ vi.mock('@/lib/api/knowledge', () => ({
 }));
 
 const mockedCreateSection = vi.mocked(createManualKnowledgeSection);
+const mockedCreateEntry = vi.mocked(createManualKnowledgeEntry);
 const mockedFetchTemplate = vi.mocked(fetchManualKnowledgeTemplate);
 const mockedPatchKnowledgeEntry = vi.mocked(patchKnowledgeEntry);
 const mockedRemoveQuestion = vi.mocked(removeManualKnowledgeQuestion);
@@ -70,7 +72,7 @@ function templateQuestion(
     applicable: false,
     qa_approved: false,
     status: 'disabled',
-    source_file: 'Vaidya Clinic Knowledge Base Q&A Template',
+    source_file: 'Vaidhyaa Clinic Knowledge Base Q&A Template',
     source_page: null,
     embedding_status: 'not_required',
     embedding_model: null,
@@ -104,6 +106,7 @@ beforeEach(() => {
   mockedFetchTemplate.mockReset().mockResolvedValue(EMPTY_TEMPLATE);
   mockedPatchKnowledgeEntry.mockReset();
   mockedCreateSection.mockReset();
+  mockedCreateEntry.mockReset();
   mockedRemoveQuestion.mockReset();
   mockedRemoveSection.mockReset();
   mockedUpdateSection.mockReset();
@@ -114,6 +117,102 @@ afterEach(() => {
 });
 
 describe('ManualQAForm activation and approval', () => {
+  it.each([true, false])('automatically saves availability from active=%s without adding a draft edit', async (initialActive) => {
+    const initial = templateQuestion({
+      applicable: initialActive,
+      qa_approved: initialActive,
+      status: initialActive ? 'approved' : 'disabled',
+      ui_status: initialActive ? 'approved' : 'inactive',
+    });
+    mockedFetchTemplate.mockResolvedValue({ ...EMPTY_TEMPLATE,
+      sections: [{key: 'payment', title: 'Payment', questions: [initial]}],
+    });
+    mockedPatchKnowledgeEntry.mockResolvedValue(knowledgeRow({
+      applicable: !initialActive,
+      status: initialActive ? 'disabled' : 'pending_review',
+    }));
+    const onSaved = vi.fn();
+    render(<ManualQAForm isOpen onClose={vi.fn()} categories={[]} onSaved={onSaved} />);
+
+    fireEvent.click(await screen.findByRole('button', {name: initialActive ? 'Make inactive' : 'Make active'}));
+    expect(await screen.findByText(/saved automatically/)).toBeInTheDocument();
+    expect(mockedPatchKnowledgeEntry).toHaveBeenCalledOnce();
+    expect(mockedPatchKnowledgeEntry).toHaveBeenCalledWith(KNOWLEDGE_ID, {
+      applicable: !initialActive,
+      qa_approved: false,
+      status: initialActive ? 'disabled' : 'pending_review',
+    }, CLINIC_ID);
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Save Draft (0)'})).toBeDisabled();
+    expect(screen.getByRole('button', {name: 'Save & Approve Edited (0)'})).toBeDisabled();
+    expect(onSaved).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', {name: 'Remove question'})).toBeEnabled();
+    expect(screen.getByRole('button', {name: 'Remove section'})).toBeEnabled();
+  });
+
+  it('creates an unanswered starter row when disabling it and uses its saved ID on reactivation', async () => {
+    const starter = templateQuestion({
+      id: 'template:payment:Is UPI accepted?', exists: false, answer: '', applicable: true,
+      status: 'needs_update', ui_status: 'draft',
+    });
+    mockedFetchTemplate.mockResolvedValue({...EMPTY_TEMPLATE,
+      sections: [{key: 'payment', title: 'Payment', questions: [starter]}],
+    });
+    mockedCreateEntry.mockResolvedValue(knowledgeRow({answer: ''}));
+    mockedPatchKnowledgeEntry.mockResolvedValue(knowledgeRow({answer: '', applicable: true, status: 'needs_update'}));
+    render(<ManualQAForm isOpen onClose={vi.fn()} categories={[]} />);
+
+    fireEvent.click(await screen.findByRole('button', {name: 'Make inactive'}));
+    expect(await screen.findByText('Question made inactive and saved automatically.')).toBeInTheDocument();
+    expect(mockedCreateEntry).toHaveBeenCalledWith(expect.objectContaining({
+      template_key: starter.template_key, answer: '', applicable: false, qa_approved: false, status: 'disabled',
+    }));
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: 'Make active'}));
+    expect(await screen.findByText('Question made active and saved automatically.')).toBeInTheDocument();
+    expect(mockedPatchKnowledgeEntry).toHaveBeenCalledWith(KNOWLEDGE_ID, {
+      applicable: true, qa_approved: false, status: 'needs_update',
+    }, CLINIC_ID);
+    expect(mockedCreateEntry).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', {name: 'Save Draft (0)'})).toBeDisabled();
+  });
+
+  it('preserves answer edits made before and during availability autosave', async () => {
+    mockedFetchTemplate.mockResolvedValue({...EMPTY_TEMPLATE,
+      sections: [{key: 'payment', title: 'Payment', questions: [templateQuestion()]}],
+    });
+    let resolveSave!: (row: KnowledgeEntryApiRow) => void;
+    mockedPatchKnowledgeEntry.mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
+    render(<ManualQAForm isOpen onClose={vi.fn()} categories={[]} />);
+    const answer = await screen.findByDisplayValue('Yes, UPI payments are accepted.');
+    fireEvent.change(answer, {target: {value: 'An edited answer.'}});
+    fireEvent.click(screen.getByRole('button', {name: 'Make active'}));
+    expect(screen.getByRole('button', {name: 'Saving…'})).toBeDisabled();
+    expect(screen.getByRole('button', {name: 'Save Draft (1)'})).toBeDisabled();
+    fireEvent.change(answer, {target: {value: 'The latest edited answer.'}});
+    await act(async () => resolveSave(knowledgeRow({applicable: true, status: 'pending_review'})));
+
+    expect(screen.getByDisplayValue('The latest edited answer.')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Save Draft (1)'})).toBeEnabled();
+    expect(mockedPatchKnowledgeEntry.mock.calls[0]?.[1]).not.toHaveProperty('answer');
+  });
+
+  it('keeps the original availability and a retryable error if autosave fails', async () => {
+    mockedFetchTemplate.mockResolvedValue({...EMPTY_TEMPLATE,
+      sections: [{key: 'payment', title: 'Payment', questions: [templateQuestion()]}],
+    });
+    mockedPatchKnowledgeEntry.mockRejectedValueOnce(new Error('Offline'))
+      .mockResolvedValueOnce(knowledgeRow({applicable: true, status: 'pending_review'}));
+    render(<ManualQAForm isOpen onClose={vi.fn()} categories={[]} />);
+    fireEvent.click(await screen.findByRole('button', {name: 'Make active'}));
+    expect(await screen.findByText('Failed to save this question.')).toBeInTheDocument();
+    expect(screen.getByText('Inactive')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'Save Draft (0)'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', {name: 'Make active'}));
+    expect(await screen.findByText('Question made active and saved automatically.')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to save this question.')).not.toBeInTheDocument();
+  });
+
   it('removes an inactive section with legacy approval flags and keeps API errors in the dialog', async () => {
     mockedFetchTemplate.mockResolvedValue({
       ...EMPTY_TEMPLATE,
@@ -303,7 +402,7 @@ describe('ManualQAForm activation and approval', () => {
 
     expect(await screen.findByRole('button', { name: 'Remove question' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Remove section' })).toBeDisabled();
-    expect(screen.getByText('Make inactive and save before removal.')).toBeInTheDocument();
+    expect(screen.getByText('Make inactive before removal.')).toBeInTheDocument();
     expect(mockedRemoveQuestion).not.toHaveBeenCalled();
     expect(mockedRemoveSection).not.toHaveBeenCalled();
   });
@@ -326,7 +425,10 @@ describe('ManualQAForm activation and approval', () => {
         not_applicable: 1,
       },
     });
-    mockedPatchKnowledgeEntry.mockResolvedValue(
+    mockedPatchKnowledgeEntry.mockResolvedValueOnce(knowledgeRow({
+      applicable: true,
+      status: 'pending_review',
+    })).mockResolvedValueOnce(
       knowledgeRow({
         applicable: true,
         qa_approved: true,
@@ -365,6 +467,7 @@ describe('ManualQAForm activation and approval', () => {
     fireEvent.change(serviceSelect, { target: { value: 'Dental Consultation' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Make active' }));
+    await screen.findByText('Question made active and saved automatically.');
     expect(screen.getByText('Draft')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Save & Approve Edited \(1\)/ }));
 
@@ -380,7 +483,7 @@ describe('ManualQAForm activation and approval', () => {
         CLINIC_ID,
       );
     });
-    expect(mockedPatchKnowledgeEntry.mock.calls[0]?.[1]).not.toHaveProperty('source_notes');
+    expect(mockedPatchKnowledgeEntry.mock.calls[1]?.[1]).not.toHaveProperty('source_notes');
     const approvedRegion = screen.getByRole('region', {
       name: 'Approved questions in Payment',
     });
@@ -388,7 +491,7 @@ describe('ManualQAForm activation and approval', () => {
       within(approvedRegion).getByRole('button', { name: 'Is UPI accepted?' }),
     ).toBeInTheDocument();
     expect(screen.getByText('1 question approved successfully.')).toBeInTheDocument();
-    expect(onSaved).toHaveBeenCalledOnce();
+    expect(onSaved).toHaveBeenCalledTimes(2);
   });
 
   it('keeps an edited inactive question disabled instead of approving it', async () => {
@@ -416,7 +519,7 @@ describe('ManualQAForm activation and approval', () => {
         not_applicable: 0,
       },
     });
-    mockedPatchKnowledgeEntry.mockResolvedValue(
+    mockedPatchKnowledgeEntry.mockResolvedValueOnce(knowledgeRow()).mockResolvedValueOnce(
       knowledgeRow({
         answer: 'UPI is currently unavailable.',
         applicable: false,
@@ -438,6 +541,8 @@ describe('ManualQAForm activation and approval', () => {
 
     expect(await screen.findByText('Approved')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Make inactive' }));
+    await screen.findByText('Question made inactive and saved automatically.');
+    expect(screen.getByRole('button', { name: 'Save Draft (0)' })).toBeDisabled();
     fireEvent.change(screen.getByDisplayValue('Yes, UPI payments are accepted.'), {
       target: { value: 'UPI is currently unavailable.' },
     });

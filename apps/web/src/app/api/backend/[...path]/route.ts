@@ -1,8 +1,9 @@
 import { createRequestId, REQUEST_ID_HEADER, toApiErrorBody } from '@vaidya/shared';
-import type { NextRequest } from 'next/server';
+import { after, type NextRequest } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 const LOCAL_API_BASE_URL = 'http://127.0.0.1:3000';
 // Finish before the browser client's 20-second timeout so it receives a
@@ -149,6 +150,61 @@ async function proxyRequest(request: NextRequest, context: RouteContext): Promis
     }
 
     const upstreamResponse = await fetch(upstreamUrl, upstreamRequest);
+    // The settings write commits a durable job. Run it after returning the save response,
+    // using Next's request-lifetime support instead of an untracked fire-and-forget promise.
+    const clinicIndex = path.indexOf('clinics');
+    const clinicId = clinicIndex >= 0 ? path[clinicIndex + 1] : undefined;
+    const resource = clinicIndex >= 0 ? path[clinicIndex + 2] : undefined;
+    if (
+      upstreamResponse.ok &&
+      canHaveBody &&
+      clinicId &&
+      [
+        'hours',
+        'holidays',
+        'doctor-schedules',
+        'doctors',
+        'doctor-services',
+        'booking-rules',
+      ].includes(resource ?? '') &&
+      !path.includes('preview')
+    ) {
+      after(async () => {
+        try {
+          const deadline = Date.now() + 260_000;
+          const jobHeaders = new Headers(headers);
+          jobHeaders.set('content-type', 'application/json');
+          do {
+            const jobResponse = await fetch(
+              `${upstreamBaseUrl}/v1/clinics/${encodeURIComponent(clinicId)}/slot-reconciliation/run`,
+              {
+                method: 'POST',
+                headers: jobHeaders,
+                body: '{}',
+                cache: 'no-store',
+                redirect: 'manual',
+                signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())),
+              },
+            );
+            if (!jobResponse.ok)
+              console.error('Slot background runner failed.', {
+                clinicId,
+                status: jobResponse.status,
+              });
+            if (!jobResponse.ok) break;
+            const result = (await jobResponse.json()) as { data?: { remaining?: number } };
+            if (!result.data?.remaining || Date.now() + 10_000 >= deadline) break;
+            await new Promise((resolve) => setTimeout(resolve, 10_000));
+          } while (Date.now() < deadline);
+        } catch (error) {
+          // The committed outbox job remains pending and is recovered by the worker/cron.
+          console.error('Slot background runner interrupted; durable job retained.', {
+            clinicId,
+            error,
+          });
+        }
+      });
+    }
     const responseHeaders = new Headers(upstreamResponse.headers);
     for (const header of RESPONSE_HEADERS_TO_REMOVE) {
       responseHeaders.delete(header);

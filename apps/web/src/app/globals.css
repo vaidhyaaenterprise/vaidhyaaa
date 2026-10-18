@@ -29,6 +29,28 @@ code {
   @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.85em];
 }
 
+/* One consistently inset chevron, with room for long service names. */
+select:not([multiple]) {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2364758b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.875rem center;
+  background-size: 18px 18px;
+  padding-right: 2.75rem;
+  text-overflow: ellipsis;
+}
+
+input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /*
  * Portal layouts must respond to the space left after the desktop sidebar,
  * not to the browser viewport. These grids use the real content width, so a

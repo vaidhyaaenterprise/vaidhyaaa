@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { DigitsInput } from '@/components/ui/DigitsInput';
+import { RemoveIconButton } from '@/components/ui/RemoveIconButton';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
 import {
@@ -29,7 +31,7 @@ type Doctor = {
   serviceId: string;
   serviceKey: string;
   serviceName: string;
-  fee: number;
+  fee: number | string;
   active: boolean;
   userId: string | null;
 };
@@ -205,6 +207,9 @@ export function DoctorManagement() {
         if (!doctor.serviceKey) {
           throw new Error(`Select a service for ${doctorName}.`);
         }
+        if (String(doctor.fee).trim() === '' || !Number.isFinite(Number(doctor.fee)) || Number(doctor.fee) < 0) {
+          throw new Error(`Enter a valid consultation fee for ${doctorName}.`);
+        }
         if (
           !findPredefinedClinicService(doctor.serviceKey) &&
           !services.some((service) => service.key === doctor.serviceKey)
@@ -282,7 +287,7 @@ export function DoctorManagement() {
           throw new Error(`Could not save the selected service for ${doctorName}.`);
         }
 
-        const consultationFeeAmount = Number.isFinite(doctor.fee) ? doctor.fee : 0;
+        const consultationFeeAmount = Number(doctor.fee);
 
         if (doctor.id.startsWith('new-')) {
           if (!isActive()) {
@@ -700,11 +705,10 @@ export function DoctorManagement() {
                       <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                         Fee (Rs.)
                       </span>
-                      <input
-                        type="number"
+                      <DigitsInput
                         value={doctor.fee}
-                        onChange={(event) =>
-                          updateDoctor(doctor.id, 'fee', Number(event.target.value) || 0)
+                        onValueChange={(value) =>
+                          updateDoctor(doctor.id, 'fee', value)
                         }
                         placeholder="Fee"
                         aria-label={`Fee for ${doctor.name || 'new doctor'}`}
@@ -712,15 +716,11 @@ export function DoctorManagement() {
                         min={0}
                       />
                     </label>
-                    <div className="flex min-w-0 items-end">
-                      <button
-                        type="button"
+                    <div className="flex min-w-0 items-end justify-end">
+                      <RemoveIconButton
                         onClick={() => removeDoctor(doctor.id)}
-                        aria-label={`Remove ${doctor.name || 'new doctor'}`}
-                        className="doctor-remove-button w-full rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50"
-                      >
-                        Remove
-                      </button>
+                        label={`Remove ${doctor.name || 'new doctor'}`}
+                      />
                     </div>
                   </div>
                 );

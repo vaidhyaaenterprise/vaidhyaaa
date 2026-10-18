@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { replaceDoctorSchedulesSchema } from '@vaidya/shared';
+import { RemoveIconButton } from '@/components/ui/RemoveIconButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -10,10 +12,12 @@ import {
   fetchDoctorSchedules,
   fetchDoctors,
   replaceDoctorSchedules,
+  replaceAllDoctorSchedules,
 } from '@/lib/api/clinic-clinical';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 import { dayLabel, dayNumber } from '@/lib/clinic-scheduling';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { ScheduleConflictPanel } from './ScheduleConflictPanel';
 
 type DoctorScheduleSlot = {
   id: string;
@@ -49,6 +53,7 @@ export function DoctorSchedule() {
   const [tempSchedules, setTempSchedules] = useState<DoctorScheduleSlot[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const authenticatedDoctorId = useMemo(
     () =>
@@ -126,12 +131,20 @@ export function DoctorSchedule() {
     setConflicts([]);
     setError(null);
     setSaving(false);
+    setNotice(null);
     void loadSchedules();
     return cancelLoad;
   }, [cancelLoad, loadSchedules]);
 
   const handleEdit = () => {
-    setTempSchedules(schedules);
+    setTempSchedules(
+      currentDoctorId === 'all'
+        ? schedules
+            .filter((row) => row.doctorId === doctors[0]?.id)
+            .map((row) => ({ ...row, doctorId: 'all' }))
+        : schedules,
+    );
+    setNotice(null);
     setConflicts([]);
     setError(null);
     setIsEditing(true);
@@ -146,9 +159,8 @@ export function DoctorSchedule() {
     if (!clinicId || !isActive()) {
       return;
     }
-    const doctorId =
-      currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : doctors[0]?.id;
-    if (!doctorId) {
+    const doctorId = currentDoctorId;
+    if (!doctorId || doctors.length === 0) {
       return;
     }
 
@@ -164,7 +176,15 @@ export function DoctorSchedule() {
     setSaving(true);
     setError(null);
     try {
-      const updatedRows = await replaceDoctorSchedules(clinicId, doctorId, windows);
+      const parsed = replaceDoctorSchedulesSchema.safeParse({ windows });
+      if (!parsed.success) {
+        setError(parsed.error.issues[0]?.message ?? 'Check the doctor working hours.');
+        return;
+      }
+      const updatedRows =
+        doctorId === 'all'
+          ? await replaceAllDoctorSchedules(clinicId, windows)
+          : await replaceDoctorSchedules(clinicId, doctorId, windows);
       if (!isActive()) {
         return;
       }
@@ -176,11 +196,15 @@ export function DoctorSchedule() {
         endTime: normalizeTime(row.end_time),
         active: row.active,
       }));
-      const nextSchedules = [...schedules.filter((row) => row.doctorId !== doctorId), ...updated];
+      const nextSchedules =
+        doctorId === 'all'
+          ? updated
+          : [...schedules.filter((row) => row.doctorId !== doctorId), ...updated];
       setSchedules(nextSchedules);
       setTempSchedules(nextSchedules);
       setIsEditing(false);
       setConflicts([]);
+      setNotice('Working hours saved. Appointment slots are updating in the background.');
     } catch (err) {
       if (!isActive()) {
         return;
@@ -201,8 +225,7 @@ export function DoctorSchedule() {
   };
 
   const addScheduleSlot = (day: string) => {
-    const doctorId =
-      currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : doctors[0]?.id;
+    const doctorId = currentDoctorId;
     if (!doctorId) {
       return;
     }
@@ -244,8 +267,7 @@ export function DoctorSchedule() {
     return schedules.filter((s) => s.doctorId === doctorId && s.day === day && s.active);
   };
 
-  const editingDoctorId =
-    currentDoctorId && currentDoctorId !== 'all' ? currentDoctorId : (doctors[0]?.id ?? '');
+  const editingDoctorId = currentDoctorId ?? '';
 
   if (loading) {
     return (
@@ -294,6 +316,7 @@ export function DoctorSchedule() {
             Select doctor
           </label>
           <select
+            disabled={isEditing || saving}
             value={selectedDoctorId}
             onChange={(e) => {
               setSelectedDoctorId(e.target.value);
@@ -310,6 +333,12 @@ export function DoctorSchedule() {
             ))}
           </select>
         </div>
+      )}
+
+      {notice && (
+        <p role="status" className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800">
+          {notice}
+        </p>
       )}
 
       {!isEditing ? (
@@ -368,24 +397,22 @@ export function DoctorSchedule() {
         </div>
       ) : (
         <div className="space-y-4">
+          {currentDoctorId === 'all' && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Start with the first doctor’s hours, then edit below. Saving replaces the existing
+              weekly schedules of all {doctors.length} active doctors. To change only one doctor,
+              cancel and select that doctor first.
+            </p>
+          )}
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
               {error}
             </p>
           )}
-          {conflicts.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-              <h4 className="mb-2 text-sm font-bold text-red-800">⚠ Conflicts detected</h4>
-              <ul className="space-y-1 text-sm text-red-700">
-                {conflicts.map((conflict, idx) => (
-                  <li key={idx}>• {conflict}</li>
-                ))}
-              </ul>
-              <p className="mt-2 text-xs text-red-600">
-                Resolve or reschedule the listed appointments, then recheck and save this schedule.
-              </p>
-            </div>
-          )}
+          <ScheduleConflictPanel
+            conflicts={conflicts}
+            guidance="Choose doctor working hours within clinic hours and reschedule any affected appointments before saving."
+          />
 
           <div className="space-y-3">
             {DAYS.map((day) => {
@@ -439,13 +466,10 @@ export function DoctorSchedule() {
                               className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                             />
                           </label>
-                          <button
-                            type="button"
+                          <RemoveIconButton
                             onClick={() => removeScheduleSlot(slot.id)}
-                            className="w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 sm:w-auto"
-                          >
-                            Remove
-                          </button>
+                            label={`Remove ${day} doctor schedule ${slot.startTime}–${slot.endTime}`}
+                          />
                         </div>
                       ))}
                     </div>

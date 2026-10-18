@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { clinicProfileDetailsSchema } from '@vaidya/shared';
+import { DigitsInput } from '@/components/ui/DigitsInput';
 
 import type { ClinicProfile, ClinicProfilePatch } from '@/lib/api/clinic-settings';
 
@@ -25,7 +27,13 @@ type ClinicProfileForm = {
 function formFromProfile(profile: ClinicProfile): ClinicProfileForm {
   return {
     name: profile.name,
-    primary_phone: profile.primary_phone ?? '',
+    primary_phone: (profile.primary_phone ?? '').replace(
+      /^\+91[\s-]*([0-9\s-]+)$/,
+      (_match, local: string) => {
+        const digits = local.replace(/[\s-]/g, '');
+        return digits.length === 10 ? digits : (profile.primary_phone ?? '');
+      },
+    ),
     address_line1: profile.address_line1 ?? '',
     address_line2: profile.address_line2 ?? '',
     city: profile.city ?? '',
@@ -33,11 +41,6 @@ function formFromProfile(profile: ClinicProfile): ClinicProfileForm {
     postal_code: profile.postal_code ?? '',
     country: profile.country ?? '',
   };
-}
-
-function optionalValue(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed || null;
 }
 
 const inputClassName =
@@ -49,6 +52,10 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
   const [form, setForm] = useState<ClinicProfileForm>(() => formFromProfile(profile));
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof ClinicProfileForm, string>>>(
+    {},
+  );
+  const formRef = useRef<HTMLFormElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const isSavingRef = useRef(false);
 
@@ -74,11 +81,40 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
   const updateField = (field: keyof ClinicProfileForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
     setSaveError(null);
+    setFieldErrors((current) => ({ ...current, [field]: undefined }));
   };
+
+  const fieldAttributes = (field: keyof ClinicProfileForm) => ({
+    required: true,
+    name: field,
+    'aria-invalid': Boolean(fieldErrors[field]),
+    'aria-describedby': fieldErrors[field] ? `clinic-profile-${field}-error` : undefined,
+  });
+  const fieldError = (field: keyof ClinicProfileForm) =>
+    fieldErrors[field] ? (
+      <p id={`clinic-profile-${field}-error`} className="mt-1 text-sm font-medium text-red-700">
+        {fieldErrors[field]}
+      </p>
+    ) : null;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSaving) {
+      return;
+    }
+
+    const parsed = clinicProfileDetailsSchema.safeParse(form);
+    if (!parsed.success) {
+      const errors: Partial<Record<keyof ClinicProfileForm, string>> = {};
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0] as keyof ClinicProfileForm;
+        errors[field] ??= issue.message;
+      }
+      setFieldErrors(errors);
+      setSaveError('Please complete all required fields and correct the highlighted details.');
+      const firstField = parsed.error.issues[0]?.path[0];
+      if (typeof firstField === 'string')
+        formRef.current?.querySelector<HTMLInputElement>(`[name="${firstField}"]`)?.focus();
       return;
     }
 
@@ -87,16 +123,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
     setSaveError(null);
 
     try {
-      await onSave({
-        name: form.name.trim(),
-        primary_phone: optionalValue(form.primary_phone),
-        address_line1: optionalValue(form.address_line1),
-        address_line2: optionalValue(form.address_line2),
-        city: optionalValue(form.city),
-        state: optionalValue(form.state),
-        postal_code: optionalValue(form.postal_code),
-        country: optionalValue(form.country),
-      });
+      await onSave(parsed.data);
       isSavingRef.current = false;
       setIsSaving(false);
       onClose();
@@ -137,15 +164,25 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
           <p className="mt-1 text-sm text-slate-500">
             Update the clinic information shown to staff and patients.
           </p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            All fields are required. Enter a 10-digit phone number without +91 and a 6-digit PIN
+            code.
+          </p>
         </div>
 
-        <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={(event) => void handleSubmit(event)}
+          className="space-y-4"
+        >
           <div>
             <label htmlFor="clinic-profile-name" className={labelClassName}>
               Clinic name
             </label>
             <input
               ref={nameInputRef}
+              {...fieldAttributes('name')}
               id="clinic-profile-name"
               type="text"
               value={form.name}
@@ -154,24 +191,26 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
               autoComplete="organization"
               maxLength={160}
               disabled={isSaving}
-              required
             />
+            {fieldError('name')}
           </div>
 
           <div>
             <label htmlFor="clinic-profile-phone" className={labelClassName}>
               Phone number
             </label>
-            <input
+            <DigitsInput
+              {...fieldAttributes('primary_phone')}
               id="clinic-profile-phone"
-              type="tel"
               value={form.primary_phone}
-              onChange={(event) => updateField('primary_phone', event.target.value)}
+              onValueChange={(value) => updateField('primary_phone', value)}
               className={inputClassName}
               autoComplete="tel"
-              maxLength={30}
+              minLength={10}
+              maxLength={10}
               disabled={isSaving}
             />
+            {fieldError('primary_phone')}
           </div>
 
           <div>
@@ -179,6 +218,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
               Address line 1
             </label>
             <input
+              {...fieldAttributes('address_line1')}
               id="clinic-profile-address-line-1"
               type="text"
               value={form.address_line1}
@@ -188,6 +228,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
               maxLength={255}
               disabled={isSaving}
             />
+            {fieldError('address_line1')}
           </div>
 
           <div>
@@ -195,6 +236,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
               Address line 2
             </label>
             <input
+              {...fieldAttributes('address_line2')}
               id="clinic-profile-address-line-2"
               type="text"
               value={form.address_line2}
@@ -204,6 +246,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
               maxLength={255}
               disabled={isSaving}
             />
+            {fieldError('address_line2')}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -212,6 +255,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
                 City
               </label>
               <input
+                {...fieldAttributes('city')}
                 id="clinic-profile-city"
                 type="text"
                 value={form.city}
@@ -221,6 +265,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
                 maxLength={120}
                 disabled={isSaving}
               />
+              {fieldError('city')}
             </div>
 
             <div>
@@ -228,6 +273,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
                 State
               </label>
               <input
+                {...fieldAttributes('state')}
                 id="clinic-profile-state"
                 type="text"
                 value={form.state}
@@ -237,22 +283,25 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
                 maxLength={120}
                 disabled={isSaving}
               />
+              {fieldError('state')}
             </div>
 
             <div>
               <label htmlFor="clinic-profile-postal-code" className={labelClassName}>
                 Postal code
               </label>
-              <input
+              <DigitsInput
+                {...fieldAttributes('postal_code')}
                 id="clinic-profile-postal-code"
-                type="text"
                 value={form.postal_code}
-                onChange={(event) => updateField('postal_code', event.target.value)}
+                onValueChange={(value) => updateField('postal_code', value)}
                 className={inputClassName}
                 autoComplete="postal-code"
-                maxLength={30}
+                minLength={6}
+                maxLength={6}
                 disabled={isSaving}
               />
+              {fieldError('postal_code')}
             </div>
 
             <div>
@@ -260,6 +309,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
                 Country
               </label>
               <input
+                {...fieldAttributes('country')}
                 id="clinic-profile-country"
                 type="text"
                 value={form.country}
@@ -269,6 +319,7 @@ export function ClinicProfileEditModal({ profile, onSave, onClose }: ClinicProfi
                 maxLength={120}
                 disabled={isSaving}
               />
+              {fieldError('country')}
             </div>
           </div>
 

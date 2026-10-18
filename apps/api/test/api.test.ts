@@ -11,7 +11,7 @@ import { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestApp } from './test-app';
 import { prepareTestDatabase } from './db-setup';
 
-describe('Vaidya API bootstrap', () => {
+describe('Vaidhyaa API bootstrap', () => {
   let app: NestFastifyApplication;
 
   beforeAll(async () => {

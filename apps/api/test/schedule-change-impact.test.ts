@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ScheduleChangeImpactService } from '../src/modules/slots/schedule-change-impact.service';
+import { ScheduleChangeImpactService, scheduleWindowFitsClinicHours } from '../src/modules/slots/schedule-change-impact.service';
 
 function installPrivateDependency(target: object, name: string, value: unknown): void {
   Object.defineProperty(target, name, { value });
@@ -30,6 +30,7 @@ function createService(input: {
     serviceName: string | null;
     status: string;
   }>;
+  activeDoctorSchedules?: Array<{ doctorName: string; dayOfWeek: number; startTime: string; endTime: string }>;
 }) {
   const appointmentLifecycle = {
     listFutureActiveAppointments: vi.fn().mockResolvedValue(input.appointments ?? []),
@@ -38,6 +39,8 @@ function createService(input: {
   const clinicalSetup = {
     listClinicHours: vi.fn().mockResolvedValue(input.clinicHours ?? []),
     listDoctorSchedules: vi.fn().mockResolvedValue(input.doctorSchedules ?? []),
+    listActiveDoctorScheduleWindows: vi.fn().mockResolvedValue(input.activeDoctorSchedules ?? []),
+    listActiveDoctors: vi.fn().mockResolvedValue([{id: 'doctor-1', name: 'Dr. Test'}]),
   };
   const service = Object.create(
     ScheduleChangeImpactService.prototype,
@@ -255,6 +258,7 @@ describe('schedule change impact', () => {
 
   it('blocks a doctor schedule contraction and scopes the lookup to that doctor', async () => {
     const { service, appointmentLifecycle } = createService({
+      clinicHours: [mondayHours],
       doctorSchedules: [
         {
           ...mondayHours,
@@ -287,6 +291,7 @@ describe('schedule change impact', () => {
 
   it('allows a doctor schedule expansion that preserves existing coverage', async () => {
     const { service } = createService({
+      clinicHours: [0, 1].map((dayOfWeek) => ({...mondayHours, dayOfWeek, startTime: '08:00:00', endTime: '14:00:00'})),
       doctorSchedules: [
         {
           ...mondayHours,
@@ -305,6 +310,45 @@ describe('schedule change impact', () => {
     });
 
     expect(result).toEqual({ blocked: false, conflicts: [] });
+  });
+
+  it('blocks removing clinic hours when a doctor is scheduled even without bookings', async () => {
+    const { service } = createService({clinicHours: [mondayHours], activeDoctorSchedules: [{
+      doctorName: 'Dr. Test', dayOfWeek: 1, startTime: '09:00:00', endTime: '12:00:00',
+    }]});
+    const result = await service.previewClinicHoursReplace('clinic-1', {windows: []});
+    expect(result).toEqual({blocked: true, conflicts: [{
+      reason: 'doctor_schedule_outside_clinic_hours',
+      doctor_schedule: {doctor_name: 'Dr. Test', day_of_week: 1, start_time: '09:00:00', end_time: '12:00:00'},
+    }]});
+  });
+
+  it('rejects doctor hours outside clinic hours even with no appointments', async () => {
+    const { service } = createService({clinicHours: [mondayHours]});
+    const result = await service.previewDoctorSchedulesReplace('clinic-1', 'doctor-1', {
+      windows: [{day_of_week: 1, start_time: '08:00', end_time: '12:00', active: true}],
+    });
+    expect(result.blocked).toBe(true);
+    expect(result.conflicts[0]).toMatchObject({
+      reason: 'doctor_schedule_outside_clinic_hours', doctor_schedule: {doctor_name: 'Dr. Test'},
+    });
+  });
+
+  it.each([
+    { ranges: [['09:00', '13:00'], ['13:00', '17:00']], expected: true },
+    { ranges: [['09:00', '13:00'], ['14:00', '17:00']], expected: false },
+    { ranges: [['09:00', '17:00']], expected: true },
+  ])('checks full doctor-window coverage, including breaks: $expected', ({ranges, expected}) => {
+    expect(scheduleWindowFitsClinicHours({day_of_week: 1, start_time: '12:00', end_time: '15:00'},
+      ranges.map(([start_time, end_time]) => ({day_of_week: 1, start_time: start_time!, end_time: end_time!})),
+    )).toBe(expected);
+  });
+
+  it('ignores inactive clinic windows and uses the correct day', () => {
+    expect(scheduleWindowFitsClinicHours({day_of_week: 1, start_time: '09:00', end_time: '12:00'}, [
+      {day_of_week: 1, start_time: '09:00', end_time: '13:00', active: false},
+      {day_of_week: 2, start_time: '09:00', end_time: '13:00'},
+    ])).toBe(false);
   });
 
   it('includes readable appointment details in holiday conflicts', async () => {

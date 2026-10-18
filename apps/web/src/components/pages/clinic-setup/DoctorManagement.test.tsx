@@ -142,6 +142,23 @@ afterEach(() => {
 });
 
 describe('DoctorManagement predefined services', () => {
+  it('keeps a cleared fee blank, validates it, and saves a fresh numeric fee', async () => {
+    render(<DoctorManagement />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const fee = screen.getByRole('textbox', { name: 'Fee for Dr. Merp' });
+    fireEvent.change(fee, { target: { value: '' } });
+    expect(fee).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Enter a valid consultation fee for Dr. Merp.')).toBeInTheDocument();
+    expect(mockedPatchDoctorService).not.toHaveBeenCalled();
+    expect(mockedPatchService).not.toHaveBeenCalled();
+    fireEvent.change(fee, { target: { value: '750' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockedPatchDoctorService).toHaveBeenCalledWith(
+      CLINIC_ID, MAPPING_ID, expect.objectContaining({ consultation_fee_amount: 750 }),
+    ));
+  });
+
   it('uses the full setup-grid width while the doctor editor is open', async () => {
     render(<DoctorManagement />);
 
@@ -207,7 +224,7 @@ describe('DoctorManagement predefined services', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Service for Dr. New' }), {
       target: { value: 'dermatology_consultation' },
     });
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Fee for Dr. New' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Fee for Dr. New' }), {
       target: { value: '750' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -327,7 +344,7 @@ describe('DoctorManagement predefined services', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Service for Dr. Replacement' }), {
       target: { value: 'general_consultation' },
     });
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Fee for Dr. Replacement' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Fee for Dr. Replacement' }), {
       target: { value: '900' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

@@ -1,4 +1,4 @@
-import { eq, desc, and, isNull, or } from 'drizzle-orm';
+import { eq, desc, and, isNull, inArray } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -138,16 +138,19 @@ export class ClinicsRepository {
 
   findClinicByPhone(phone: string) {
     const digits = phone.replace(/\D/g, '');
+    const nationalDigits =
+      digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+    const variants = new Set([digits, phone, `+${digits}`]);
+    // Clinic editing uses ten digits; telephony integrations may still send E.164.
+    if (nationalDigits.length === 10) {
+      variants.add(nationalDigits);
+      variants.add(`91${nationalDigits}`);
+      variants.add(`+91${nationalDigits}`);
+    }
     return this.db
       .select()
       .from(clinics)
-      .where(
-        or(
-          eq(clinics.primaryPhone, digits),
-          eq(clinics.primaryPhone, phone),
-          eq(clinics.primaryPhone, `+${digits}`),
-        ),
-      )
+      .where(inArray(clinics.primaryPhone, [...variants]))
       .limit(1);
   }
 

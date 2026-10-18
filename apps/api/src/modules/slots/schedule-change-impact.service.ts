@@ -133,6 +133,32 @@ function normalizeWindowTime(value: string): string {
   return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
 }
 
+/** A doctor window must fit wholly inside the union of that day's clinic windows. */
+export function scheduleWindowFitsClinicHours(
+  window: ScheduleWindow,
+  clinicWindows: ScheduleWindow[],
+): boolean {
+  const start = normalizeWindowTime(window.start_time);
+  const end = normalizeWindowTime(window.end_time);
+  if (end <= start) return false;
+  const ranges = clinicWindows
+    .filter(
+      (candidate) => candidate.active !== false && candidate.day_of_week === window.day_of_week,
+    )
+    .map((candidate) => ({
+      start: normalizeWindowTime(candidate.start_time),
+      end: normalizeWindowTime(candidate.end_time),
+    }))
+    .sort((a, b) => a.start.localeCompare(b.start));
+  let coveredUntil = start;
+  for (const range of ranges) {
+    if (range.start > coveredUntil) break;
+    if (range.end > coveredUntil) coveredUntil = range.end;
+    if (coveredUntil >= end) return true;
+  }
+  return false;
+}
+
 function appointmentFitsWindows(
   appointment: ScheduleAppointment,
   windows: ScheduleWindow[],
@@ -274,8 +300,9 @@ export class ScheduleChangeImpactService {
   async previewClinicHoursReplace(
     clinicId: string,
     input: ReplaceClinicHoursInput,
+    repos: Repositories = this.repos,
   ): Promise<{ blocked: boolean; conflicts: ScheduleConflictItem[] }> {
-    const conflicts = await this.findHoursConflicts(clinicId, input.windows);
+    const conflicts = await this.findHoursConflicts(clinicId, input.windows, repos);
     return { blocked: conflicts.length > 0, conflicts };
   }
 
@@ -283,10 +310,12 @@ export class ScheduleChangeImpactService {
     clinicId: string,
     doctorId: string,
     input: ReplaceDoctorSchedulesInput,
+    repos: Repositories = this.repos,
   ): Promise<{ blocked: boolean; conflicts: ScheduleConflictItem[] }> {
-    const [currentRows, appointments] = await Promise.all([
-      this.repos.clinicalSetup.listDoctorSchedules(clinicId, doctorId),
-      this.repos.appointmentLifecycle.listFutureActiveAppointments(clinicId, doctorId),
+    const [currentRows, appointments, clinicRows] = await Promise.all([
+      repos.clinicalSetup.listDoctorSchedules(clinicId, doctorId),
+      repos.appointmentLifecycle.listFutureActiveAppointments(clinicId, doctorId),
+      repos.clinicalSetup.listClinicHours(clinicId),
     ]);
     const currentWindows: ScheduleWindow[] = currentRows.map((window) => ({
       day_of_week: window.dayOfWeek,
@@ -296,7 +325,7 @@ export class ScheduleChangeImpactService {
       effective_from: window.effectiveFrom,
       effective_to: window.effectiveTo,
     }));
-    const conflicts = findNewlyExcludedScheduleAppointments(
+    const conflicts: ScheduleConflictItem[] = findNewlyExcludedScheduleAppointments(
       appointments,
       currentWindows,
       input.windows,
@@ -306,11 +335,42 @@ export class ScheduleChangeImpactService {
       reason: 'outside_doctor_hours',
     }));
 
+    const clinicWindows = clinicRows.map((window) => ({
+      day_of_week: window.dayOfWeek,
+      start_time: window.startTime,
+      end_time: window.endTime,
+      active: window.active,
+    }));
+    const outsideWindows = input.windows.filter(
+      (window) => window.active !== false && !scheduleWindowFitsClinicHours(window, clinicWindows),
+    );
+    if (outsideWindows.length > 0) {
+      const doctors = await repos.clinicalSetup.listActiveDoctors(clinicId);
+      const doctorName =
+        doctors.find((doctor) => doctor.id === doctorId)?.name ?? 'Selected doctor';
+      conflicts.push(
+        ...outsideWindows.map((window) => ({
+          reason: 'doctor_schedule_outside_clinic_hours',
+          doctor_schedule: {
+            doctor_name: doctorName,
+            day_of_week: window.day_of_week,
+            start_time: window.start_time,
+            end_time: window.end_time,
+          },
+        })),
+      );
+    }
+
     return { blocked: conflicts.length > 0, conflicts };
   }
 
-  async previewHolidayDate(clinicId: string, holidayDate: string, doctorIds?: string[]) {
-    const rows = await this.repos.appointmentLifecycle.listActiveAppointmentsOnDate(
+  async previewHolidayDate(
+    clinicId: string,
+    holidayDate: string,
+    doctorIds?: string[],
+    repos: Repositories = this.repos,
+  ) {
+    const rows = await repos.appointmentLifecycle.listActiveAppointmentsOnDate(
       clinicId,
       holidayDate,
       doctorIds,
@@ -327,10 +387,12 @@ export class ScheduleChangeImpactService {
   private async findHoursConflicts(
     clinicId: string,
     windows: ReplaceClinicHoursInput['windows'],
+    repos: Repositories = this.repos,
   ): Promise<ScheduleConflictItem[]> {
-    const [currentRows, appointments] = await Promise.all([
-      this.repos.clinicalSetup.listClinicHours(clinicId),
-      this.repos.appointmentLifecycle.listFutureActiveAppointments(clinicId),
+    const [currentRows, appointments, doctorSchedules] = await Promise.all([
+      repos.clinicalSetup.listClinicHours(clinicId),
+      repos.appointmentLifecycle.listFutureActiveAppointments(clinicId),
+      repos.clinicalSetup.listActiveDoctorScheduleWindows(clinicId),
     ]);
     const currentWindows: ScheduleWindow[] = currentRows.map((window) => ({
       day_of_week: window.dayOfWeek,
@@ -339,12 +401,28 @@ export class ScheduleChangeImpactService {
       active: window.active,
     }));
 
-    return findNewlyExcludedScheduleAppointments(appointments, currentWindows, windows).map(
-      (appointment) => ({
-        appointment_id: appointment.id,
-        appointment: appointmentConflictDetails(appointment),
-        reason: 'outside_clinic_hours',
-      }),
-    );
+    const conflicts: ScheduleConflictItem[] = findNewlyExcludedScheduleAppointments(
+      appointments,
+      currentWindows,
+      windows,
+    ).map((appointment) => ({
+      appointment_id: appointment.id,
+      appointment: appointmentConflictDetails(appointment),
+      reason: 'outside_clinic_hours',
+    }));
+    for (const schedule of doctorSchedules) {
+      const window = {
+        day_of_week: schedule.dayOfWeek,
+        start_time: schedule.startTime,
+        end_time: schedule.endTime,
+      };
+      if (!scheduleWindowFitsClinicHours(window, windows)) {
+        conflicts.push({
+          reason: 'doctor_schedule_outside_clinic_hours',
+          doctor_schedule: { doctor_name: schedule.doctorName, ...window },
+        });
+      }
+    }
+    return conflicts;
   }
 }

@@ -18,6 +18,7 @@ import {
 } from '@vaidya/db';
 import {
   AppError,
+  clinicProfileDetailsSchema,
   type ClinicProfilePatchInput,
   type ClinicSettingsPatchInput,
 } from '@vaidya/shared';
@@ -61,6 +62,22 @@ export class ClinicSettingsService {
 
   async patchClinicProfile(clinicId: string, patch: ClinicProfilePatchInput, actorUserId: string) {
     const current = await this.dbService.findClinicById(clinicId);
+    const validated = clinicProfileDetailsSchema.safeParse({
+      name: current.name,
+      primary_phone: current.primaryPhone,
+      address_line1: current.addressLine1,
+      address_line2: current.addressLine2,
+      city: current.city,
+      state: current.state,
+      postal_code: current.postalCode,
+      country: current.country,
+      ...patch,
+    });
+    if (!validated.success) {
+      throw new AppError('VALIDATION_ERROR', validated.error.issues[0]!.message, {
+        fields: validated.error.issues,
+      });
+    }
     const [updated] = await this.repos.clinics.updateClinicProfile(clinicId, {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.primary_phone !== undefined ? { primaryPhone: patch.primary_phone } : {}),

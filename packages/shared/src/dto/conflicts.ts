@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { appointmentStatusSchema } from '../enums/appointment-statuses';
-import { uuidSchema } from './common';
+import { dayOfWeekSchema, timeSchema, uuidSchema } from './common';
 
 const clinicLocalTimestampSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/);
 
@@ -17,6 +17,12 @@ export const scheduleConflictAppointmentSchema = z.object({
 export const scheduleConflictItemSchema = z.object({
   appointment_id: uuidSchema.optional(),
   appointment: scheduleConflictAppointmentSchema.optional(),
+  doctor_schedule: z.object({
+    doctor_name: z.string().min(1),
+    day_of_week: dayOfWeekSchema,
+    start_time: timeSchema,
+    end_time: timeSchema,
+  }).optional(),
   slot_id: uuidSchema.optional(),
   slot_start: clinicLocalTimestampSchema.optional(),
   slot_end: clinicLocalTimestampSchema.optional(),

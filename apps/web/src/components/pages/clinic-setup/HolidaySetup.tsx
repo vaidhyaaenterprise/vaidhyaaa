@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { RemoveIconButton } from '@/components/ui/RemoveIconButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -14,6 +15,7 @@ import {
 } from '@/lib/api/clinic-clinical';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { ScheduleConflictPanel } from './ScheduleConflictPanel';
 
 type Holiday = {
   id: string;
@@ -87,6 +89,7 @@ export function HolidaySetup() {
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const doctorNameById = useMemo(
@@ -146,6 +149,7 @@ export function HolidaySetup() {
 
   useEffect(() => {
     setIsEditing(false);
+    setNotice(null);
     setConflicts([]);
     setError(null);
     setSaving(false);
@@ -154,6 +158,7 @@ export function HolidaySetup() {
   }, [cancelLoad, loadHolidays]);
 
   const handleEdit = () => {
+    setNotice(null);
     setTempHolidays(holidays);
     setConflicts([]);
     setError(null);
@@ -242,6 +247,7 @@ export function HolidaySetup() {
 
       setIsEditing(false);
       setConflicts([]);
+      setNotice('Holidays saved. Appointment slots are updating in the background.');
     } catch (err) {
       if (!isActive()) {
         return;
@@ -261,6 +267,8 @@ export function HolidaySetup() {
   };
 
   const addHoliday = () => {
+    setConflicts([]);
+    setError(null);
     const newHoliday: Holiday = {
       id: `new-${Date.now()}`,
       date: '',
@@ -273,10 +281,14 @@ export function HolidaySetup() {
   };
 
   const removeHoliday = (id: string) => {
+    setConflicts([]);
+    setError(null);
     setTempHolidays(tempHolidays.filter((holiday) => holiday.id !== id));
   };
 
   const updateHoliday = (id: string, patch: Partial<Holiday>) => {
+    setConflicts([]);
+    setError(null);
     setTempHolidays((prev) =>
       prev.map((holiday) => (holiday.id === id ? { ...holiday, ...patch } : holiday)),
     );
@@ -296,7 +308,7 @@ export function HolidaySetup() {
     updateHoliday(holidayId, { doctorIds: Array.from(selected) });
   };
 
-  const toggleHolidayActive = async (id: string) => {
+  const removeSavedHoliday = async (id: string) => {
     if (!clinicId || !isActive()) {
       return;
     }
@@ -305,18 +317,23 @@ export function HolidaySetup() {
       return;
     }
 
+    setSaving(true);
+    setError(null);
     try {
-      await patchHoliday(clinicId, id, { active: !holiday.active });
+      await patchHoliday(clinicId, id, { active: false });
       if (!isActive()) {
         return;
       }
-      await loadHolidays();
+      setHolidays((rows) => rows.filter((row) => row.id !== id));
+      setNotice('Holiday removed. Appointment slots are updating in the background.');
     } catch (err) {
       if (isActive()) {
         setError(
-          err instanceof ApiRequestError ? err.apiError.message : 'Failed to update holiday.',
+          err instanceof ApiRequestError ? err.apiError.message : 'Failed to remove holiday.',
         );
       }
+    } finally {
+      if (isActive()) setSaving(false);
     }
   };
 
@@ -379,6 +396,11 @@ export function HolidaySetup() {
         )}
       </div>
 
+      {notice && (
+        <p role="status" className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800">
+          {notice}
+        </p>
+      )}
       {!isEditing ? (
         <div className="space-y-2">
           {holidays.length === 0 ? (
@@ -408,10 +430,11 @@ export function HolidaySetup() {
                     </p>
                   </div>
                   <button
-                    onClick={() => void toggleHolidayActive(holiday.id)}
+                    onClick={() => void removeSavedHoliday(holiday.id)}
+                    disabled={saving}
                     className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
                   >
-                    Disable
+                    Remove
                   </button>
                 </div>
               ))
@@ -425,17 +448,10 @@ export function HolidaySetup() {
             </p>
           )}
 
-          {conflicts.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-              <h4 className="mb-2 text-sm font-bold text-red-800">Conflicts detected</h4>
-              <ul className="space-y-1 text-sm text-red-700">
-                {conflicts.map((conflict, idx) => (
-                  <li key={idx}>- {conflict}</li>
-                ))}
-              </ul>
-              <p className="mt-2 text-xs text-red-600">Please resolve conflicts before saving.</p>
-            </div>
-          )}
+          <ScheduleConflictPanel
+            conflicts={conflicts}
+            guidance="Reschedule the affected appointments before adding this holiday."
+          />
 
           <div className="space-y-3">
             {tempHolidays.map((holiday) => (
@@ -456,12 +472,10 @@ export function HolidaySetup() {
                     aria-label="Holiday reason"
                     className="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                   />
-                  <button
+                  <RemoveIconButton
                     onClick={() => removeHoliday(holiday.id)}
-                    className="w-full shrink-0 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 sm:w-auto"
-                  >
-                    Remove
-                  </button>
+                    label={`Remove holiday ${holiday.reason || holiday.date}`}
+                  />
                 </div>
 
                 <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -518,10 +532,10 @@ export function HolidaySetup() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleSave()}
-              disabled={conflicts.length > 0 || saving}
+              disabled={saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : conflicts.length > 0 ? 'Recheck and save' : 'Save'}
             </button>
             <button
               onClick={handleCancel}

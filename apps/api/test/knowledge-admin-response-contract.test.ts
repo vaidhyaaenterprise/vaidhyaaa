@@ -14,7 +14,7 @@ function knowledgeRow(overrides: Record<string, unknown> = {}) {
     category: 'communication',
     alternativePhrasesJson: [],
     sourceFileId: null,
-    sourceFile: 'Vaidya Clinic Knowledge Base Q&A Template',
+    sourceFile: 'Vaidhyaa Clinic Knowledge Base Q&A Template',
     sourcePage: null,
     templateKey: 'communication::Can I share photos or documents before visit?',
     sectionKey: 'communication',
@@ -40,6 +40,41 @@ function knowledgeRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('KnowledgeAdminService response contract', () => {
+  it('loads five starter questions per predefined section for a new clinic', async () => {
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    Reflect.set(service, 'repos', { knowledge: {
+      listManualTemplateEntries: vi.fn().mockResolvedValue([]),
+      listKnowledgeSections: vi.fn().mockResolvedValue([]),
+    } });
+
+    const template = await service.listManualTemplate(CLINIC_ID);
+    const predefinedSections = template.sections.filter((section) => section.key !== 'custom');
+    expect(predefinedSections).toHaveLength(7);
+    expect(predefinedSections.map((section) => section.questions.length)).toEqual([5, 5, 5, 5, 5, 5, 5]);
+    expect(template.summary.total).toBe(35);
+    expect(template.sections.find((section) => section.key === 'custom')?.questions).toEqual([]);
+  });
+
+  it('omits unanswered legacy starter rows even with stale approval flags while keeping clinic answers', async () => {
+    const service = Object.create(KnowledgeAdminService.prototype) as KnowledgeAdminService;
+    const legacyRows = [
+      knowledgeRow({ id: 'legacy-blank', templateKey: 'communication::Legacy question', answer: '', qaApproved: true }),
+      knowledgeRow({ id: 'legacy-disabled', templateKey: 'communication::Legacy disabled question', answer: '  ', status: 'disabled', applicable: false }),
+      knowledgeRow({ id: 'legacy-answered', templateKey: 'communication::Legacy answered question', answer: 'Contact the clinic.' }),
+    ];
+    Reflect.set(service, 'repos', { knowledge: {
+      listManualTemplateEntries: vi.fn().mockResolvedValue(legacyRows),
+      listKnowledgeSections: vi.fn().mockResolvedValue([]),
+    } });
+
+    const template = await service.listManualTemplate(CLINIC_ID);
+    const questions = template.sections.find((section) => section.key === 'communication')!.questions;
+    expect(questions).toHaveLength(6);
+    expect(questions.map((question) => question.id)).not.toContain('legacy-blank');
+    expect(questions.map((question) => question.id)).not.toContain('legacy-disabled');
+    expect(questions.map((question) => question.id)).toContain('legacy-answered');
+  });
+
   it('rejects removal of an approved question until it is disabled', async () => {
     const findKnowledgeEntry = vi
       .fn()

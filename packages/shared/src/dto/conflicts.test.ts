@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { scheduleConflictItemSchema } from './conflicts';
 
 describe('schedule conflict contract', () => {
+  it('accepts doctor availability details without a booked appointment', () => {
+    const result = scheduleConflictItemSchema.parse({
+      reason: 'doctor_schedule_outside_clinic_hours',
+      doctor_schedule: {doctor_name: 'Dr. Test', day_of_week: 1, start_time: '09:00', end_time: '13:00'},
+    });
+    expect(result.doctor_schedule?.doctor_name).toBe('Dr. Test');
+    expect(result.appointment).toBeUndefined();
+  });
   it('accepts safe appointment display details', () => {
     const result = scheduleConflictItemSchema.parse({
       appointment_id: '00000000-0000-0000-0000-000000000123',

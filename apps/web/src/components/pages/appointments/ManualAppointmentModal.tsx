@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { DigitsInput } from '@/components/ui/DigitsInput';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import {
   fetchAvailableAppointmentSlots,
@@ -487,7 +488,7 @@ export function ManualAppointmentModal({
     const normalizedPatientName = normalizeName(formData.patientName);
     const hasDob = formData.patientDateOfBirth.trim().length > 0;
 
-    if (hasDob || phoneDigits.length < 8 || normalizedPatientName.length < 2) {
+    if (hasDob || phoneDigits.length !== 10 || normalizedPatientName.length < 2) {
       setFollowupIdentityHint(null);
       setCheckingFollowupIdentity(false);
       return;
@@ -580,6 +581,11 @@ export function ManualAppointmentModal({
     }
 
     const parsedAge = Number.parseInt(formData.patientAge.trim(), 10);
+
+    if (!/^[0-9]{10}$/.test(formData.patientPhone)) {
+      setSubmitError('Enter a 10-digit patient phone number without a country code.');
+      return;
+    }
 
     if (
       !formData.patientName ||
@@ -780,17 +786,22 @@ export function ManualAppointmentModal({
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+            <label htmlFor="manual-patient-phone" className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
               Patient phone *
             </label>
-            <input
-              type="tel"
+            <DigitsInput
+              id="manual-patient-phone"
               value={formData.patientPhone}
-              onChange={(e) => setFormData({ ...formData, patientPhone: e.target.value })}
-              placeholder="+91 98765 43210"
+              onValueChange={(value) => setFormData({ ...formData, patientPhone: value })}
+              placeholder="9876543210"
+              minLength={10}
+              maxLength={10}
+              autoComplete="tel-national"
+              aria-describedby="manual-patient-phone-help"
               className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
               required
             />
+            <p id="manual-patient-phone-help" className="mt-1.5 text-xs text-slate-500">Enter 10 digits without a country code.</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -798,12 +809,11 @@ export function ManualAppointmentModal({
               <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
                 Patient age *
               </label>
-              <input
-                type="number"
+              <DigitsInput
                 min={0}
                 max={130}
                 value={formData.patientAge}
-                onChange={(e) => setFormData({ ...formData, patientAge: e.target.value })}
+                onValueChange={(value) => setFormData({ ...formData, patientAge: value })}
                 placeholder="e.g. 38"
                 className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 required

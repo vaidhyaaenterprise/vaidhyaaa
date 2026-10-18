@@ -21,6 +21,7 @@ import {
   slotHolds,
 } from '../schema';
 import { ACTIVE_APPOINTMENT_STATUSES, ACTIVE_HOLD_STATUS } from '../services/slot-capacity';
+import { slotConfigurationReady } from '../services/slot-configuration-ready';
 
 function clinicLocalNow(clinicId: string) {
   return sql`(
@@ -177,7 +178,13 @@ export class SlotsRepository {
     return this.db
       .select()
       .from(appointmentSlots)
-      .where(and(eq(appointmentSlots.clinicId, clinicId), eq(appointmentSlots.id, slotId)))
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          eq(appointmentSlots.id, slotId),
+          slotConfigurationReady(),
+        ),
+      )
       .limit(1);
   }
 
@@ -199,6 +206,7 @@ export class SlotsRepository {
           eq(appointmentSlots.startTime, startTime),
           eq(appointmentSlots.endTime, endTime),
           ne(appointmentSlots.status, 'superseded'),
+          slotConfigurationReady(),
           sql`NOT EXISTS (
             SELECT 1
             FROM clinic_holidays h
@@ -473,6 +481,7 @@ export class SlotsRepository {
       eq(appointmentSlots.doctorId, doctorId),
       eq(appointmentSlots.clinicServiceId, clinicServiceId),
       eq(appointmentSlots.status, 'open'),
+      slotConfigurationReady(),
       gt(appointmentSlots.startTime, clinicLocalNow(clinicId)),
     ];
     if (date) {
@@ -532,6 +541,7 @@ export class SlotsRepository {
           eq(appointmentSlots.clinicServiceId, clinicServiceId),
           eq(appointmentSlots.status, 'open'),
           sql`${appointmentSlots.startTime} = ${startTime}`,
+          slotConfigurationReady(),
           sql`NOT EXISTS (
             SELECT 1
             FROM clinic_holidays h
@@ -762,11 +772,7 @@ export class SlotsRepository {
       .returning();
   }
 
-  findActiveHoldForSession(
-    clinicId: string,
-    sessionId: string,
-    db: Database = this.db,
-  ) {
+  findActiveHoldForSession(clinicId: string, sessionId: string, db: Database = this.db) {
     return db
       .select()
       .from(slotHolds)

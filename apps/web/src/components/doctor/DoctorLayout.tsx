@@ -54,7 +54,7 @@ export function DoctorLayout({ children }: { children: ReactNode }) {
               V
             </div>
             <div>
-              <p className="text-xl font-extrabold text-white">Vaidya</p>
+              <p className="text-xl font-extrabold text-white">Vaidhyaa</p>
               <p className="text-xs text-slate-400">Doctor Portal</p>
             </div>
           </div>

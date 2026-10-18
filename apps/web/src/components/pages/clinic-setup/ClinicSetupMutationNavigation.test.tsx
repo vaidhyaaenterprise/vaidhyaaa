@@ -140,13 +140,76 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Clinic Setup mutation navigation safety', () => {
+  it.each([
+    'Slot duration (minutes)',
+    'Capacity per slot',
+    'Booking horizon (days)',
+    'Edit cutoff (minutes before start)',
+    'Max edit shift (minutes)',
+  ])('keeps %s digits-only and allows clearing and typing fresh', async (label) => {
+    render(<BookingRules />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const input = screen.getByRole('textbox', { name: label });
+    expect(input).toHaveAttribute('type', 'text');
+    expect(input).toHaveAttribute('inputmode', 'numeric');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).toHaveValue('');
+    for (const invalid of ['e', '-', '+', '.', '1e2', 'abc']) {
+      fireEvent.change(input, { target: { value: invalid } });
+      expect(input).toHaveValue('');
+    }
+    fireEvent.change(input, { target: { value: '25' } });
+    expect(input).toHaveValue('25');
+  });
+
+  it.each(['0', '5', '10', '14'])(
+    'rejects a slot duration of %s minutes before any API update',
+    async (duration) => {
+      render(<BookingRules />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Slot duration (minutes)'), {
+        target: { value: duration },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect(
+        await screen.findByText('Slot duration must be a number between 15 and 120.'),
+      ).toBeInTheDocument();
+      expect(mockedPatchBookingRule).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows blank booking numbers during editing and validates before sending a numeric update', async () => {
+    mockedPatchBookingRule.mockImplementation(async (_clinicId, ruleId, patch) => ({
+      ...FIRST_RULE,
+      id: ruleId,
+      ...patch,
+    }));
+    render(<BookingRules />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const horizon = screen.getByRole('textbox', { name: 'Booking horizon (days)' });
+    fireEvent.change(horizon, { target: { value: '' } });
+    expect(horizon).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(
+      await screen.findByText('Booking horizon must be a number between 1 and 180.'),
+    ).toBeInTheDocument();
+    expect(mockedPatchBookingRule).not.toHaveBeenCalled();
+    fireEvent.change(horizon, { target: { value: '45' } });
+    expect(horizon).toHaveValue('45');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockedPatchBookingRule).toHaveBeenCalledTimes(2));
+    expect(mockedPatchBookingRule).toHaveBeenCalledWith(FIRST_CLINIC_ID, FIRST_RULE.id, {
+      booking_horizon_days: 45,
+    });
+  });
+
   it('does not patch later booking rules or settings after an A-B-A clinic switch', async () => {
     const firstPatch = deferred<BookingRuleApiRow>();
     mockedPatchBookingRule.mockReturnValueOnce(firstPatch.promise);
 
     const { rerender } = render(<BookingRules />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getAllByRole('spinbutton')[2]!, { target: { value: '45' } });
+    fireEvent.change(screen.getAllByRole('textbox')[2]!, { target: { value: '45' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Allow doctor service edit' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -176,7 +239,7 @@ describe('Clinic Setup mutation navigation safety', () => {
 
     const { rerender } = render(<HolidaySetup />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    for (const removeButton of screen.getAllByRole('button', { name: 'Remove' })) {
+    for (const removeButton of screen.getAllByRole('button', { name: /^Remove holiday / })) {
       fireEvent.click(removeButton);
     }
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

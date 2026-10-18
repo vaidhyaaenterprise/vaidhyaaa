@@ -40,7 +40,7 @@ describe('knowledge mutation response normalization', () => {
         category: 'communication',
         alternativePhrasesJson: [],
         sourceFileId: null,
-        sourceFile: 'Vaidya Clinic Knowledge Base Q&A Template',
+        sourceFile: 'Vaidhyaa Clinic Knowledge Base Q&A Template',
         sourcePage: null,
         templateKey: 'communication::Can I share photos or documents before visit?',
         sectionKey: 'communication',

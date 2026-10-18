@@ -1,6 +1,6 @@
-# Vaidya
+# Vaidhyaa
 
-Vaidya is a text-first, voice-ready clinic receptionist platform.
+Vaidhyaa is a text-first, voice-ready clinic receptionist platform.
 
 ## Monorepo layout
 
@@ -48,6 +48,12 @@ The root Vercel project deploys the Next.js web application only. The Nest API m
 Use a separate Supabase/staging database for Vercel Preview deployments. If Preview must temporarily share the production project, it must still use the Transaction pooler URL; never configure Production and Preview with the session-pooler URL.
 
 For production background jobs, use `QUEUE_MODE=bullmq`, provide `REDIS_URL`, and run `pnpm --filter @vaidya/api worker` as a separate persistent worker service. Run `pnpm db:migrate` as a release step rather than on every application startup.
+
+Clinic hours, doctor schedules, holidays and booking-rule changes save their configuration with a durable slot-reconciliation job in the existing `background_jobs` table. The web API proxy runs these jobs with Next.js `after()` after returning the save response. Slot generation and retirement do not delay Save; appointment-conflict validation still runs before accepting the change. Affected slots cannot be offered or booked until reconciliation completes.
+
+For recovery after a serverless timeout or process restart, keep the persistent worker above running (it also polls slot-reconciliation jobs, with or without Redis), **or** configure a scheduler to call `GET /internal/jobs/slot-reconciliation` on the API at least once per minute with `Authorization: Bearer <CRON_SECRET>`. Set `CRON_SECRET` on the API only; the endpoint rejects calls when it is unset. Scheduling frequency depends on your hosting plan. No new migration is required. Failed jobs retry up to five times with backoff; exhausted failures appear in platform job health and keep stale slots unavailable. After resolving the underlying failure, replay them with `pnpm --filter @vaidya/api jobs:run slot-reconciliation --retry-failed`. Normal recovery/draining can be run with `pnpm --filter @vaidya/api jobs:run slot-reconciliation`.
+
+Saving **All doctors** replaces the weekly schedules of every currently active doctor in that clinic, in one transaction, after validating every doctor’s appointments and clinic-hour coverage. It does not create a default for doctors added later. Select one doctor before editing to change only that doctor.
 
 Tests are the only supported local-database workflow. Set `NODE_ENV=test`/`APP_ENV=local` and use `TEST_DATABASE_URL` for the test Postgres container.
 

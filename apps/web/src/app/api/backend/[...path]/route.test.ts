@@ -1,10 +1,16 @@
-import { NextRequest } from 'next/server';
+import { after, NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { GET, POST } from './route';
 
+vi.mock('next/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: vi.fn(),
+}));
+
 describe('API proxy route', () => {
   afterEach(() => {
+    vi.mocked(after).mockClear();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -37,6 +43,34 @@ describe('API proxy route', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store, private');
     await expect(response.json()).resolves.toMatchObject({ data: { ok: true } });
+  });
+
+  it('returns a successful save before running authenticated slot work after the response', async () => {
+    vi.stubEnv('API_BASE_URL', 'https://api.example.test');
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () => Response.json({ data: { holidays: [], remaining: 0 } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await POST(
+      new NextRequest('https://web.example.test/api/backend/v1/clinics/clinic-1/holidays', {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token' },
+        body: '{}',
+      }),
+      { params: Promise.resolve({ path: ['v1', 'clinics', 'clinic-1', 'holidays'] }) },
+    );
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const callback = vi.mocked(after).mock.calls.at(-1)?.[0] as () => Promise<void>;
+    expect(callback).toBeTypeOf('function');
+    await callback();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.example.test/v1/clinics/clinic-1/slot-reconciliation/run',
+      expect.objectContaining({ method: 'POST', body: '{}' }),
+    );
+    const headers = fetchMock.mock.calls.at(-1)?.[1].headers as Headers;
+    expect(headers.get('authorization')).toBe('Bearer test-token');
+    expect(headers.get('content-type')).toBe('application/json');
   });
 
   it('uses the same-server API default outside Vercel and returns structured failures', async () => {

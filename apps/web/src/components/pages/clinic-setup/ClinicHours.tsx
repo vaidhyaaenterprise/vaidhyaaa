@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { RemoveIconButton } from '@/components/ui/RemoveIconButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
@@ -9,6 +10,7 @@ import { ApiRequestError } from '@/lib/api/client';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
 import { dayLabel, dayNumber } from '@/lib/clinic-scheduling';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { ScheduleConflictPanel } from './ScheduleConflictPanel';
 
 type TimeSlot = {
   id: string;
@@ -42,6 +44,7 @@ export function ClinicHours() {
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const { beginLoad, cancelLoad, isActive } = useAbortableLoad(clinicId ?? '');
 
   const loadHours = useCallback(async () => {
@@ -83,6 +86,7 @@ export function ClinicHours() {
 
   useEffect(() => {
     setIsEditing(false);
+    setNotice(null);
     setConflicts([]);
     setError(null);
     setSaving(false);
@@ -91,6 +95,7 @@ export function ClinicHours() {
   }, [cancelLoad, loadHours]);
 
   const handleEdit = () => {
+    setNotice(null);
     setTempHours(clinicHours);
     setConflicts([]);
     setError(null);
@@ -128,6 +133,7 @@ export function ClinicHours() {
       setTempHours(saved);
       setIsEditing(false);
       setConflicts([]);
+      setNotice('Clinic hours saved. Appointment slots are updating in the background.');
     } catch (err) {
       if (!isActive()) {
         return;
@@ -229,6 +235,11 @@ export function ClinicHours() {
         )}
       </div>
 
+      {notice && (
+        <p role="status" className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800">
+          {notice}
+        </p>
+      )}
       {!isEditing ? (
         <div className="space-y-2">
           {DAYS.map((day) => {
@@ -255,19 +266,10 @@ export function ClinicHours() {
               {error}
             </p>
           )}
-          {conflicts.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-              <h4 className="mb-2 text-sm font-bold text-red-800">⚠ Conflicts detected</h4>
-              <ul className="space-y-1 text-sm text-red-700">
-                {conflicts.map((conflict, idx) => (
-                  <li key={idx}>• {conflict}</li>
-                ))}
-              </ul>
-              <p className="mt-2 text-xs text-red-600">
-                Resolve or reschedule the listed appointments, then recheck and save these hours.
-              </p>
-            </div>
-          )}
+          <ScheduleConflictPanel
+            conflicts={conflicts}
+            guidance="Doctor working hours must stay within clinic hours. Adjust the affected doctor's schedule, or add a holiday for a date-specific closure. Reschedule affected appointments before saving."
+          />
 
           <div className="space-y-3">
             {DAYS.map((day) => {
@@ -315,13 +317,10 @@ export function ClinicHours() {
                               className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                             />
                           </label>
-                          <button
-                            type="button"
+                          <RemoveIconButton
                             onClick={() => removeTimeSlot(slot.id)}
-                            className="w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 sm:w-auto"
-                          >
-                            Remove
-                          </button>
+                            label={`Remove ${day} clinic hours ${slot.startTime}–${slot.endTime}`}
+                          />
                         </div>
                       ))}
                     </div>

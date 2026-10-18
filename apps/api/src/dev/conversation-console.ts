@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   let currentClinicId = clinicId();
   let phone = process.env.PATIENT_PHONE ?? DEFAULT_PHONE;
 
-  output.write(`Vaidya conversation console\nAPI: ${apiBaseUrl()}\nClinic: ${currentClinicId}\n`);
+  output.write(`Vaidhyaa conversation console\nAPI: ${apiBaseUrl()}\nClinic: ${currentClinicId}\n`);
   printHelp();
 
   try {

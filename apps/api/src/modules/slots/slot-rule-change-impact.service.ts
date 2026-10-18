@@ -7,12 +7,12 @@ import {
   formatTimeInTimezone,
   type Repositories,
 } from '@vaidya/db';
-import { AppError } from '@vaidya/shared';
+import { AppError, MIN_SLOT_DURATION_MINUTES } from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 import type { DatabaseConnection } from '@vaidya/db';
 
-import { SlotGenerationService } from './slot-generation.service';
+import { SlotReconciliationService } from './slot-reconciliation.service';
 
 export type RuleChangeConflict = {
   slot_id: string;
@@ -71,7 +71,7 @@ export class SlotRuleChangeImpactService {
 
   constructor(
     @Inject(DATABASE_CONNECTION) connection: DatabaseConnection,
-    @Inject(SlotGenerationService) private readonly slotGenerationService: SlotGenerationService,
+    @Inject(SlotReconciliationService) private readonly reconciliation: SlotReconciliationService,
   ) {
     this.repos = createRepositories(connection.db);
   }
@@ -115,23 +115,43 @@ export class SlotRuleChangeImpactService {
       );
     }
 
-    const updatedSlots = await this.repos.slots.updateFutureOpenSlotCapacity(
+    await this.reconciliation.save(
       clinicId,
-      ruleId,
-      newCapacity,
-      rule.version,
-      normalizedImplementFrom,
+      {
+        doctorId: rule.doctorId,
+        clinicServiceId: rule.clinicServiceId,
+        ruleChange: {
+          ruleId,
+          durationChanged: false,
+          ...(normalizedImplementFrom ? { implementFrom: normalizedImplementFrom } : {}),
+        },
+      },
+      async (repos) => {
+        const currentConflicts = await this.findCapacityConflicts(
+          clinicId,
+          ruleId,
+          newCapacity,
+          normalizedImplementFrom,
+          repos,
+        );
+        if (currentConflicts.length > 0)
+          throw new AppError(
+            'CONFLICTING_APPOINTMENTS',
+            'Capacity decrease would conflict with occupancy.',
+            { conflicts: currentConflicts },
+          );
+        const [currentRule] = await repos.slots.findBookingRule(clinicId, ruleId);
+        return repos.slots.updateBookingRule(clinicId, ruleId, {
+          capacityPerSlot: newCapacity,
+          version: (currentRule?.version ?? rule.version) + 1,
+          ...(normalizedImplementFrom
+            ? { effectiveFrom: datePartOfTimestamp(normalizedImplementFrom) }
+            : {}),
+        });
+      },
     );
 
-    await this.repos.slots.updateBookingRule(clinicId, ruleId, {
-      capacityPerSlot: newCapacity,
-      version: rule.version + 1,
-      ...(normalizedImplementFrom
-        ? { effectiveFrom: datePartOfTimestamp(normalizedImplementFrom) }
-        : {}),
-    });
-
-    return { updated_slots: updatedSlots.length, conflicts: [] as RuleChangeConflict[] };
+    return { updated_slots: 0, conflicts: [] as RuleChangeConflict[] };
   }
 
   async applyDurationChange(
@@ -148,6 +168,15 @@ export class SlotRuleChangeImpactService {
     newDurationMinutes: number,
     implementFrom?: string,
   ): Promise<{ superseded_slots: number; conflicts: RuleChangeConflict[] }> {
+    if (
+      !Number.isSafeInteger(newDurationMinutes) ||
+      newDurationMinutes < MIN_SLOT_DURATION_MINUTES
+    ) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Slot duration must be a whole number of at least 15 minutes.',
+      );
+    }
     const normalizedImplementFrom = implementFrom
       ? normalizeClinicLocalTimestamp(implementFrom)
       : undefined;
@@ -189,22 +218,54 @@ export class SlotRuleChangeImpactService {
       );
     }
 
-    await this.repos.slots.supersedeFutureOpenSlots(clinicId, ruleId, normalizedImplementFrom);
-    await this.repos.slots.updateBookingRule(clinicId, ruleId, {
-      slotDurationMinutes: newDurationMinutes,
-      version: rule.version + 1,
-      ...(normalizedImplementFrom
-        ? { effectiveFrom: datePartOfTimestamp(normalizedImplementFrom) }
-        : {}),
-    });
-
-    await this.slotGenerationService.generateSlots({
+    await this.reconciliation.save(
       clinicId,
-      doctorId: rule.doctorId,
-      clinicServiceId: rule.clinicServiceId,
-    });
+      {
+        doctorId: rule.doctorId,
+        clinicServiceId: rule.clinicServiceId,
+        ruleChange: {
+          ruleId,
+          durationChanged: true,
+          ...(normalizedImplementFrom ? { implementFrom: normalizedImplementFrom } : {}),
+        },
+      },
+      async (repos) => {
+        const currentSlots = await repos.slots.listFutureOpenSlotsForRule(
+          clinicId,
+          ruleId,
+          normalizedImplementFrom,
+        );
+        const occupancy = await this.getOccupancyBySlot(
+          clinicId,
+          currentSlots.map((slot) => slot.id),
+          repos,
+        );
+        const currentConflicts = currentSlots
+          .filter((slot) => (occupancy.get(slot.id) ?? 0) > 0)
+          .map((slot) => ({
+            slot_id: slot.id,
+            slot_start: slot.startTime,
+            slot_end: slot.endTime,
+            reason: 'future_occupancy_blocks_duration_change',
+          }));
+        if (currentConflicts.length > 0)
+          throw new AppError(
+            'CONFLICTING_APPOINTMENTS',
+            'Duration change would conflict with future occupancy.',
+            { conflicts: currentConflicts },
+          );
+        const [currentRule] = await repos.slots.findBookingRule(clinicId, ruleId);
+        return repos.slots.updateBookingRule(clinicId, ruleId, {
+          slotDurationMinutes: newDurationMinutes,
+          version: (currentRule?.version ?? rule.version) + 1,
+          ...(normalizedImplementFrom
+            ? { effectiveFrom: datePartOfTimestamp(normalizedImplementFrom) }
+            : {}),
+        });
+      },
+    );
 
-    return { superseded_slots: futureSlots.length, conflicts: [] as RuleChangeConflict[] };
+    return { superseded_slots: 0, conflicts: [] as RuleChangeConflict[] };
   }
 
   private async findCapacityConflicts(
@@ -212,8 +273,9 @@ export class SlotRuleChangeImpactService {
     ruleId: string,
     newCapacity: number,
     implementFrom?: string,
+    repos: Repositories = this.repos,
   ): Promise<RuleChangeConflict[]> {
-    const futureSlots = await this.repos.slots.listFutureOpenSlotsForRule(
+    const futureSlots = await repos.slots.listFutureOpenSlotsForRule(
       clinicId,
       ruleId,
       implementFrom,
@@ -221,6 +283,7 @@ export class SlotRuleChangeImpactService {
     const occupancyBySlot = await this.getOccupancyBySlot(
       clinicId,
       futureSlots.map((slot) => slot.id),
+      repos,
     );
     const conflicts: RuleChangeConflict[] = [];
 
@@ -262,6 +325,15 @@ export class SlotRuleChangeImpactService {
   }
 
   async previewDurationChange(clinicId: string, ruleId: string, _newDurationMinutes: number) {
+    if (
+      !Number.isSafeInteger(_newDurationMinutes) ||
+      _newDurationMinutes < MIN_SLOT_DURATION_MINUTES
+    ) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Slot duration must be a whole number of at least 15 minutes.',
+      );
+    }
     const [rule] = await this.repos.slots.findBookingRule(clinicId, ruleId);
     if (!rule) {
       throw new AppError('NOT_FOUND', 'Booking rule not found.');
@@ -353,10 +425,11 @@ export class SlotRuleChangeImpactService {
   private async getOccupancyBySlot(
     clinicId: string,
     slotIds: string[],
+    repos: Repositories = this.repos,
   ): Promise<Map<string, number>> {
     const [appointmentCounts, holdCounts] = await Promise.all([
-      this.repos.slots.countActiveAppointmentsBySlots(clinicId, slotIds),
-      this.repos.slots.countActiveHoldsBySlots(clinicId, slotIds),
+      repos.slots.countActiveAppointmentsBySlots(clinicId, slotIds),
+      repos.slots.countActiveHoldsBySlots(clinicId, slotIds),
     ]);
 
     return new Map(

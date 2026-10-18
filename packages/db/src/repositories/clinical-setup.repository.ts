@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -9,6 +9,7 @@ import {
   clinicHours,
   clinicServices,
   clinicUsers,
+  clinics,
   doctorBlockedSlots,
   doctorSchedules,
   doctorServiceBookingRules,
@@ -294,6 +295,29 @@ export class ClinicalSetupRepository {
       .from(doctorSchedules)
       .where(and(...filters))
       .orderBy(doctorSchedules.doctorId, doctorSchedules.dayOfWeek, doctorSchedules.startTime);
+  }
+
+  listActiveDoctorScheduleWindows(clinicId: string) {
+    return this.db
+      .select({
+        doctorName: doctors.name,
+        dayOfWeek: doctorSchedules.dayOfWeek,
+        startTime: doctorSchedules.startTime,
+        endTime: doctorSchedules.endTime,
+      })
+      .from(doctorSchedules)
+      .innerJoin(doctors, and(eq(doctors.id, doctorSchedules.doctorId), eq(doctors.clinicId, doctorSchedules.clinicId)))
+      .innerJoin(clinics, eq(clinics.id, doctorSchedules.clinicId))
+      .where(and(
+        eq(doctorSchedules.clinicId, clinicId),
+        eq(doctorSchedules.active, true),
+        eq(doctors.active, true),
+        or(
+          isNull(doctorSchedules.effectiveTo),
+          gte(doctorSchedules.effectiveTo, sql<string>`(current_timestamp at time zone ${clinics.timezone})::date`),
+        ),
+      ))
+      .orderBy(doctors.name, doctorSchedules.dayOfWeek, doctorSchedules.startTime);
   }
 
   async replaceDoctorSchedules(

@@ -330,12 +330,11 @@ export class KnowledgeAdminService {
       }
 
       // Do not reintroduce blank rows imported from the older, larger starter
-      // template. Any answered/approved legacy row remains visible as clinic data.
+      // template, including rows with stale approval flags. Answered legacy
+      // rows remain visible as clinic data.
       if (
         existing.templateKey &&
-        existing.answer.trim().length === 0 &&
-        existing.status !== 'approved' &&
-        !existing.qaApproved
+        existing.answer.trim().length === 0
       ) {
         continue;
       }

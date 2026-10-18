@@ -607,7 +607,7 @@ export function HomePageContent() {
                 <h2 className="text-xl font-black">
                   {effectiveRole === 'doctor'
                     ? 'Your clinic day at a glance'
-                    : `Vaidya dashboard for ${me?.user.name ?? 'your clinic'}`}
+                    : `Vaidhyaa dashboard for ${me?.user.name ?? 'your clinic'}`}
                 </h2>
                 <p className="mt-2 text-sm text-teal-100">
                   {effectiveRole === 'doctor'

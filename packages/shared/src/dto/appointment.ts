@@ -54,7 +54,7 @@ export const createAppointmentRequestSchema = z.object({
 });
 
 export const manualAppointmentCreateSchema = createAppointmentRequestSchema.extend({
-  patient_phone: z.string().min(8),
+  patient_phone: z.string().regex(/^[0-9]{10}$/, 'Enter a 10-digit patient phone number without a country code.'),
   patient_age: z.number().int().min(0).max(130),
   patient_date_of_birth: dateSchema.optional(),
   override_reason: z.string().min(1).optional(),

@@ -20,7 +20,7 @@ export function ClinicSetupPageContent() {
         description={
           effectiveRole === 'doctor'
             ? 'Manage your schedule and services when enabled by clinic policy.'
-            : 'Only what doctors and receptionists need to manage Vaidya.'
+            : 'Manage your doctors, services, schedules, and team in one place.'
         }
       />
 

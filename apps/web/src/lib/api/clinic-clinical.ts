@@ -158,10 +158,7 @@ export type PatientHistoryApiRow = {
 };
 
 export async function fetchDoctors(clinicId: string, signal?: AbortSignal) {
-  const data = await apiGet<{ doctors: DoctorApiRow[] }>(
-    clinicPath(clinicId, '/doctors'),
-    signal,
-  );
+  const data = await apiGet<{ doctors: DoctorApiRow[] }>(clinicPath(clinicId, '/doctors'), signal);
   return data.doctors;
 }
 
@@ -287,10 +284,7 @@ export async function patchBookingRule(
 }
 
 export async function fetchClinicHours(clinicId: string, signal?: AbortSignal) {
-  const data = await apiGet<{ hours: ClinicHoursApiRow[] }>(
-    clinicPath(clinicId, '/hours'),
-    signal,
-  );
+  const data = await apiGet<{ hours: ClinicHoursApiRow[] }>(clinicPath(clinicId, '/hours'), signal);
   return data.hours.filter((row) => row.active);
 }
 
@@ -362,6 +356,17 @@ export async function replaceDoctorSchedules(
 ) {
   const data = await apiPut<{ schedules: DoctorScheduleApiRow[] }>(
     clinicPath(clinicId, `/doctors/${doctorId}/schedules`),
+    { windows },
+  );
+  return data.schedules;
+}
+
+export async function replaceAllDoctorSchedules(
+  clinicId: string,
+  windows: Array<{ day_of_week: number; start_time: string; end_time: string; active: boolean }>,
+) {
+  const data = await apiPut<{ schedules: DoctorScheduleApiRow[] }>(
+    clinicPath(clinicId, '/doctor-schedules'),
     { windows },
   );
   return data.schedules;

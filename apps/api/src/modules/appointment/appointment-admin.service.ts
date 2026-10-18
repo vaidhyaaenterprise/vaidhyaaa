@@ -38,6 +38,9 @@ export class AppointmentAdminService {
     input: ManualAppointmentCreateInput,
     actorUserId: string,
   ) {
+    if (!/^[0-9]{10}$/.test(input.patient_phone)) {
+      throw new AppError('VALIDATION_ERROR', 'Enter a 10-digit patient phone number without a country code.');
+    }
     let slotId: string | null = input.slot_id ?? null;
     let appointmentStart = input.appointment_start;
     let appointmentEnd = input.appointment_end;
@@ -126,10 +129,6 @@ export class AppointmentAdminService {
     const normalizedName = normalizeName(input.patient_name);
     const normalizedPhone = input.patient_phone ? normalizePhone(input.patient_phone) : '';
     const requestedDob = input.patient_date_of_birth ?? null;
-
-    if (!normalizedPhone || normalizedPhone.length < 8) {
-      throw new AppError('VALIDATION_ERROR', 'patient_phone must contain at least 8 digits.');
-    }
 
     if (input.patient_age < 0 || input.patient_age > 130) {
       throw new AppError('VALIDATION_ERROR', 'patient_age must be between 0 and 130.');

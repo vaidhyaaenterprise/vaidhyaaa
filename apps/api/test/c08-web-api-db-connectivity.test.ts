@@ -166,7 +166,7 @@ describe('C08 web API to DB connectivity', () => {
       headers: adminHeaders,
       payload: {
         name: 'C08 Updated Clinic',
-        primary_phone: '+91 98765 43219',
+        primary_phone: '9876543219',
         address_line1: '42 Connectivity Road',
         address_line2: 'Second Floor',
         city: 'Chennai',
@@ -194,7 +194,7 @@ describe('C08 web API to DB connectivity', () => {
     expect(patchBody.clinic).toEqual({
       name: 'C08 Updated Clinic',
       clinic_unique_number: before?.unique_number,
-      primary_phone: '+91 98765 43219',
+      primary_phone: '9876543219',
       address_line1: '42 Connectivity Road',
       address_line2: 'Second Floor',
       city: 'Chennai',
@@ -238,7 +238,7 @@ describe('C08 web API to DB connectivity', () => {
       id: before?.id,
       unique_number: before?.unique_number,
       name: 'C08 Updated Clinic',
-      primary_phone: '+91 98765 43219',
+      primary_phone: '9876543219',
       address_line1: '42 Connectivity Road',
       address_line2: 'Second Floor',
       city: 'Chennai',

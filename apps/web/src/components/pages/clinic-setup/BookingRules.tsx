@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MIN_SLOT_DURATION_MINUTES } from '@vaidya/shared';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { DigitsInput } from '@/components/ui/DigitsInput';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
 import {
@@ -17,6 +19,7 @@ import { previewBookingRuleChange } from '@/lib/api/clinic-subscription';
 import { conflictsFromApiError, formatScheduleConflicts } from '@/lib/api/conflict-helpers';
 import { fetchClinicSettings, patchClinicSettings } from '@/lib/api/clinic-settings';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { ScheduleConflictPanel } from './ScheduleConflictPanel';
 
 type DoctorScopedBookingRules = {
   ruleIds: string[];
@@ -35,6 +38,19 @@ type ConflictModalState = {
   implementFrom: string;
   conflicts: string[];
   patch: BookingRulePatchPayload;
+};
+
+const NUMERIC_RULE_FIELDS = [
+  ['slotDurationMinutes', 'Slot duration', MIN_SLOT_DURATION_MINUTES, 120],
+  ['capacityPerSlot', 'Capacity per slot', 1, 10],
+  ['bookingHorizonDays', 'Booking horizon', 1, 180],
+  ['manualEditCutoffBeforeStartMinutes', 'Edit cutoff', 0, 1440],
+  ['manualEditMaxShiftMinutes', 'Max edit shift', 0, 1440],
+] as const;
+
+type NumericRuleField = (typeof NUMERIC_RULE_FIELDS)[number][0];
+type EditableBookingRules = Omit<DoctorScopedBookingRules, NumericRuleField> & {
+  [Field in NumericRuleField]: number | string;
 };
 
 function toScopedRules(
@@ -125,12 +141,13 @@ export function BookingRules() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [doctorRows, setDoctorRows] = useState<DoctorApiRow[]>([]);
   const [ruleRows, setRuleRows] = useState<BookingRuleApiRow[]>([]);
   const [allowDoctorServiceEdit, setAllowDoctorServiceEdit] = useState(false);
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [rules, setRules] = useState<DoctorScopedBookingRules | null>(null);
-  const [tempRules, setTempRules] = useState<DoctorScopedBookingRules | null>(null);
+  const [tempRules, setTempRules] = useState<EditableBookingRules | null>(null);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [conflictModal, setConflictModal] = useState<ConflictModalState | null>(null);
   const [applyingImplementFrom, setApplyingImplementFrom] = useState(false);
@@ -301,6 +318,7 @@ export function BookingRules() {
   ]);
 
   const handleEdit = () => {
+    setNotice(null);
     if (!rules) {
       return;
     }
@@ -312,6 +330,7 @@ export function BookingRules() {
 
   const handleCancel = () => {
     setIsEditing(false);
+    setError(null);
     setConflicts([]);
     setConflictModal(null);
     setTempRules(rules);
@@ -365,6 +384,7 @@ export function BookingRules() {
     setIsEditing(false);
     setConflicts([]);
     setConflictModal(null);
+    setNotice('Booking rules saved. Appointment slots are updating in the background.');
   };
 
   const handleSave = async () => {
@@ -372,7 +392,22 @@ export function BookingRules() {
       return;
     }
 
-    const patch = buildRulePatch(rules, tempRules);
+    for (const [field, label, minimum, maximum] of NUMERIC_RULE_FIELDS) {
+      const value = tempRules[field];
+      const parsed = Number(value);
+      if (value === '' || !Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+        setError(`${label} must be a number between ${minimum} and ${maximum}.`);
+        return;
+      }
+    }
+    const patch = buildRulePatch(rules, {
+      ...tempRules,
+      slotDurationMinutes: Number(tempRules.slotDurationMinutes),
+      capacityPerSlot: Number(tempRules.capacityPerSlot),
+      bookingHorizonDays: Number(tempRules.bookingHorizonDays),
+      manualEditCutoffBeforeStartMinutes: Number(tempRules.manualEditCutoffBeforeStartMinutes),
+      manualEditMaxShiftMinutes: Number(tempRules.manualEditMaxShiftMinutes),
+    });
     const capacityOrDurationChanged =
       patch.capacity_per_slot !== undefined || patch.slot_duration_minutes !== undefined;
 
@@ -483,7 +518,7 @@ export function BookingRules() {
     );
   }
 
-  if (error) {
+  if (error && !isEditing) {
     return (
       <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load booking rules" description={error}>
@@ -547,6 +582,11 @@ export function BookingRules() {
           </div>
         )}
 
+        {notice && (
+          <p role="status" className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800">
+            {notice}
+          </p>
+        )}
         {!isEditing ? (
           <div className="space-y-3">
             <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -604,90 +644,86 @@ export function BookingRules() {
           </div>
         ) : (
           <div className="space-y-4">
-            {conflicts.length > 0 && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                <h4 className="mb-2 text-sm font-bold text-red-800">Conflicts detected</h4>
-                <ul className="space-y-1 text-sm text-red-700">
-                  {conflicts.map((conflict, idx) => (
-                    <li key={idx}>- {conflict}</li>
-                  ))}
-                </ul>
-              </div>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700"
+              >
+                {error}
+              </p>
             )}
+            <ScheduleConflictPanel conflicts={conflicts} />
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-slot-duration"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Slot duration (minutes)
                 </label>
-                <input
-                  type="number"
-                  min="5"
+                <DigitsInput
+                  id="rule-slot-duration"
+                  min={MIN_SLOT_DURATION_MINUTES}
                   max="120"
                   step="5"
                   value={tempRules.slotDurationMinutes}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({ ...tempRules, slotDurationMinutes: value });
                   }}
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />
+                <p className="mt-1 text-xs text-slate-500">Minimum 15 minutes.</p>
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-capacity"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Capacity per slot
                 </label>
-                <input
-                  type="number"
+                <DigitsInput
+                  id="rule-capacity"
                   min="1"
                   max="10"
                   value={tempRules.capacityPerSlot}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({ ...tempRules, capacityPerSlot: value });
                   }}
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-booking-horizon"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Booking horizon (days)
                 </label>
-                <input
-                  type="number"
+                <DigitsInput
+                  id="rule-booking-horizon"
                   min="1"
-                  max="365"
+                  max="180"
                   value={tempRules.bookingHorizonDays}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({ ...tempRules, bookingHorizonDays: value });
                   }}
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-edit-cutoff"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Edit cutoff (minutes before start)
                 </label>
-                <input
-                  type="number"
+                <DigitsInput
+                  id="rule-edit-cutoff"
                   min="0"
                   max="1440"
                   value={tempRules.manualEditCutoffBeforeStartMinutes}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({
                       ...tempRules,
                       manualEditCutoffBeforeStartMinutes: value,
@@ -697,19 +733,18 @@ export function BookingRules() {
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-max-edit-shift"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Max edit shift (minutes)
                 </label>
-                <input
-                  type="number"
+                <DigitsInput
+                  id="rule-max-edit-shift"
                   min="0"
                   max="1440"
                   value={tempRules.manualEditMaxShiftMinutes}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({
                       ...tempRules,
                       manualEditMaxShiftMinutes: value,

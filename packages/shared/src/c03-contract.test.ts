@@ -119,7 +119,7 @@ describe('C03 shared DTO contracts', () => {
     expect(
       clinicProfilePatchSchema.safeParse({
         name: 'High on Love Clinic',
-        primary_phone: '+91 98765 43210',
+        primary_phone: '9876543210',
         address_line1: 'Mettukuppam',
         city: 'Chennai',
       }).success,

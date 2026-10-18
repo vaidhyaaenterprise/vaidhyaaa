@@ -9,7 +9,7 @@ import { AppError } from '@vaidya/shared';
 
 import { API_ENV } from '../../config/api-config.module';
 
-const DEFAULT_EMAIL_FROM = 'Vaidya <noreply@vaidya.local>';
+const DEFAULT_EMAIL_FROM = 'Vaidhyaa <noreply@vaidya.local>';
 
 type EmailLayoutInput = {
   title: string;
@@ -46,7 +46,7 @@ function buildEmailLayout(input: EmailLayoutInput): string {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
           <tr>
             <td style="background:#0f766e;padding:20px 28px;">
-              <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800;font-family:Arial,Helvetica,sans-serif;">Vaidya</p>
+              <p style="margin:0;color:#ffffff;font-size:18px;font-weight:800;font-family:Arial,Helvetica,sans-serif;">Vaidhyaa</p>
             </td>
           </tr>
           <tr>
@@ -61,7 +61,7 @@ function buildEmailLayout(input: EmailLayoutInput): string {
               <p style="margin:0 0 18px 0;font-size:13px;line-height:1.6;color:#64748b;">
                 If you did not request this, you can safely ignore this email.
               </p>
-              <p style="margin:0;font-size:13px;color:#94a3b8;">Thank you,<br/>The Vaidya Team</p>
+              <p style="margin:0;font-size:13px;color:#94a3b8;">Thank you,<br/>The Vaidhyaa Team</p>
             </td>
           </tr>
         </table>
@@ -141,17 +141,18 @@ export class EmailService {
   }
 
   private get from(): string {
-    return this.env.EMAIL_FROM?.trim().length ? this.env.EMAIL_FROM : DEFAULT_EMAIL_FROM;
+    const sender = this.env.EMAIL_FROM?.trim().length ? this.env.EMAIL_FROM : DEFAULT_EMAIL_FROM;
+    return sender.replace(/^Vaidya(?=\s*<)/, 'Vaidhyaa');
   }
 
   async sendVerificationCode(to: string, otp: string): Promise<{ messageId: string }> {
     return this.send({
       to,
-      subject: 'Verify your email - Vaidya',
+      subject: 'Verify your email - Vaidhyaa',
       html: buildEmailLayout({
         title: 'Verify Your Email',
         greeting: 'Hello,',
-        paragraphs: ['Thank you for registering with Vaidya.', 'Your verification code is:'],
+        paragraphs: ['Thank you for registering with Vaidhyaa.', 'Your verification code is:'],
         code: otp,
         expiryMinutes: 10,
       }),
@@ -162,12 +163,12 @@ export class EmailService {
   async sendPasswordResetCode(to: string, otp: string): Promise<{ messageId: string }> {
     return this.send({
       to,
-      subject: 'Reset your password - Vaidya',
+      subject: 'Reset your password - Vaidhyaa',
       html: buildEmailLayout({
         title: 'Reset Your Password',
         greeting: 'Hello,',
         paragraphs: [
-          'We received a request to reset the password for your Vaidya account.',
+          'We received a request to reset the password for your Vaidhyaa account.',
           'Your password reset code is:',
         ],
         code: otp,

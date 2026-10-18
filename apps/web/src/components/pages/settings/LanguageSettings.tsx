@@ -133,7 +133,7 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
                   Default language
                 </p>
                 <p className="mt-0.5 text-sm text-slate-400">
-                  Primary language used by Vaidya when speaking with patients
+                  Primary language used by Vaidhyaa when speaking with patients
                 </p>
               </div>
               <span className="rounded-full border-2 border-teal-300 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700">
@@ -185,7 +185,7 @@ export function LanguageSettings({ settings, onUpdateSettings }: LanguageSetting
                 <option value="english">English</option>
               </select>
               <p className="mt-1 text-xs text-slate-400">
-                Vaidya will use this language by default when initiating conversations.
+                Vaidhyaa will use this language by default when initiating conversations.
               </p>
             </div>
 

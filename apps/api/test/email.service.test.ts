@@ -20,7 +20,7 @@ function createEmailService(timeoutMs = 50): EmailService {
     JWT_SECRET: 'test-secret',
     AUTH_MODE: 'dev',
     RESEND_API_KEY: 're_test',
-    EMAIL_FROM: 'Vaidya <noreply@example.test>',
+    EMAIL_FROM: 'Vaidhyaa <noreply@example.test>',
     EMAIL_PROVIDER_TIMEOUT_MS: String(timeoutMs),
   });
   return new EmailService(env);

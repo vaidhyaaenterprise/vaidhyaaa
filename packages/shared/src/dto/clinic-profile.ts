@@ -1,21 +1,34 @@
 import { z } from 'zod';
 
-const nullableTrimmedText = (maxLength: number) =>
-  z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
-    z.string().trim().min(1).max(maxLength).nullable(),
-  );
-
-const nullablePhone = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+const requiredText = (label: string, maxLength: number) =>
   z
-    .string()
+    .string({
+      required_error: `${label} is required.`,
+      invalid_type_error: `${label} is required.`,
+    })
     .trim()
-    .min(7)
-    .max(30)
-    .regex(/^[+0-9()\-\s]+$/, 'Phone number contains unsupported characters.')
-    .nullable(),
-);
+    .min(1, `${label} is required.`)
+    .max(maxLength, `${label} must not exceed ${maxLength} characters.`);
+
+// Responses remain nullable so existing incomplete profiles can still be opened and corrected.
+export const clinicProfileDetailsSchema = z
+  .object({
+    name: requiredText('Clinic name', 160),
+    primary_phone: requiredText('Phone number', 10).regex(
+      /^[0-9]{10}$/,
+      'Enter a 10-digit clinic phone number without +91 or other characters.',
+    ),
+    address_line1: requiredText('Address line 1', 255),
+    address_line2: requiredText('Address line 2', 255),
+    city: requiredText('City', 120),
+    state: requiredText('State', 120),
+    postal_code: requiredText('PIN code', 6).regex(
+      /^[1-9][0-9]{5}$/,
+      'Enter a valid 6-digit PIN code that does not start with 0.',
+    ),
+    country: requiredText('Country', 120),
+  })
+  .strict();
 
 export const clinicProfileResponseSchema = z.object({
   name: z.string().min(1),
@@ -30,18 +43,8 @@ export const clinicProfileResponseSchema = z.object({
   timezone: z.string().min(1),
 });
 
-export const clinicProfilePatchSchema = z
-  .object({
-    name: z.string().trim().min(1).max(160).optional(),
-    primary_phone: nullablePhone.optional(),
-    address_line1: nullableTrimmedText(255).optional(),
-    address_line2: nullableTrimmedText(255).optional(),
-    city: nullableTrimmedText(120).optional(),
-    state: nullableTrimmedText(120).optional(),
-    postal_code: nullableTrimmedText(30).optional(),
-    country: nullableTrimmedText(120).optional(),
-  })
-  .strict()
+export const clinicProfilePatchSchema = clinicProfileDetailsSchema
+  .partial()
   .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'At least one clinic profile field is required.',
   });

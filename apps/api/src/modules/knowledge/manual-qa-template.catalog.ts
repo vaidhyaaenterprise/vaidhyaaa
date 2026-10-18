@@ -1,4 +1,4 @@
-export const VAIDYA_MANUAL_TEMPLATE_SOURCE = 'Vaidya Clinic Knowledge Base Q&A Template';
+export const VAIDYA_MANUAL_TEMPLATE_SOURCE = 'Vaidhyaa Clinic Knowledge Base Q&A Template';
 
 export type ManualQaTemplateQuestion = {
   sectionKey: string;

@@ -241,7 +241,7 @@ describe('HomePage dashboard', () => {
 
     expect(screen.getByRole('heading', { name: /^home$/i })).toBeInTheDocument();
     expect(screen.getByLabelText('AI Voice Agent status')).toBeInTheDocument();
-    expect(await screen.findByText('Vaidya dashboard for Clinic Admin')).toBeInTheDocument();
+    expect(await screen.findByText('Vaidhyaa dashboard for Clinic Admin')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Missed actions' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: "Today's summary" })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Session' })).not.toBeInTheDocument();
@@ -279,7 +279,7 @@ describe('HomePage dashboard', () => {
 
     render(<HomePageContent />);
 
-    await screen.findByText('Vaidya dashboard for Clinic Admin');
+    await screen.findByText('Vaidhyaa dashboard for Clinic Admin');
     expect(mockedFetchDoctors).not.toHaveBeenCalled();
     expect(mockedFetchServices).not.toHaveBeenCalled();
     expect(mockedFetchDoctorServices).not.toHaveBeenCalled();
@@ -300,7 +300,12 @@ describe('HomePage dashboard', () => {
     fireEvent.change(patientNameInput, {
       target: { value: 'New Patient' },
     });
-    fireEvent.change(within(dialog).getByPlaceholderText('+91 98765 43210'), {
+    const phoneInput = within(dialog).getByRole('textbox', {name: 'Patient phone *'});
+    expect(phoneInput).toHaveAttribute('maxlength', '10');
+    expect(phoneInput).toHaveAttribute('minlength', '10');
+    fireEvent.change(phoneInput, { target: { value: '87784367gh' } });
+    expect(phoneInput).toHaveValue('');
+    fireEvent.change(phoneInput, {
       target: { value: '9876543210' },
     });
     fireEvent.change(within(dialog).getByPlaceholderText('e.g. 38'), {
@@ -311,6 +316,7 @@ describe('HomePage dashboard', () => {
     });
     fireEvent.click(within(dialog).getByRole('button', { name: /^Select date/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Today' }));
+    expect(phoneInput).toHaveValue('9876543210');
 
     await waitFor(() => {
       expect(mockedFetchAvailableAppointmentSlots).toHaveBeenCalledWith(
@@ -555,7 +561,7 @@ describe('HomePage dashboard', () => {
 
     render(<HomePageContent />);
 
-    await screen.findByText('Vaidya dashboard for Clinic Admin');
+    await screen.findByText('Vaidhyaa dashboard for Clinic Admin');
     fireEvent.click(screen.getByRole('button', { name: 'Add manual booking' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'New manual appointment' });
@@ -598,7 +604,7 @@ describe('HomePage dashboard', () => {
     });
 
     const secondRender = render(<HomePageContent />);
-    await screen.findByText('Vaidya dashboard for Clinic Admin');
+    await screen.findByText('Vaidhyaa dashboard for Clinic Admin');
     fireEvent.click(screen.getByRole('button', { name: 'Add manual booking' }));
     await waitFor(() => expect(referenceSignal).toBeDefined());
     secondRender.unmount();
