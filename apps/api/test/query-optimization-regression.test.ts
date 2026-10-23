@@ -94,6 +94,7 @@ describe('query optimization regressions', () => {
       slots: {
         findClinicTimezone: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]),
         listAvailableOpenSlots,
+        hasStaleOpenSlotsForDate: vi.fn().mockResolvedValue(false),
       },
     });
 
@@ -168,6 +169,7 @@ describe('query optimization regressions', () => {
       slots: {
         findClinicTimezone: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]),
         listAvailableOpenSlots,
+        hasStaleOpenSlotsForDate: vi.fn().mockResolvedValue(false),
       },
     });
 
@@ -192,6 +194,54 @@ describe('query optimization regressions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('repairs stale rows even when the requested date already has some valid availability', async () => {
+    const date = '2099-10-27';
+    const validSlot = {
+      slot_id: 'valid-15',
+      doctor_id: 'doctor-1',
+      clinic_service_id: 'service-1',
+      start_time: `${date} 09:00:00`,
+      end_time: `${date} 09:15:00`,
+      capacity_total: 3,
+      available_count: 3,
+    };
+    const repairedSlot = {
+      ...validSlot,
+      slot_id: 'repaired-15',
+      start_time: `${date} 09:15:00`,
+      end_time: `${date} 09:30:00`,
+    };
+    const listProposableSlots = vi
+      .fn()
+      .mockResolvedValueOnce([validSlot])
+      .mockResolvedValueOnce([validSlot, repairedSlot]);
+    const generateSlots = vi.fn().mockResolvedValue([]);
+    const service = Object.create(AppointmentsService.prototype) as AppointmentsService;
+    installPrivateDependency(service, 'slotService', { listProposableSlots });
+    installPrivateDependency(service, 'slotGenerationService', { generateSlots });
+    installPrivateDependency(service, 'repos', {
+      slots: {
+        hasStaleOpenSlotsForDate: vi.fn().mockResolvedValue(true),
+        findClinicTimezone: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]),
+        listAvailableOpenSlots: vi.fn().mockResolvedValue([{ id: validSlot.slot_id }]),
+      },
+    });
+    const result = await service.listAvailableSlots({
+      clinicId: 'clinic-1',
+      doctorId: 'doctor-1',
+      clinicServiceId: 'service-1',
+      date,
+    });
+    expect(generateSlots).toHaveBeenCalledOnce();
+    expect(generateSlots).toHaveBeenCalledWith({
+      clinicId: 'clinic-1',
+      doctorId: 'doctor-1',
+      clinicServiceId: 'service-1',
+      date,
+    });
+    expect(result.map((slot) => slot.slot_id)).toEqual(['valid-15', 'repaired-15']);
   });
 
   it('loads action-request appointments in one clinic-scoped bulk query', async () => {

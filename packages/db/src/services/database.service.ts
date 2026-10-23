@@ -5,6 +5,7 @@ import { AppError, type ApiErrorCode } from '@vaidya/shared';
 
 import type { Database } from '../client';
 import { slotConfigurationReady } from './slot-configuration-ready';
+import { slotMatchesEffectiveRule } from './slot-effective-rule';
 import {
   appointmentSlots,
   auditLogs,
@@ -150,6 +151,7 @@ export class DatabaseService {
             eq(appointmentSlots.clinicId, clinicId),
             eq(appointmentSlots.id, slotId),
             slotConfigurationReady(),
+            slotMatchesEffectiveRule(),
           ),
         )
         .for('update')

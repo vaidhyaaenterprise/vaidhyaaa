@@ -57,6 +57,7 @@ describe('schedule slot synchronization', () => {
           45,
           undefined,
           expect.anything(),
+          [target.rule],
         );
         await service.generateSlots({ clinicId: 'clinic-1', date: '2026-11-04' });
         expect(generateForTarget).toHaveBeenCalledTimes(2);

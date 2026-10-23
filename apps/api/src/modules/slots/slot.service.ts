@@ -98,6 +98,20 @@ export class SlotService {
             : 'Appointment slots are updating in the background. Please try again shortly.',
         );
       }
+      if (date) {
+        const [effectiveRule] = await this.repos.slots.findEffectiveBookingRuleForDate(
+          clinicId,
+          doctorId,
+          clinicServiceId,
+          date,
+        );
+        if (!effectiveRule) {
+          throw new AppError(
+            'CLINIC_SETUP_INCOMPLETE',
+            `No saved booking rules cover ${date}. If a future change is scheduled, the earlier configuration must be restored before booking this date. Please contact your clinic administrator.`,
+          );
+        }
+      }
       return [];
     }
 

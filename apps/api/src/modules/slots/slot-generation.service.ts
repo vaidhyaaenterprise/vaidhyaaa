@@ -78,6 +78,13 @@ export class SlotGenerationService {
             targetHorizonDays,
             input.date,
             repos,
+            currentTargets
+              .filter(
+                (peer) =>
+                  peer.doctorId === target.doctorId &&
+                  peer.clinicServiceId === target.clinicServiceId,
+              )
+              .map((peer) => peer.rule),
           );
           if (summary) results.push(summary);
         }
@@ -115,6 +122,12 @@ export class SlotGenerationService {
     horizonDays: number,
     requestedDate?: string,
     repos: Repositories = this.repos,
+    effectiveVersions: Array<{
+      id: string;
+      version: number;
+      effectiveFrom?: string;
+      effectiveTo?: string | null;
+    }> = [rule],
   ) {
     const today = formatDateInTimezone(new Date(), timezone);
     const endDate = addDays(today, horizonDays, timezone);
@@ -124,33 +137,56 @@ export class SlotGenerationService {
     const generationEndDate = [requestedDate ?? endDate, rule.effectiveTo ?? endDate].sort()[0]!;
     if (generationStartDate > generationEndDate) return null;
 
-    const rangeStart = `${generationStartDate} 00:00:00`;
-    const rangeEnd = `${generationEndDate} 23:59:59`;
-    const [[batch], schedules, clinicHours, holidays, blocked, existingSlots] = await Promise.all([
-      repos.slots.insertBatch({
-        clinicId,
-        triggerSource: 'daily_job',
-        ruleId: rule.id,
-        status: 'running',
-        summaryJson: {},
-      }),
-      repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId),
-      repos.slots.listClinicHours(clinicId),
-      repos.slots.listClinicHolidays(clinicId, generationStartDate, generationEndDate, doctorId),
-      repos.slots.listDoctorBlockedSlots(
-        clinicId,
-        doctorId,
-        combineDateAndTime(generationStartDate, '00:00:00', timezone),
-        combineDateAndTime(generationEndDate, '23:59:59', timezone),
-      ),
-      repos.slots.listExistingSlotWindows(
-        clinicId,
-        doctorId,
-        clinicServiceId,
-        rangeStart,
-        rangeEnd,
-      ),
-    ]);
+    const generationDates: string[] = [];
+    for (
+      let date = generationStartDate;
+      date <= generationEndDate;
+      date = addDays(date, 1, timezone)
+    ) {
+      const newer = effectiveVersions.some(
+        (peer) =>
+          peer.version > rule.version &&
+          (!peer.effectiveFrom || peer.effectiveFrom <= date) &&
+          (!peer.effectiveTo || peer.effectiveTo >= date),
+      );
+      if (!newer) generationDates.push(date);
+    }
+    if (generationDates.length === 0) return null;
+    const ownedDates = new Set(generationDates);
+    const rangeStart = `${generationDates[0]} 00:00:00`;
+    const rangeEnd = `${generationDates.at(-1)} 23:59:59`;
+    const [[batch], schedules, clinicHours, holidays, blocked, existingWindows] = await Promise.all(
+      [
+        repos.slots.insertBatch({
+          clinicId,
+          triggerSource: 'daily_job',
+          ruleId: rule.id,
+          status: 'running',
+          summaryJson: {},
+        }),
+        repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId),
+        repos.slots.listClinicHours(clinicId),
+        repos.slots.listClinicHolidays(clinicId, generationStartDate, generationEndDate, doctorId),
+        repos.slots.listDoctorBlockedSlots(
+          clinicId,
+          doctorId,
+          combineDateAndTime(generationStartDate, '00:00:00', timezone),
+          combineDateAndTime(generationEndDate, '23:59:59', timezone),
+        ),
+        repos.slots.listExistingSlotWindows(
+          clinicId,
+          doctorId,
+          clinicServiceId,
+          rangeStart,
+          rangeEnd,
+        ),
+      ],
+    );
+    // Legacy active versions can overlap. A lower version must not retire or
+    // rewrite slots on dates owned by a newer effective version, in any order.
+    const existingSlots = existingWindows.filter((slot) =>
+      ownedDates.has(slot.startTime.slice(0, 10)),
+    );
     const holidayDates = new Set(
       holidays.filter((holiday) => holiday.isFullDay).map((holiday) => holiday.holidayDate),
     );
@@ -182,15 +218,6 @@ export class SlotGenerationService {
     );
     const desiredSlotWindows = new Set<string>();
     const slotsToInsert: Array<typeof appointmentSlots.$inferInsert> = [];
-
-    const generationDates: string[] = [];
-    for (
-      let date = generationStartDate;
-      date <= generationEndDate;
-      date = addDays(date, 1, timezone)
-    ) {
-      generationDates.push(date);
-    }
 
     for (const dateStr of generationDates) {
       if (holidayDates.has(dateStr)) {
