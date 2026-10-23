@@ -269,9 +269,15 @@ describe('query optimization regressions', () => {
     const slots = {
       findBookingRule: vi.fn().mockResolvedValue([
         {
+          id: 'rule-1',
           version: 3,
           doctorId: 'doctor-1',
           clinicServiceId: 'service-1',
+          slotDurationMinutes: 15,
+          capacityPerSlot: 3,
+          effectiveFrom: '2026-09-18',
+          effectiveTo: null,
+          active: true,
         },
       ]),
       listFutureOpenSlotsForRule: vi.fn().mockResolvedValue([
@@ -292,6 +298,7 @@ describe('query optimization regressions', () => {
       countActiveHoldsBySlots: vi.fn().mockResolvedValue(new Map<string, number>([['slot-2', 0]])),
       supersedeFutureOpenSlots: vi.fn().mockResolvedValue([{ id: 'slot-1' }, { id: 'slot-2' }]),
       updateBookingRule: vi.fn().mockResolvedValue([]),
+      findClinicTimezone: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]),
     };
     const slotGenerationService = {
       generateSlots: vi.fn().mockResolvedValue({ created: 2 }),
@@ -299,8 +306,18 @@ describe('query optimization regressions', () => {
     const service = Object.create(
       SlotRuleChangeImpactService.prototype,
     ) as SlotRuleChangeImpactService;
-    installPrivateDependency(service, 'repos', { slots });
-    installPrivateDependency(service, 'slotGenerationService', slotGenerationService);
+    const rule = (await slots.findBookingRule())[0];
+    const repos = {
+      slots,
+      clinicalSetup: {
+        listBookingRulesForDoctorService: vi.fn().mockResolvedValue([rule]),
+        createBookingRule: vi.fn().mockResolvedValue([]),
+        patchBookingRule: vi.fn().mockResolvedValue([rule]),
+      },
+    };
+    installPrivateDependency(service, 'repos', repos);
+    const save = vi.fn(async (_clinic, _scope, mutate) => mutate(repos));
+    installPrivateDependency(service, 'reconciliation', { save });
 
     const result = await service.applyDurationChangeFrom('clinic-1', 'rule-1', 30);
 
@@ -309,12 +326,9 @@ describe('query optimization regressions', () => {
     expect(slots.countActiveAppointmentsBySlots).toHaveBeenCalledWith('clinic-1', expectedSlotIds);
     expect(slots.countActiveHoldsBySlots).toHaveBeenCalledOnce();
     expect(slots.countActiveHoldsBySlots).toHaveBeenCalledWith('clinic-1', expectedSlotIds);
-    expect(result).toEqual({ superseded_slots: 2, conflicts: [] });
-    expect(slotGenerationService.generateSlots).toHaveBeenCalledWith({
-      clinicId: 'clinic-1',
-      doctorId: 'doctor-1',
-      clinicServiceId: 'service-1',
-    });
+    expect(result).toEqual({ superseded_slots: 0, conflicts: [] });
+    expect(save).toHaveBeenCalledOnce();
+    expect(slotGenerationService.generateSlots).not.toHaveBeenCalled();
   });
 
   it('generates a target with bulk reads and one bulk slot insert', async () => {
@@ -351,12 +365,20 @@ describe('query optimization regressions', () => {
       listClinicHolidays: vi.fn().mockResolvedValue([]),
       listDoctorBlockedSlots: vi.fn().mockResolvedValue([]),
       listExistingSlotWindows: vi.fn().mockResolvedValue([]),
+      countActiveAppointmentsBySlots: vi.fn().mockResolvedValue(new Map()),
+      countActiveHoldsBySlots: vi.fn().mockResolvedValue(new Map()),
+      updateGeneratedSlotConfiguration: vi.fn().mockResolvedValue([]),
       insertSlots: vi.fn(async (values: unknown[]) => values),
       supersedeFutureOpenSlotsByIds: vi.fn().mockResolvedValue([]),
       completeBatch: vi.fn().mockResolvedValue([]),
     };
     const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;
     installPrivateDependency(service, 'repos', { slots });
+    installPrivateDependency(
+      service,
+      'withClinicLock',
+      async (_clinic: string, work: (repos: unknown) => unknown) => work({ slots }),
+    );
 
     try {
       const result = await service.generateSlots({

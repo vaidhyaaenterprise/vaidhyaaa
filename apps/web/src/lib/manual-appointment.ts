@@ -1,3 +1,4 @@
+import { BOOKING_HORIZON_DAYS } from '@vaidya/shared';
 import type { ManualAppointmentData } from '@/components/pages/appointments/ManualAppointmentModal';
 import type { BookingRules } from '@/components/pages/appointments/types';
 import type { ManualAppointmentPayload } from '@/lib/api/appointments';
@@ -5,9 +6,7 @@ import type { ManualAppointmentPayload } from '@/lib/api/appointments';
 export const DEFAULT_BOOKING_RULES: BookingRules = {
   slotDurationMinutes: 30,
   capacityPerSlot: 1,
-  bookingHorizonDays: 45,
-  manualEditCutoffBeforeStartMinutes: 60,
-  manualEditMaxShiftMinutes: 60,
+  bookingHorizonDays: BOOKING_HORIZON_DAYS,
   allowDoctorServiceEdit: false,
 };
 

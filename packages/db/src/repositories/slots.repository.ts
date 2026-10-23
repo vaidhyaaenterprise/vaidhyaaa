@@ -259,7 +259,27 @@ export class SlotsRepository {
           lte(appointmentSlots.endTime, to),
           ne(appointmentSlots.status, 'superseded'),
         ),
-      );
+      )
+      .for('update');
+  }
+
+  updateGeneratedSlotConfiguration(
+    clinicId: string,
+    slotIds: string[],
+    values: { generatedFromRuleId: string; configVersion: number; capacityTotal: number },
+  ) {
+    if (slotIds.length === 0) return Promise.resolve([]);
+    return this.db
+      .update(appointmentSlots)
+      .set({ ...values, updatedAt: new Date() })
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          inArray(appointmentSlots.id, slotIds),
+          eq(appointmentSlots.status, 'open'),
+        ),
+      )
+      .returning();
   }
 
   supersedeFutureOpenSlotsByIds(clinicId: string, slotIds: string[]) {

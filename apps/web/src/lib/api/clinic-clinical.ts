@@ -34,8 +34,6 @@ export type BookingRuleApiRow = {
   slot_duration_minutes: number;
   capacity_per_slot: number;
   booking_horizon_days: number;
-  manual_edit_cutoff_before_start_minutes: number;
-  manual_edit_max_shift_minutes: number;
   effective_from?: string;
   version?: number;
   active: boolean;
@@ -44,9 +42,6 @@ export type BookingRuleApiRow = {
 export type BookingRulePatchPayload = Partial<{
   slot_duration_minutes: number;
   capacity_per_slot: number;
-  booking_horizon_days: number;
-  manual_edit_cutoff_before_start_minutes: number;
-  manual_edit_max_shift_minutes: number;
   implement_from: string;
 }>;
 

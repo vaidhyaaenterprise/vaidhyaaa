@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AppError } from '@vaidya/shared';
 
 import {
   computeAvailableCount,
@@ -12,6 +13,7 @@ import type { DatabaseConnection } from '@vaidya/db';
 
 import { SlotHoldExpiryService } from './slot-hold-expiry.service';
 import { SlotHoldService, type HoldSlotInput } from './slot-hold.service';
+import { SlotReconciliationService } from './slot-reconciliation.service';
 
 export type SlotAvailability = {
   slot_id: string;
@@ -33,6 +35,7 @@ export class SlotService {
     @Inject(DatabaseService) private readonly dbService: DatabaseService,
     @Inject(SlotHoldService) private readonly slotHoldService: SlotHoldService,
     @Inject(SlotHoldExpiryService) private readonly slotHoldExpiryService: SlotHoldExpiryService,
+    @Inject(SlotReconciliationService) private readonly reconciliation: SlotReconciliationService,
   ) {
     this.repos = createRepositories(connection.db);
   }
@@ -79,8 +82,22 @@ export class SlotService {
     clinicServiceId: string,
     date?: string,
   ) {
-    const slots = await this.repos.slots.listAvailableOpenSlots(clinicId, doctorId, clinicServiceId, date);
+    const slots = await this.repos.slots.listAvailableOpenSlots(
+      clinicId,
+      doctorId,
+      clinicServiceId,
+      date,
+    );
     if (slots.length === 0) {
+      const status = await this.reconciliation.status(clinicId, doctorId, clinicServiceId);
+      if (status.state !== 'ready') {
+        throw new AppError(
+          status.state === 'failed' ? 'SLOT_UPDATE_FAILED' : 'SLOT_UPDATE_PENDING',
+          status.state === 'failed'
+            ? 'Appointment slots could not be updated. Retry the slot update in Clinic setup → Booking rules, or contact your clinic administrator.'
+            : 'Appointment slots are updating in the background. Please try again shortly.',
+        );
+      }
       return [];
     }
 
@@ -124,12 +141,7 @@ export class SlotService {
   }
 
   /** A02 alias */
-  findAvailableSlots(
-    clinicId: string,
-    doctorId: string,
-    clinicServiceId: string,
-    date?: string,
-  ) {
+  findAvailableSlots(clinicId: string, doctorId: string, clinicServiceId: string, date?: string) {
     return this.listProposableSlots(clinicId, doctorId, clinicServiceId, date);
   }
 

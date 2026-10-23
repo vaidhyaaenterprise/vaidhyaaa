@@ -29,6 +29,31 @@ function jobsHarness() {
 }
 
 describe('durable slot reconciliation', () => {
+  it('reports a failed job explicitly, even when no work remains pending', async () => {
+    const jobs = {
+      drain: vi.fn().mockResolvedValue(1),
+      status: vi.fn().mockResolvedValue({ state: 'failed', failed: 1, remaining: 0 }),
+    };
+    const controller = new SlotReconciliationController(jobs as never);
+    await expect(controller.runClinic('clinic-1')).resolves.toEqual({
+      processed: 1,
+      state: 'failed',
+      failed: 1,
+      remaining: 0,
+    });
+  });
+
+  it('requeues failed work only for the requested clinic and enqueues a repair', async () => {
+    const jobs = {
+      retryFailed: vi.fn().mockResolvedValue(undefined),
+      enqueue: vi.fn().mockResolvedValue(undefined),
+      status: vi.fn().mockResolvedValue({ state: 'updating', remaining: 1, failed: 0 }),
+    };
+    await new SlotReconciliationController(jobs as never).retry('clinic-1');
+    expect(jobs.retryFailed).toHaveBeenCalledWith('clinic-1');
+    expect(jobs.enqueue).toHaveBeenCalledWith('clinic-1');
+  });
+
   it('saves settings and a persistent job in the same transaction without awaiting slot generation', async () => {
     const { service, values, generateSlots } = jobsHarness();
     const mutate = vi.fn().mockResolvedValue('saved');

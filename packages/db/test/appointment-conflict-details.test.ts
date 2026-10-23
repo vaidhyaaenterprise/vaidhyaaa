@@ -66,4 +66,27 @@ describe('appointment conflict detail queries', () => {
     expect(query.params).toContain('appointment.rescheduled');
     expect(query.params).toContain(CLINIC_ID);
   });
+
+  it('selects one latest change per appointment before retention and the 100-appointment limit', () => {
+    const { sql, params } = repository.listClinicAdminAppointmentActivities(CLINIC_ID).toSQL();
+    const normalizedSql = sql.toLowerCase();
+    expect(normalizedSql).toContain(
+      'select distinct on ("appointment_events"."appointment_request_id")',
+    );
+    const latestSelection = normalizedSql.slice(
+      normalizedSql.indexOf('inner join (select distinct on'),
+      normalizedSql.indexOf('"latest_appointment_changes" on'),
+    );
+    expect(latestSelection).toContain('"appointment_events"."clinic_id" =');
+    expect(latestSelection).toContain('"appointment_events"."actor_type" =');
+    expect(latestSelection).toContain(
+      'order by "appointment_events"."appointment_request_id", "appointment_events"."created_at" desc, "appointment_events"."id" desc',
+    );
+    expect(latestSelection).not.toContain('::date - 3');
+    expect(latestSelection).not.toContain('limit');
+    expect(normalizedSql).toContain(
+      'order by "appointment_events"."created_at" desc, "appointment_events"."id" desc limit',
+    );
+    expect(params.at(-1)).toBe(100);
+  });
 });

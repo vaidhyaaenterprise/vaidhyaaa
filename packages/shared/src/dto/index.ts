@@ -125,6 +125,7 @@ export {
 export {
   bookingRuleResponseSchema,
   MIN_SLOT_DURATION_MINUTES,
+  BOOKING_HORIZON_DAYS,
   createBookingRuleSchema,
   updateBookingRuleSchema,
   type BookingRuleResponse,

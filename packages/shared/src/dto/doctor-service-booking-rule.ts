@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { auditTimestampsSchema, dateSchema, uuidSchema } from './common';
 
 export const MIN_SLOT_DURATION_MINUTES = 15;
+export const BOOKING_HORIZON_DAYS = 45;
 const slotDurationInputSchema = z
   .number()
   .int()
@@ -21,8 +22,6 @@ export const bookingRuleResponseSchema = z
     booking_horizon_days: z.number().int().min(1).max(180),
     min_booking_notice_minutes: z.number().int().min(0),
     max_advance_booking_days: z.number().int().positive().nullable(),
-    manual_edit_cutoff_before_start_minutes: z.number().int().min(0),
-    manual_edit_max_shift_minutes: z.number().int().min(0),
     effective_from: dateSchema,
     effective_to: dateSchema.nullable(),
     active: z.boolean(),
@@ -35,11 +34,9 @@ export const createBookingRuleSchema = z.object({
   clinic_service_id: uuidSchema,
   slot_duration_minutes: slotDurationInputSchema,
   capacity_per_slot: z.number().int().positive(),
-  booking_horizon_days: z.number().int().min(1).max(180).default(45),
+  booking_horizon_days: z.literal(BOOKING_HORIZON_DAYS).default(BOOKING_HORIZON_DAYS),
   min_booking_notice_minutes: z.number().int().min(0).default(0),
   max_advance_booking_days: z.number().int().positive().optional(),
-  manual_edit_cutoff_before_start_minutes: z.number().int().min(0).default(60),
-  manual_edit_max_shift_minutes: z.number().int().min(0).default(60),
   effective_from: dateSchema.optional(),
   effective_to: dateSchema.nullable().optional(),
   active: z.boolean().default(true),

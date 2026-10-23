@@ -60,13 +60,43 @@ export class SlotReconciliationService implements OnModuleDestroy {
         and(
           eq(backgroundJobs.clinicId, clinicId),
           eq(backgroundJobs.jobType, SLOT_RECONCILIATION_JOB),
-          sql`${backgroundJobs.status} IN ('pending', 'running')`,
+          sql`${backgroundJobs.status} IN ('pending', 'processing')`,
         ),
       );
     return row?.count ?? 0;
   }
 
-  async retryFailed() {
+  async status(clinicId: string, doctorId?: string, clinicServiceId?: string) {
+    const rows = await this.connection.db
+      .select({ status: backgroundJobs.status })
+      .from(backgroundJobs)
+      .where(
+        and(
+          eq(backgroundJobs.clinicId, clinicId),
+          eq(backgroundJobs.jobType, SLOT_RECONCILIATION_JOB),
+          sql`${backgroundJobs.status} IN ('pending', 'processing', 'failed')`,
+          ...(doctorId
+            ? [
+                sql`(${backgroundJobs.payloadJson}->>'doctorId' IS NULL OR ${backgroundJobs.payloadJson}->>'doctorId' = ${doctorId})`,
+              ]
+            : []),
+          ...(clinicServiceId
+            ? [
+                sql`(${backgroundJobs.payloadJson}->>'clinicServiceId' IS NULL OR ${backgroundJobs.payloadJson}->>'clinicServiceId' = ${clinicServiceId})`,
+              ]
+            : []),
+        ),
+      );
+    const failed = rows.filter((row) => row.status === 'failed').length;
+    const remaining = rows.length - failed;
+    return {
+      state: failed ? ('failed' as const) : remaining ? ('updating' as const) : ('ready' as const),
+      remaining,
+      failed,
+    };
+  }
+
+  async retryFailed(clinicId?: string) {
     await this.connection.db
       .update(backgroundJobs)
       .set({
@@ -82,6 +112,7 @@ export class SlotReconciliationService implements OnModuleDestroy {
         and(
           eq(backgroundJobs.jobType, SLOT_RECONCILIATION_JOB),
           eq(backgroundJobs.status, 'failed'),
+          ...(clinicId ? [eq(backgroundJobs.clinicId, clinicId)] : []),
         ),
       );
   }
@@ -111,27 +142,8 @@ export class SlotReconciliationService implements OnModuleDestroy {
       if (!job) break;
       try {
         const scope = job.payloadJson as SlotReconciliationScope;
-        const repos = createRepositories(this.connection.db);
-        if (scope.ruleChange) {
-          const [rule] = await repos.slots.findBookingRule(job.clinicId!, scope.ruleChange.ruleId);
-          if (rule) {
-            if (scope.ruleChange.durationChanged) {
-              await repos.slots.supersedeFutureOpenSlots(
-                job.clinicId!,
-                rule.id,
-                scope.ruleChange.implementFrom,
-              );
-            }
-            await repos.slots.updateFutureOpenSlotCapacity(
-              job.clinicId!,
-              rule.id,
-              rule.capacityPerSlot,
-              rule.version,
-              scope.ruleChange.implementFrom,
-            );
-          }
-        }
-        // Read current settings rather than replaying a stale schedule snapshot.
+        // The generator reconciles all effective rule versions atomically. Never
+        // remove slots here before their replacements have been generated.
         await this.generation.generateSlots({
           clinicId: job.clinicId!,
           ...(scope.doctorId ? { doctorId: scope.doctorId } : {}),
@@ -179,7 +191,7 @@ export class SlotReconciliationService implements OnModuleDestroy {
         status = CASE WHEN attempt_count >= max_attempts THEN 'failed' ELSE 'pending' END,
         locked_by = NULL, locked_at = NULL, last_error = 'Worker interrupted before completing slot updates',
         updated_at = now() WHERE job_type = ${SLOT_RECONCILIATION_JOB}
-        AND status = 'running' AND locked_at < now() - interval '10 minutes'`);
+        AND status = 'processing' AND locked_at < now() - interval '10 minutes'`);
       const [job] = await tx
         .select()
         .from(backgroundJobs)
@@ -190,7 +202,7 @@ export class SlotReconciliationService implements OnModuleDestroy {
             sql`${backgroundJobs.scheduledAt} <= now()`,
             ...(clinicId ? [eq(backgroundJobs.clinicId, clinicId)] : []),
             sql`NOT EXISTS (SELECT 1 FROM background_jobs busy WHERE busy.job_type = ${SLOT_RECONCILIATION_JOB}
-          AND busy.clinic_id = ${backgroundJobs.clinicId} AND busy.status = 'running')`,
+          AND busy.clinic_id = ${backgroundJobs.clinicId} AND busy.status = 'processing')`,
           ),
         )
         .orderBy(backgroundJobs.createdAt)
@@ -200,7 +212,7 @@ export class SlotReconciliationService implements OnModuleDestroy {
       const [claimed] = await tx
         .update(backgroundJobs)
         .set({
-          status: 'running',
+          status: 'processing',
           lockedAt: new Date(),
           lockedBy: owner,
           attemptCount: job.attemptCount + 1,

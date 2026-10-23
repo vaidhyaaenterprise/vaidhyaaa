@@ -2,6 +2,28 @@ import type { Appointment, AppointmentActivity } from '@/components/pages/appoin
 
 export const APPOINTMENT_ACTIVITY_RETENTION_DAYS = 3;
 
+/** One final change per appointment, never per patient name or shared phone number. */
+export function latestAppointmentActivities<T extends AppointmentActivity>(
+  activities: readonly T[],
+): T[] {
+  const byAppointment = new Map<string, T>();
+  const timestamp = (activity: T) => {
+    const value = Date.parse(activity.occurredAt);
+    return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
+  };
+  const compare = (left: T, right: T) => {
+    const leftTime = timestamp(left);
+    const rightTime = timestamp(right);
+    return leftTime === rightTime ? right.id.localeCompare(left.id) : leftTime > rightTime ? -1 : 1;
+  };
+  for (const activity of activities) {
+    const current = byAppointment.get(activity.appointmentId);
+    if (!current || compare(activity, current) < 0)
+      byAppointment.set(activity.appointmentId, activity);
+  }
+  return [...byAppointment.values()].sort(compare);
+}
+
 function shiftIsoDate(date: string, days: number): string {
   const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {
@@ -97,7 +119,7 @@ export function filterRetainedAppointmentActivities<T extends AppointmentActivit
 ): T[] {
   const retentionStartDate = shiftIsoDate(clinicDate, -APPOINTMENT_ACTIVITY_RETENTION_DAYS);
 
-  return activities.filter((activity) => {
+  return latestAppointmentActivities(activities).filter((activity) => {
     if (activity.actionType === 'reschedule') {
       return activity.appointmentDate >= retentionStartDate;
     }

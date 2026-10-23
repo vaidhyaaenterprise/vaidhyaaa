@@ -13,6 +13,7 @@ import {
   type HolidayApiRow,
 } from '@/lib/api/clinic-clinical';
 import { fetchClinicSettings, patchClinicSettings } from '@/lib/api/clinic-settings';
+import { previewBookingRuleChange } from '@/lib/api/clinic-subscription';
 
 const FIRST_CLINIC_ID = '00000000-0000-0000-0000-000000000001';
 const SECOND_CLINIC_ID = '00000000-0000-0000-0000-000000000002';
@@ -35,8 +36,6 @@ function bookingRule(id: string, serviceId: string): BookingRuleApiRow {
     slot_duration_minutes: 30,
     capacity_per_slot: 1,
     booking_horizon_days: 30,
-    manual_edit_cutoff_before_start_minutes: 60,
-    manual_edit_max_shift_minutes: 120,
     version: 1,
     active: true,
   };
@@ -86,6 +85,11 @@ vi.mock('@/lib/api/clinic-subscription', () => ({
   previewBookingRuleChange: vi.fn(),
 }));
 
+vi.mock('@/lib/api/slot-updates', () => ({
+  fetchSlotUpdateStatus: vi.fn().mockResolvedValue({ state: 'ready', remaining: 0, failed: 0 }),
+  retrySlotUpdates: vi.fn(),
+}));
+
 const mockedFetchBookingRules = vi.mocked(fetchBookingRules);
 const mockedFetchDoctors = vi.mocked(fetchDoctors);
 const mockedFetchHolidays = vi.mocked(fetchHolidays);
@@ -93,10 +97,15 @@ const mockedPatchBookingRule = vi.mocked(patchBookingRule);
 const mockedPatchHoliday = vi.mocked(patchHoliday);
 const mockedFetchClinicSettings = vi.mocked(fetchClinicSettings);
 const mockedPatchClinicSettings = vi.mocked(patchClinicSettings);
+const mockedPreviewBookingRuleChange = vi.mocked(previewBookingRuleChange);
 
 beforeEach(() => {
   activeClinicId = FIRST_CLINIC_ID;
   vi.clearAllMocks();
+  mockedPreviewBookingRuleChange.mockResolvedValue({
+    blocked: false,
+    conflicts: [],
+  });
   mockedFetchBookingRules.mockImplementation((clinicId) =>
     Promise.resolve(clinicId === FIRST_CLINIC_ID ? [FIRST_RULE, SECOND_RULE] : []),
   );
@@ -140,27 +149,52 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Clinic Setup mutation navigation safety', () => {
-  it.each([
-    'Slot duration (minutes)',
-    'Capacity per slot',
-    'Booking horizon (days)',
-    'Edit cutoff (minutes before start)',
-    'Max edit shift (minutes)',
-  ])('keeps %s digits-only and allows clearing and typing fresh', async (label) => {
+  it('edits only the latest rule of each service, not the earlier effective snapshots', async () => {
+    mockedFetchBookingRules.mockResolvedValue([
+      { ...FIRST_RULE, id: 'snapshot', version: 1 },
+      { ...FIRST_RULE, version: 3 },
+    ]);
+    mockedPatchBookingRule.mockResolvedValue({ ...FIRST_RULE, version: 4, capacity_per_slot: 2 });
     render(<BookingRules />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    const input = screen.getByRole('textbox', { name: label });
-    expect(input).toHaveAttribute('type', 'text');
-    expect(input).toHaveAttribute('inputmode', 'numeric');
-    fireEvent.change(input, { target: { value: '' } });
-    expect(input).toHaveValue('');
-    for (const invalid of ['e', '-', '+', '.', '1e2', 'abc']) {
-      fireEvent.change(input, { target: { value: invalid } });
-      expect(input).toHaveValue('');
-    }
-    fireEvent.change(input, { target: { value: '25' } });
-    expect(input).toHaveValue('25');
+    fireEvent.change(screen.getByLabelText('Capacity per slot'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockedPatchBookingRule).toHaveBeenCalledTimes(1));
+    expect(mockedPatchBookingRule).toHaveBeenCalledWith(FIRST_CLINIC_ID, FIRST_RULE.id, {
+      capacity_per_slot: 2,
+    });
   });
+  it('does not display or allow editing the horizon or retired edit settings', async () => {
+    render(<BookingRules />);
+    const edit = await screen.findByRole('button', { name: 'Edit' });
+    expect(
+      screen.queryByText(/Booking horizon|Edit cutoff|Max edit shift/i),
+    ).not.toBeInTheDocument();
+    fireEvent.click(edit);
+    expect(
+      screen.queryByLabelText(/Booking horizon|Edit cutoff|Max edit shift/i),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole('textbox')).toHaveLength(2);
+  });
+
+  it.each(['Slot duration (minutes)', 'Capacity per slot'])(
+    'keeps %s digits-only and allows clearing and typing fresh',
+    async (label) => {
+      render(<BookingRules />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      const input = screen.getByRole('textbox', { name: label });
+      expect(input).toHaveAttribute('type', 'text');
+      expect(input).toHaveAttribute('inputmode', 'numeric');
+      fireEvent.change(input, { target: { value: '' } });
+      expect(input).toHaveValue('');
+      for (const invalid of ['e', '-', '+', '.', '1e2', 'abc']) {
+        fireEvent.change(input, { target: { value: invalid } });
+        expect(input).toHaveValue('');
+      }
+      fireEvent.change(input, { target: { value: '25' } });
+      expect(input).toHaveValue('25');
+    },
+  );
 
   it.each(['0', '5', '10', '14'])(
     'rejects a slot duration of %s minutes before any API update',
@@ -186,20 +220,20 @@ describe('Clinic Setup mutation navigation safety', () => {
     }));
     render(<BookingRules />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    const horizon = screen.getByRole('textbox', { name: 'Booking horizon (days)' });
-    fireEvent.change(horizon, { target: { value: '' } });
-    expect(horizon).toHaveValue('');
+    const capacity = screen.getByRole('textbox', { name: 'Capacity per slot' });
+    fireEvent.change(capacity, { target: { value: '' } });
+    expect(capacity).toHaveValue('');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(
-      await screen.findByText('Booking horizon must be a number between 1 and 180.'),
+      await screen.findByText('Capacity per slot must be a number between 1 and 10.'),
     ).toBeInTheDocument();
     expect(mockedPatchBookingRule).not.toHaveBeenCalled();
-    fireEvent.change(horizon, { target: { value: '45' } });
-    expect(horizon).toHaveValue('45');
+    fireEvent.change(capacity, { target: { value: '3' } });
+    expect(capacity).toHaveValue('3');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mockedPatchBookingRule).toHaveBeenCalledTimes(2));
     expect(mockedPatchBookingRule).toHaveBeenCalledWith(FIRST_CLINIC_ID, FIRST_RULE.id, {
-      booking_horizon_days: 45,
+      capacity_per_slot: 3,
     });
   });
 
@@ -209,7 +243,7 @@ describe('Clinic Setup mutation navigation safety', () => {
 
     const { rerender } = render(<BookingRules />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getAllByRole('textbox')[2]!, { target: { value: '45' } });
+    fireEvent.change(screen.getByLabelText('Capacity per slot'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Allow doctor service edit' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -224,7 +258,7 @@ describe('Clinic Setup mutation navigation safety', () => {
     expect(await screen.findByRole('button', { name: 'Edit' })).toBeInTheDocument();
 
     await act(async () => {
-      firstPatch.resolve({ ...FIRST_RULE, booking_horizon_days: 45 });
+      firstPatch.resolve({ ...FIRST_RULE, capacity_per_slot: 3 });
       await firstPatch.promise;
     });
 

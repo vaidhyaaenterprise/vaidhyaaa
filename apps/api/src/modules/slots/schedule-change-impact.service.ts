@@ -7,6 +7,7 @@ import {
   type ReplaceDoctorSchedulesInput,
   type ScheduleConflictAppointment,
   type ScheduleConflictItem,
+  type UpdateBookingRuleInput,
 } from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
@@ -271,6 +272,10 @@ export class ScheduleChangeImpactService {
         ...(nextSafe ? { next_safe_implement_from: nextSafe } : {}),
       };
     });
+  }
+
+  applyBookingRuleUpdate(clinicId: string, ruleId: string, input: UpdateBookingRuleInput) {
+    return this.ruleImpactService.applyRuleUpdate(clinicId, ruleId, input);
   }
 
   async applyBookingRuleChange(

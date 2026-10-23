@@ -20,6 +20,7 @@ import { conflictsFromApiError, formatScheduleConflicts } from '@/lib/api/confli
 import { fetchClinicSettings, patchClinicSettings } from '@/lib/api/clinic-settings';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 import { ScheduleConflictPanel } from './ScheduleConflictPanel';
+import { SlotUpdateStatus } from './SlotUpdateStatus';
 
 type DoctorScopedBookingRules = {
   ruleIds: string[];
@@ -27,9 +28,6 @@ type DoctorScopedBookingRules = {
   doctorName: string;
   slotDurationMinutes: number;
   capacityPerSlot: number;
-  bookingHorizonDays: number;
-  manualEditCutoffBeforeStartMinutes: number;
-  manualEditMaxShiftMinutes: number;
   effectiveFrom: string | null;
   allowDoctorServiceEdit: boolean;
 };
@@ -43,9 +41,6 @@ type ConflictModalState = {
 const NUMERIC_RULE_FIELDS = [
   ['slotDurationMinutes', 'Slot duration', MIN_SLOT_DURATION_MINUTES, 120],
   ['capacityPerSlot', 'Capacity per slot', 1, 10],
-  ['bookingHorizonDays', 'Booking horizon', 1, 180],
-  ['manualEditCutoffBeforeStartMinutes', 'Edit cutoff', 0, 1440],
-  ['manualEditMaxShiftMinutes', 'Max edit shift', 0, 1440],
 ] as const;
 
 type NumericRuleField = (typeof NUMERIC_RULE_FIELDS)[number][0];
@@ -65,9 +60,6 @@ function toScopedRules(
     doctorName,
     slotDurationMinutes: row.slot_duration_minutes,
     capacityPerSlot: row.capacity_per_slot,
-    bookingHorizonDays: row.booking_horizon_days,
-    manualEditCutoffBeforeStartMinutes: row.manual_edit_cutoff_before_start_minutes,
-    manualEditMaxShiftMinutes: row.manual_edit_max_shift_minutes,
     effectiveFrom: row.effective_from ?? null,
     allowDoctorServiceEdit,
   };
@@ -110,15 +102,6 @@ function buildRulePatch(
   if (next.capacityPerSlot !== current.capacityPerSlot) {
     patch.capacity_per_slot = next.capacityPerSlot;
   }
-  if (next.bookingHorizonDays !== current.bookingHorizonDays) {
-    patch.booking_horizon_days = next.bookingHorizonDays;
-  }
-  if (next.manualEditCutoffBeforeStartMinutes !== current.manualEditCutoffBeforeStartMinutes) {
-    patch.manual_edit_cutoff_before_start_minutes = next.manualEditCutoffBeforeStartMinutes;
-  }
-  if (next.manualEditMaxShiftMinutes !== current.manualEditMaxShiftMinutes) {
-    patch.manual_edit_max_shift_minutes = next.manualEditMaxShiftMinutes;
-  }
 
   return patch;
 }
@@ -152,6 +135,7 @@ export function BookingRules() {
   const [conflictModal, setConflictModal] = useState<ConflictModalState | null>(null);
   const [applyingImplementFrom, setApplyingImplementFrom] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [slotStatusRefresh, setSlotStatusRefresh] = useState(0);
 
   const myDoctorId = useMemo(
     () =>
@@ -184,7 +168,17 @@ export function BookingRules() {
 
     for (const [doctorId, rows] of map.entries()) {
       rows.sort((a, b) => (b.version ?? 1) - (a.version ?? 1));
-      map.set(doctorId, rows);
+      // Earlier effective versions remain active for their date ranges, but
+      // only the latest configuration of each service is editable here.
+      const seenServices = new Set<string>();
+      map.set(
+        doctorId,
+        rows.filter((row) => {
+          if (seenServices.has(row.clinic_service_id)) return false;
+          seenServices.add(row.clinic_service_id);
+          return true;
+        }),
+      );
     }
 
     return map;
@@ -384,7 +378,8 @@ export function BookingRules() {
     setIsEditing(false);
     setConflicts([]);
     setConflictModal(null);
-    setNotice('Booking rules saved. Appointment slots are updating in the background.');
+    setNotice('Booking rules saved.');
+    setSlotStatusRefresh((value) => value + 1);
   };
 
   const handleSave = async () => {
@@ -404,9 +399,6 @@ export function BookingRules() {
       ...tempRules,
       slotDurationMinutes: Number(tempRules.slotDurationMinutes),
       capacityPerSlot: Number(tempRules.capacityPerSlot),
-      bookingHorizonDays: Number(tempRules.bookingHorizonDays),
-      manualEditCutoffBeforeStartMinutes: Number(tempRules.manualEditCutoffBeforeStartMinutes),
-      manualEditMaxShiftMinutes: Number(tempRules.manualEditMaxShiftMinutes),
     });
     const capacityOrDurationChanged =
       patch.capacity_per_slot !== undefined || patch.slot_duration_minutes !== undefined;
@@ -587,6 +579,15 @@ export function BookingRules() {
             {notice}
           </p>
         )}
+        {clinicId && selectedDoctorId && (
+          <SlotUpdateStatus
+            key={`${clinicId}:${selectedDoctorId}`}
+            clinicId={clinicId}
+            doctorId={selectedDoctorId}
+            canRetry={isAdmin}
+            refreshKey={slotStatusRefresh}
+          />
+        )}
         {!isEditing ? (
           <div className="space-y-3">
             <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -605,24 +606,6 @@ export function BookingRules() {
               <span className="text-sm font-semibold text-slate-600">Capacity per slot</span>
               <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.capacityPerSlot} patient(s)
-              </span>
-            </div>
-            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-              <span className="text-sm font-semibold text-slate-600">Booking horizon</span>
-              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
-                {rules.bookingHorizonDays} days
-              </span>
-            </div>
-            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-              <span className="text-sm font-semibold text-slate-600">Edit cutoff</span>
-              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
-                {rules.manualEditCutoffBeforeStartMinutes} minutes before start
-              </span>
-            </div>
-            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-              <span className="text-sm font-semibold text-slate-600">Max edit shift</span>
-              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
-                {rules.manualEditMaxShiftMinutes} minutes
               </span>
             </div>
             <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -689,66 +672,6 @@ export function BookingRules() {
                   value={tempRules.capacityPerSlot}
                   onValueChange={(value) => {
                     setTempRules({ ...tempRules, capacityPerSlot: value });
-                  }}
-                  className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="rule-booking-horizon"
-                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
-                >
-                  Booking horizon (days)
-                </label>
-                <DigitsInput
-                  id="rule-booking-horizon"
-                  min="1"
-                  max="180"
-                  value={tempRules.bookingHorizonDays}
-                  onValueChange={(value) => {
-                    setTempRules({ ...tempRules, bookingHorizonDays: value });
-                  }}
-                  className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="rule-edit-cutoff"
-                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
-                >
-                  Edit cutoff (minutes before start)
-                </label>
-                <DigitsInput
-                  id="rule-edit-cutoff"
-                  min="0"
-                  max="1440"
-                  value={tempRules.manualEditCutoffBeforeStartMinutes}
-                  onValueChange={(value) => {
-                    setTempRules({
-                      ...tempRules,
-                      manualEditCutoffBeforeStartMinutes: value,
-                    });
-                  }}
-                  className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="rule-max-edit-shift"
-                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
-                >
-                  Max edit shift (minutes)
-                </label>
-                <DigitsInput
-                  id="rule-max-edit-shift"
-                  min="0"
-                  max="1440"
-                  value={tempRules.manualEditMaxShiftMinutes}
-                  onValueChange={(value) => {
-                    setTempRules({
-                      ...tempRules,
-                      manualEditMaxShiftMinutes: value,
-                    });
                   }}
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />

@@ -56,6 +56,63 @@ const activity: AppointmentActivity = {
 };
 
 describe('RescheduleCancelRequests', () => {
+  it('shows only the last reschedule for an appointment, with the final old and new slot', () => {
+    const earlier = {
+      ...activity,
+      id: 'earlier',
+      occurredAt: '2026-09-23T07:00:00Z',
+      previousAppointmentTime: '08:00',
+    };
+    const last = {
+      ...activity,
+      id: 'last',
+      previousAppointmentTime: '09:30',
+      appointmentTime: '11:30',
+    };
+    render(
+      <RescheduleCancelRequests
+        requests={[]}
+        activities={[earlier, last, activity]}
+        onApproveReschedule={vi.fn()}
+        onRejectRequest={vi.fn()}
+        onCancelAppointment={vi.fn()}
+        onEditPatientName={vi.fn()}
+      />,
+    );
+    const history = within(screen.getByRole('region', { name: 'Recent changes' }));
+    expect(history.getAllByRole('listitem')).toHaveLength(1);
+    // Equal event timestamps use the event ID as the same deterministic tie-breaker as the API.
+    expect(history.getByText('Previous: 24/09/2026 at 9:30 AM')).toBeInTheDocument();
+    expect(history.getByText('New: 25/09/2026 at 11:30 AM')).toBeInTheDocument();
+    expect(history.queryByText('Previous: 24/09/2026 at 8:00 AM')).not.toBeInTheDocument();
+  });
+
+  it('replaces old reschedules with the final cancellation without merging another appointment for the same patient', () => {
+    const cancellation = {
+      ...activity,
+      id: 'cancel-last',
+      actionType: 'cancel' as const,
+      occurredAt: '2026-09-24T08:00:00Z',
+    };
+    const differentAppointment = { ...activity, id: 'separate', appointmentId: 'appointment-3' };
+    render(
+      <RescheduleCancelRequests
+        requests={[]}
+        activities={[activity, cancellation, differentAppointment]}
+        onApproveReschedule={vi.fn()}
+        onRejectRequest={vi.fn()}
+        onCancelAppointment={vi.fn()}
+        onEditPatientName={vi.fn()}
+      />,
+    );
+    const history = within(screen.getByRole('region', { name: 'Recent changes' }));
+    const cards = history.getAllByRole('listitem');
+    expect(cards).toHaveLength(2);
+    expect(within(cards[0]!).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(cards[0]!).queryByText('Rescheduled')).not.toBeInTheDocument();
+    expect(within(cards[1]!).getByText('Rescheduled')).toBeInTheDocument();
+  });
+
   it('uses safe controls for a pending cancellation request', async () => {
     const onCancelAppointment = vi.fn().mockResolvedValue(undefined);
     const onRejectRequest = vi.fn().mockResolvedValue(undefined);

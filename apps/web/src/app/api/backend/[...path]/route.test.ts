@@ -73,6 +73,35 @@ describe('API proxy route', () => {
     expect(headers.get('content-type')).toBe('application/json');
   });
 
+  it('runs a retried slot update after returning the response and logs terminal failures', async () => {
+    vi.stubEnv('API_BASE_URL', 'https://api.example.test');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data: { state: 'updating' } }))
+      .mockResolvedValueOnce(Response.json({ data: { processed: 1, failed: 1, remaining: 0 } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await POST(
+      new NextRequest(
+        'https://web.example.test/api/backend/v1/clinics/clinic-1/slot-reconciliation/retry',
+        { method: 'POST', body: '{}' },
+      ),
+      {
+        params: Promise.resolve({
+          path: ['v1', 'clinics', 'clinic-1', 'slot-reconciliation', 'retry'],
+        }),
+      },
+    );
+    expect(response.status).toBe(200);
+    const callback = vi.mocked(after).mock.calls.at(-1)?.[0] as () => Promise<void>;
+    await callback();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('failed'),
+      expect.objectContaining({ clinicId: 'clinic-1', failed: 1 }),
+    );
+  });
+
   it('uses the same-server API default outside Vercel and returns structured failures', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('API_BASE_URL', '');

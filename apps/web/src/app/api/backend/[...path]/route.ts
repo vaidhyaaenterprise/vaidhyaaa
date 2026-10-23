@@ -166,6 +166,7 @@ async function proxyRequest(request: NextRequest, context: RouteContext): Promis
         'doctors',
         'doctor-services',
         'booking-rules',
+        'slot-reconciliation',
       ].includes(resource ?? '') &&
       !path.includes('preview')
     ) {
@@ -192,7 +193,16 @@ async function proxyRequest(request: NextRequest, context: RouteContext): Promis
                 status: jobResponse.status,
               });
             if (!jobResponse.ok) break;
-            const result = (await jobResponse.json()) as { data?: { remaining?: number } };
+            const result = (await jobResponse.json()) as {
+              data?: { remaining?: number; failed?: number };
+            };
+            if (result.data?.failed) {
+              console.error('Slot background update failed. Retry is available in Booking rules.', {
+                clinicId,
+                failed: result.data.failed,
+              });
+              break;
+            }
             if (!result.data?.remaining || Date.now() + 10_000 >= deadline) break;
             await new Promise((resolve) => setTimeout(resolve, 10_000));
           } while (Date.now() < deadline);

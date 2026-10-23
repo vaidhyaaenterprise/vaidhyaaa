@@ -84,8 +84,6 @@ function bookingRule(id: string, doctorId: string) {
     slot_duration_minutes: 15,
     capacity_per_slot: 2,
     booking_horizon_days: 30,
-    manual_edit_cutoff_before_start_minutes: 60,
-    manual_edit_max_shift_minutes: 60,
     active: true,
   };
 }
@@ -157,10 +155,7 @@ describe('doctor-scoped clinic setup requests', () => {
     expect(screen.queryByText('Other Clinic Doctor')).not.toBeInTheDocument();
     expect(screen.queryByText('Doctor service edit')).not.toBeInTheDocument();
     expect(mockedFetchClinicSettings).not.toHaveBeenCalled();
-    expect(mockedFetchBookingRules).toHaveBeenCalledWith(
-      ACTIVE_CLINIC_ID,
-      expect.any(AbortSignal),
-    );
+    expect(mockedFetchBookingRules).toHaveBeenCalledWith(ACTIVE_CLINIC_ID, expect.any(AbortSignal));
   });
 
   it('loads the schedule using the doctor membership for the active clinic', async () => {
@@ -172,10 +167,7 @@ describe('doctor-scoped clinic setup requests', () => {
       ACTIVE_DOCTOR_ID,
       expect.any(AbortSignal),
     );
-    expect(mockedFetchDoctorSchedules).not.toHaveBeenCalledWith(
-      ACTIVE_CLINIC_ID,
-      OTHER_DOCTOR_ID,
-    );
+    expect(mockedFetchDoctorSchedules).not.toHaveBeenCalledWith(ACTIVE_CLINIC_ID, OTHER_DOCTOR_ID);
     expect(mockedFetchAllDoctorSchedules).not.toHaveBeenCalled();
   });
 });

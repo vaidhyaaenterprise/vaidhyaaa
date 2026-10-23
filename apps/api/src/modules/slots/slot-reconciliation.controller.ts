@@ -1,6 +1,6 @@
-import { Controller, Get, Headers, Inject, Param, Post } from '@nestjs/common';
+import { Controller, Get, Headers, Inject, Param, Post, Query } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
-import { AppError } from '@vaidya/shared';
+import { AppError, uuidSchema } from '@vaidya/shared';
 import { ClinicScoped } from '../../common/decorators/clinic-scoped.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -17,7 +17,33 @@ export class SlotReconciliationController {
   @Roles('clinic_admin', 'doctor')
   async runClinic(@Param('clinicId') clinicId: string) {
     const processed = await this.jobs.drain(clinicId);
-    return { processed, remaining: await this.jobs.pendingCount(clinicId) };
+    return { processed, ...(await this.jobs.status(clinicId)) };
+  }
+
+  @Get('clinics/:clinicId/slot-reconciliation/status')
+  @ClinicScoped()
+  @Roles('clinic_admin', 'doctor')
+  status(
+    @Param('clinicId') clinicId: string,
+    @Query('doctor_id') doctorId?: string,
+    @Query('clinic_service_id') serviceId?: string,
+  ) {
+    if (
+      (doctorId && !uuidSchema.safeParse(doctorId).success) ||
+      (serviceId && !uuidSchema.safeParse(serviceId).success)
+    ) {
+      throw new AppError('VALIDATION_ERROR', 'Select a valid doctor and service.');
+    }
+    return this.jobs.status(clinicId, doctorId, serviceId);
+  }
+
+  @Post('clinics/:clinicId/slot-reconciliation/retry')
+  @ClinicScoped()
+  @Roles('clinic_admin')
+  async retry(@Param('clinicId') clinicId: string) {
+    await this.jobs.retryFailed(clinicId);
+    await this.jobs.enqueue(clinicId);
+    return this.jobs.status(clinicId);
   }
 
   @Get('internal/jobs/slot-reconciliation')

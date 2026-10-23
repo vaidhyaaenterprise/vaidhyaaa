@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AppError } from '@vaidya/shared';
 
 import {
   appointmentRequests,
@@ -298,8 +299,12 @@ export class AppointmentsService {
               input.date,
             );
             rows = mapSlotsForDate(slots);
-          } catch {
-            rows = mapSlotsForDate(slots);
+          } catch (error) {
+            if (error instanceof AppError) throw error;
+            throw new AppError(
+              'SLOT_UPDATE_FAILED',
+              'Appointment slots could not be refreshed. Retry the slot update in Clinic setup → Booking rules.',
+            );
           }
         }
       }

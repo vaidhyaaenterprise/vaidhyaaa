@@ -216,6 +216,28 @@ export class AppointmentLifecycleRepository {
 
   listClinicAdminAppointmentActivities(clinicId: string) {
     const retentionStartDate = clinicActivityRetentionStartDate(clinicId);
+    // Select the final change before retention and pagination. Otherwise an old
+    // reschedule can resurface when the appointment's newer cancellation expires,
+    // and repeated edits can crowd other appointments out of the feed.
+    const latestChanges = this.db
+      .selectDistinctOn([appointmentEvents.appointmentRequestId], { id: appointmentEvents.id })
+      .from(appointmentEvents)
+      .where(
+        and(
+          eq(appointmentEvents.clinicId, clinicId),
+          eq(appointmentEvents.actorType, 'clinic_admin'),
+          inArray(appointmentEvents.eventType, [
+            'appointment.rescheduled',
+            'appointment.cancelled',
+          ]),
+        ),
+      )
+      .orderBy(
+        appointmentEvents.appointmentRequestId,
+        desc(appointmentEvents.createdAt),
+        desc(appointmentEvents.id),
+      )
+      .as('latest_appointment_changes');
 
     return this.db
       .select({
@@ -236,6 +258,7 @@ export class AppointmentLifecycleRepository {
         appointmentEnd: appointmentRequests.appointmentEnd,
       })
       .from(appointmentEvents)
+      .innerJoin(latestChanges, eq(appointmentEvents.id, latestChanges.id))
       .innerJoin(
         appointmentRequests,
         and(
@@ -277,7 +300,7 @@ export class AppointmentLifecycleRepository {
           ),
         ),
       )
-      .orderBy(desc(appointmentEvents.createdAt))
+      .orderBy(desc(appointmentEvents.createdAt), desc(appointmentEvents.id))
       .limit(100);
   }
 

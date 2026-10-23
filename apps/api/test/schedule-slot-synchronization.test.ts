@@ -8,7 +8,66 @@ function installPrivateDependency(target: object, name: string, value: unknown):
   Object.defineProperty(target, name, { value });
 }
 
+function installGenerator(service: SlotGenerationService, slots: object) {
+  const repos = {
+    slots: {
+      countActiveAppointmentsBySlots: vi.fn().mockResolvedValue(new Map()),
+      countActiveHoldsBySlots: vi.fn().mockResolvedValue(new Map()),
+      updateGeneratedSlotConfiguration: vi.fn().mockResolvedValue([]),
+      ...slots,
+    },
+  };
+  installPrivateDependency(service, 'repos', repos);
+  installPrivateDependency(
+    service,
+    'withClinicLock',
+    async (_clinic: string, work: (repos: unknown) => unknown) => work(repos),
+  );
+}
+
 describe('schedule slot synchronization', () => {
+  it.each([7, 180])(
+    'uses the fixed 45-day window instead of a legacy %s-day rule',
+    async (legacyHorizon) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-20T03:00:00.000Z'));
+      const target = {
+        clinicId: 'clinic-1',
+        clinicTimezone: 'Asia/Kolkata',
+        doctorId: 'doctor-1',
+        doctorServiceId: 'doctor-service-1',
+        clinicServiceId: 'service-1',
+        rule: { id: 'rule-1', bookingHorizonDays: legacyHorizon },
+      };
+      const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;
+      installGenerator(service, {
+        listActiveGenerationTargets: vi.fn().mockResolvedValue([target]),
+      });
+      const generateForTarget = vi.fn().mockResolvedValue({ inserted: 0 });
+      installPrivateDependency(service, 'generateForTarget', generateForTarget);
+      try {
+        await service.generateSlots({ clinicId: 'clinic-1' });
+        expect(generateForTarget).toHaveBeenLastCalledWith(
+          target.clinicId,
+          target.clinicTimezone,
+          target.doctorId,
+          target.doctorServiceId,
+          target.clinicServiceId,
+          target.rule,
+          45,
+          undefined,
+          expect.anything(),
+        );
+        await service.generateSlots({ clinicId: 'clinic-1', date: '2026-11-04' });
+        expect(generateForTarget).toHaveBeenCalledTimes(2);
+        await service.generateSlots({ clinicId: 'clinic-1', date: '2026-11-05', horizonDays: 180 });
+        expect(generateForTarget).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('does not change clinic hours or slots when a doctor schedule blocks the edit', async () => {
     const replaceClinicHours = vi.fn();
     const generateSlots = vi.fn();
@@ -94,7 +153,7 @@ describe('schedule slot synchronization', () => {
       completeBatch: vi.fn().mockResolvedValue([]),
     };
     const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;
-    installPrivateDependency(service, 'repos', { slots });
+    installGenerator(service, slots);
 
     try {
       const result = await service.generateSlots({
@@ -167,7 +226,7 @@ describe('schedule slot synchronization', () => {
       completeBatch: vi.fn().mockResolvedValue([]),
     };
     const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;
-    installPrivateDependency(service, 'repos', { slots });
+    installGenerator(service, slots);
 
     try {
       const result = await service.generateSlots({
@@ -231,7 +290,7 @@ describe('schedule slot synchronization', () => {
       completeBatch: vi.fn().mockResolvedValue([]),
     };
     const service = Object.create(SlotGenerationService.prototype) as SlotGenerationService;
-    installPrivateDependency(service, 'repos', { slots });
+    installGenerator(service, slots);
 
     try {
       await service.generateSlots({

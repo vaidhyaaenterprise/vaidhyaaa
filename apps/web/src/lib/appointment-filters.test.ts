@@ -6,6 +6,7 @@ import {
   filterCurrentAndFuturePendingAppointments,
   filterMissedPendingAppointments,
   filterRetainedAppointmentActivities,
+  latestAppointmentActivities,
 } from '@/lib/appointment-filters';
 
 function appointment(
@@ -128,9 +129,9 @@ describe('filterRetainedAppointmentActivities', () => {
     );
 
     expect(result.map((item) => item.id)).toEqual([
+      'reschedule-future',
       'cancel-boundary',
       'reschedule-boundary',
-      'reschedule-future',
     ]);
   });
 
@@ -142,6 +143,59 @@ describe('filterRetainedAppointmentActivities', () => {
         'Asia/Kolkata',
       ),
     ).toEqual([]);
+  });
+
+  it('does not resurrect an old reschedule when the final cancellation has expired', () => {
+    const original = activity('old-reschedule', 'reschedule', '2026-10-30', '2026-10-10T08:00:00Z');
+    const cancellation = {
+      ...activity('final-cancellation', 'cancel', '2026-10-30', '2026-10-18T08:00:00Z'),
+      appointmentId: original.appointmentId,
+    };
+    expect(
+      filterRetainedAppointmentActivities([original, cancellation], '2026-10-23', 'Asia/Kolkata'),
+    ).toEqual([]);
+  });
+
+  it('keeps only the final reschedule and retains it by the latest appointment date', () => {
+    const original = activity('first', 'reschedule', '2026-10-19', '2026-10-10T08:00:00Z');
+    const latest = {
+      ...original,
+      id: 'latest',
+      occurredAt: '2026-10-11T08:00:00Z',
+      appointmentDate: '2026-10-30',
+    };
+    expect(
+      filterRetainedAppointmentActivities([latest, original], '2026-10-23', 'Asia/Kolkata'),
+    ).toEqual([latest]);
+  });
+});
+
+describe('latestAppointmentActivities', () => {
+  it('selects by appointment ID and event time, not input order, patient identity, or phone', () => {
+    const original = activity('first', 'reschedule', '2026-10-25', '2026-10-20T08:00:00Z');
+    const intermediate = { ...original, id: 'middle', occurredAt: '2026-10-21T08:00:00Z' };
+    const final = {
+      ...original,
+      id: 'last',
+      actionType: 'cancel' as const,
+      occurredAt: '2026-10-22T08:00:00Z',
+    };
+    const separateAppointment = {
+      ...original,
+      id: 'separate',
+      appointmentId: 'another-appointment',
+      occurredAt: '2026-10-21T09:00:00Z',
+    };
+    const input = [intermediate, separateAppointment, final, original];
+    expect(latestAppointmentActivities(input)).toEqual([final, separateAppointment]);
+    expect(input).toEqual([intermediate, separateAppointment, final, original]);
+  });
+
+  it('uses the event ID as a deterministic tie-breaker and ignores duplicate copies', () => {
+    const first = activity('event-1', 'reschedule', '2026-10-25', '2026-10-20T08:00:00Z');
+    const last = { ...first, id: 'event-2', actionType: 'cancel' as const };
+    expect(latestAppointmentActivities([last, first, last])).toEqual([last]);
+    expect(latestAppointmentActivities([first, last])).toEqual([last]);
   });
 });
 

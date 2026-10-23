@@ -7,6 +7,8 @@ export const API_ERROR_CODES = [
   'DOCTOR_NOT_OWNER',
   'SLOT_NOT_AVAILABLE',
   'SLOT_FULL',
+  'SLOT_UPDATE_PENDING',
+  'SLOT_UPDATE_FAILED',
   'SLOT_HOLD_EXPIRED',
   'APPOINTMENT_NOT_FOUND',
   'APPOINTMENT_NOT_CONFIRMABLE',
@@ -82,6 +84,8 @@ export function statusCodeForErrorCode(code: ApiErrorCode): number {
       return 400;
     case 'SLOT_NOT_AVAILABLE':
     case 'SLOT_FULL':
+    case 'SLOT_UPDATE_PENDING':
+    case 'SLOT_UPDATE_FAILED':
     case 'SLOT_HOLD_EXPIRED':
     case 'APPOINTMENT_NOT_CONFIRMABLE':
     case 'APPOINTMENT_NOT_CANCELLABLE':

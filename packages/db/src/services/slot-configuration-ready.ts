@@ -7,7 +7,7 @@ export function slotConfigurationReady() {
     SELECT 1 FROM background_jobs refresh
     WHERE refresh.clinic_id = ${appointmentSlots.clinicId}
       AND refresh.job_type = 'RECONCILE_SLOTS'
-      AND refresh.status IN ('pending', 'running', 'failed')
+      AND refresh.status IN ('pending', 'processing', 'failed')
       AND (refresh.payload_json->>'doctorId' IS NULL
         OR refresh.payload_json->>'doctorId' = ${appointmentSlots.doctorId}::text)
       AND (refresh.payload_json->>'clinicServiceId' IS NULL

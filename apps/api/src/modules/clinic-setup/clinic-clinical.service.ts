@@ -4,6 +4,7 @@ import { createRepositories, formatDateInTimezone, type Repositories } from '@va
 import type { DatabaseConnection } from '@vaidya/db';
 import {
   AppError,
+  BOOKING_HORIZON_DAYS,
   MIN_SLOT_DURATION_MINUTES,
   updateBookingRuleSchema,
   findPredefinedClinicService,
@@ -426,11 +427,9 @@ export class ClinicClinicalService {
             latestRule?.slotDurationMinutes ?? MIN_SLOT_DURATION_MINUTES,
           ),
           capacityPerSlot: latestRule?.capacityPerSlot ?? 3,
-          bookingHorizonDays: latestRule?.bookingHorizonDays ?? 45,
+          bookingHorizonDays: BOOKING_HORIZON_DAYS,
           minBookingNoticeMinutes: latestRule?.minBookingNoticeMinutes ?? 0,
           maxAdvanceBookingDays: latestRule?.maxAdvanceBookingDays ?? null,
-          manualEditCutoffBeforeStartMinutes: latestRule?.manualEditCutoffBeforeStartMinutes ?? 60,
-          manualEditMaxShiftMinutes: latestRule?.manualEditMaxShiftMinutes ?? 60,
           effectiveFrom: today,
           effectiveTo: null,
           active: true,
@@ -476,11 +475,9 @@ export class ClinicClinicalService {
         latestRule?.slotDurationMinutes ?? MIN_SLOT_DURATION_MINUTES,
       ),
       capacityPerSlot: latestRule?.capacityPerSlot ?? 3,
-      bookingHorizonDays: latestRule?.bookingHorizonDays ?? 45,
+      bookingHorizonDays: BOOKING_HORIZON_DAYS,
       minBookingNoticeMinutes: latestRule?.minBookingNoticeMinutes ?? 0,
       maxAdvanceBookingDays: latestRule?.maxAdvanceBookingDays ?? null,
-      manualEditCutoffBeforeStartMinutes: latestRule?.manualEditCutoffBeforeStartMinutes ?? 60,
-      manualEditMaxShiftMinutes: latestRule?.manualEditMaxShiftMinutes ?? 60,
       effectiveFrom: today,
       effectiveTo: null,
       active: true,
@@ -621,11 +618,9 @@ export class ClinicClinicalService {
         clinic_service_id: row.clinicServiceId,
         slot_duration_minutes: row.slotDurationMinutes,
         capacity_per_slot: row.capacityPerSlot,
-        booking_horizon_days: row.bookingHorizonDays,
+        booking_horizon_days: BOOKING_HORIZON_DAYS,
         min_booking_notice_minutes: row.minBookingNoticeMinutes,
         max_advance_booking_days: row.maxAdvanceBookingDays,
-        manual_edit_cutoff_before_start_minutes: row.manualEditCutoffBeforeStartMinutes,
-        manual_edit_max_shift_minutes: row.manualEditMaxShiftMinutes,
         effective_from: row.effectiveFrom,
         effective_to: row.effectiveTo,
         active: row.active,
@@ -670,9 +665,7 @@ export class ClinicClinicalService {
   async patchBookingRule(clinicId: string, ruleId: string, input: UpdateBookingRuleInput) {
     const parsed = updateBookingRuleSchema.safeParse(input);
     if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
-    const bookingRuleInput = input as UpdateBookingRuleInput & {
-      implement_from?: string;
-    };
+    const bookingRuleInput = parsed.data;
 
     const hasCapacityOrDurationChange =
       bookingRuleInput.capacity_per_slot !== undefined ||
@@ -699,23 +692,23 @@ export class ClinicClinicalService {
         );
       }
 
-      if (bookingRuleInput.capacity_per_slot !== undefined) {
-        await this.scheduleChangeImpact.applyBookingRuleChange(clinicId, ruleId, {
-          capacity_per_slot: bookingRuleInput.capacity_per_slot,
-          ...(bookingRuleInput.implement_from !== undefined
-            ? { implement_from: bookingRuleInput.implement_from }
-            : {}),
-        });
-      }
-
-      if (bookingRuleInput.slot_duration_minutes !== undefined) {
-        await this.scheduleChangeImpact.applyBookingRuleChange(clinicId, ruleId, {
-          slot_duration_minutes: bookingRuleInput.slot_duration_minutes,
-          ...(bookingRuleInput.implement_from !== undefined
-            ? { implement_from: bookingRuleInput.implement_from }
-            : {}),
-        });
-      }
+      const row = await this.scheduleChangeImpact.applyBookingRuleUpdate(
+        clinicId,
+        ruleId,
+        bookingRuleInput,
+      );
+      return {
+        id: row.id,
+        clinic_id: row.clinicId,
+        doctor_id: row.doctorId,
+        clinic_service_id: row.clinicServiceId,
+        slot_duration_minutes: row.slotDurationMinutes,
+        capacity_per_slot: row.capacityPerSlot,
+        booking_horizon_days: BOOKING_HORIZON_DAYS,
+        effective_from: row.effectiveFrom,
+        active: row.active,
+        version: row.version,
+      };
     }
 
     const [existingRule] = await this.repos.slots.findBookingRule(clinicId, ruleId);
@@ -731,23 +724,12 @@ export class ClinicClinicalService {
           ...(bookingRuleInput.capacity_per_slot !== undefined
             ? { capacityPerSlot: bookingRuleInput.capacity_per_slot }
             : {}),
-          ...(bookingRuleInput.booking_horizon_days !== undefined
-            ? { bookingHorizonDays: bookingRuleInput.booking_horizon_days }
-            : {}),
+          bookingHorizonDays: BOOKING_HORIZON_DAYS,
           ...(bookingRuleInput.min_booking_notice_minutes !== undefined
             ? { minBookingNoticeMinutes: bookingRuleInput.min_booking_notice_minutes }
             : {}),
           ...(bookingRuleInput.max_advance_booking_days !== undefined
             ? { maxAdvanceBookingDays: bookingRuleInput.max_advance_booking_days }
-            : {}),
-          ...(bookingRuleInput.manual_edit_cutoff_before_start_minutes !== undefined
-            ? {
-                manualEditCutoffBeforeStartMinutes:
-                  bookingRuleInput.manual_edit_cutoff_before_start_minutes,
-              }
-            : {}),
-          ...(bookingRuleInput.manual_edit_max_shift_minutes !== undefined
-            ? { manualEditMaxShiftMinutes: bookingRuleInput.manual_edit_max_shift_minutes }
             : {}),
           ...(bookingRuleInput.effective_from !== undefined
             ? { effectiveFrom: bookingRuleInput.effective_from }
@@ -768,9 +750,8 @@ export class ClinicClinicalService {
       clinic_service_id: row.clinicServiceId,
       slot_duration_minutes: row.slotDurationMinutes,
       capacity_per_slot: row.capacityPerSlot,
-      booking_horizon_days: row.bookingHorizonDays,
-      manual_edit_cutoff_before_start_minutes: row.manualEditCutoffBeforeStartMinutes,
-      manual_edit_max_shift_minutes: row.manualEditMaxShiftMinutes,
+      booking_horizon_days: BOOKING_HORIZON_DAYS,
+      effective_from: row.effectiveFrom,
       active: row.active,
       version: row.version,
     };

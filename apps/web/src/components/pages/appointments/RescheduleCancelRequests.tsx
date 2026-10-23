@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { latestAppointmentActivities } from '@/lib/appointment-filters';
 import { EditablePatientName } from './EditablePatientName';
 import type { AppointmentActionRequest, AppointmentActivity } from './types';
 
@@ -24,6 +25,7 @@ export function RescheduleCancelRequests({
 }: RescheduleCancelRequestsProps) {
   const { effectiveRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
+  const latestActivities = latestAppointmentActivities(activities);
 
   if (!isAdmin) {
     return (
@@ -34,18 +36,21 @@ export function RescheduleCancelRequests({
     );
   }
 
-  const groupedRequests = requests.reduce((acc, request) => {
-    if (!acc[request.doctorId]) {
-      acc[request.doctorId] = {
-        doctorName: request.doctorName,
-        requests: [],
-      };
-    }
-    acc[request.doctorId]?.requests.push(request);
-    return acc;
-  }, {} as Record<string, { doctorName: string; requests: AppointmentActionRequest[] }>);
+  const groupedRequests = requests.reduce(
+    (acc, request) => {
+      if (!acc[request.doctorId]) {
+        acc[request.doctorId] = {
+          doctorName: request.doctorName,
+          requests: [],
+        };
+      }
+      acc[request.doctorId]?.requests.push(request);
+      return acc;
+    },
+    {} as Record<string, { doctorName: string; requests: AppointmentActionRequest[] }>,
+  );
 
-  if (requests.length === 0 && activities.length === 0) {
+  if (requests.length === 0 && latestActivities.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Reschedule / cancel requests</h3>
@@ -96,11 +101,11 @@ export function RescheduleCancelRequests({
         >
           Recent changes
         </h4>
-        {activities.length === 0 ? (
+        {latestActivities.length === 0 ? (
           <p className="text-sm text-slate-500">No completed reschedules or cancellations</p>
         ) : (
           <ul className="space-y-3">
-            {activities.map((activity) => (
+            {latestActivities.map((activity) => (
               <ActivityCard
                 key={activity.id}
                 activity={activity}
@@ -267,14 +272,18 @@ function RequestCard({
             patientName={request.patientName}
             onSave={(patientName) => onEditPatientName(request.appointmentId, patientName)}
           />
-          <p className="text-sm text-slate-600">{request.doctorName} · {request.serviceName}</p>
+          <p className="text-sm text-slate-600">
+            {request.doctorName} · {request.serviceName}
+          </p>
           <p className="mt-1 text-sm text-slate-700">{request.reason}</p>
         </div>
-        <span className={`rounded-full border-2 px-3 py-1 text-xs font-bold uppercase tracking-wider ${
-          request.actionType === 'reschedule'
-            ? 'border-amber-300 bg-amber-50 text-amber-700'
-            : 'border-red-300 bg-red-50 text-red-700'
-        }`}>
+        <span
+          className={`rounded-full border-2 px-3 py-1 text-xs font-bold uppercase tracking-wider ${
+            request.actionType === 'reschedule'
+              ? 'border-amber-300 bg-amber-50 text-amber-700'
+              : 'border-red-300 bg-red-50 text-red-700'
+          }`}
+        >
           {request.actionType}
         </span>
       </div>

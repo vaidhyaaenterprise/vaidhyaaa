@@ -315,6 +315,30 @@ describe('AppointmentsPageContent', () => {
     expect(within(missed).getByText('Past pending patient')).toBeInTheDocument();
   });
 
+  it('clears the date filter with All dates and restores current and future appointments', async () => {
+    const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow('today', 'Current pending patient', clinicToday),
+      appointmentRow('future', 'Future pending patient', shiftDate(clinicToday, 1)),
+    ]);
+
+    const { container } = render(<AppointmentsPageContent />);
+
+    expect(await screen.findByText('Current pending patient')).toBeInTheDocument();
+    expect(screen.getByText('Future pending patient')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Today' })).not.toBeInTheDocument();
+
+    const dateInput = container.querySelector('input[type="date"]');
+    expect(dateInput).not.toBeNull();
+    fireEvent.change(dateInput as HTMLInputElement, { target: { value: clinicToday } });
+    expect(screen.queryByText('Future pending patient')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
+    expect(dateInput).toHaveValue('');
+    expect(screen.getByText('Current pending patient')).toBeInTheDocument();
+    expect(screen.getByText('Future pending patient')).toBeInTheDocument();
+  });
+
   it('shows only today and future appointments in the confirmed block', async () => {
     const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
     mockedFetchAppointments.mockResolvedValue([

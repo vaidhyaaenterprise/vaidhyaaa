@@ -586,8 +586,6 @@ test('booking rule fields behave like fees and cannot save a duration below fift
             slot_duration_minutes: 30,
             capacity_per_slot: 3,
             booking_horizon_days: 45,
-            manual_edit_cutoff_before_start_minutes: 60,
-            manual_edit_max_shift_minutes: 60,
             active: true,
             version: 1,
           },
@@ -604,9 +602,6 @@ test('booking rule fields behave like fees and cannot save a duration below fift
   for (const [label, value] of [
     ['Slot duration (minutes)', '30'],
     ['Capacity per slot', '3'],
-    ['Booking horizon (days)', '45'],
-    ['Edit cutoff (minutes before start)', '60'],
-    ['Max edit shift (minutes)', '60'],
   ]) {
     const input = card.getByLabel(label!);
     await expect(input).toHaveAttribute('type', 'text');

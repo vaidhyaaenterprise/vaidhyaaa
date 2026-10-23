@@ -61,8 +61,6 @@ export interface BookingRules {
   slotDurationMinutes: number;
   capacityPerSlot: number;
   bookingHorizonDays: number;
-  manualEditCutoffBeforeStartMinutes: number;
-  manualEditMaxShiftMinutes: number;
   allowDoctorServiceEdit: boolean;
 }
 
