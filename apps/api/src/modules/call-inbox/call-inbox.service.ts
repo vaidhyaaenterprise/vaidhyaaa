@@ -1,7 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type DatabaseConnection, type Repositories } from '@vaidya/db';
-import type { CallInboxOutcome, CallInboxSource } from '@vaidya/shared';
+import {
+  CALL_INBOX_VISIBLE_DAYS,
+  type CallInboxOutcome,
+  type CallInboxSource,
+} from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 
@@ -150,10 +154,13 @@ export class CallInboxService {
     to?: Date;
     limit: number;
   }): Promise<{ items: CallInboxItem[]; next_cursor: null }> {
+    const now = new Date();
+    const earliest = new Date(now.getTime() - CALL_INBOX_VISIBLE_DAYS * 86_400_000);
     const range = {
-      ...(input.from ? { from: input.from } : {}),
-      ...(input.to ? { to: input.to } : {}),
+      from: input.from && input.from > earliest ? input.from : earliest,
+      to: input.to && input.to < now ? input.to : now,
     };
+    if (range.to < range.from) return { items: [], next_cursor: null };
     const [calls, bookings, actions, callbacks, emergencies, inquiryMessages] = await Promise.all([
       this.repos.callInbox.listCalls(input.clinicId, range),
       this.repos.callInbox.listVoiceAppointmentBookings(input.clinicId, range),
@@ -445,7 +452,16 @@ export class CallInboxService {
     }
 
     const selected = input.outcomes?.length ? new Set(input.outcomes) : null;
-    const filtered = selected ? items.filter((item) => selected.has(item.outcome)) : items;
+    // A linked call's timestamp can differ from the canonical source's creation
+    // time. Enforce the window again on the actual displayed call timestamp.
+    const filtered = items.filter((item) => {
+      const occurredAt = Date.parse(item.occurred_at);
+      return (
+        occurredAt >= range.from.getTime() &&
+        occurredAt <= range.to.getTime() &&
+        (!selected || selected.has(item.outcome))
+      );
+    });
     filtered.sort(
       (left, right) =>
         Date.parse(right.occurred_at) - Date.parse(left.occurred_at) ||

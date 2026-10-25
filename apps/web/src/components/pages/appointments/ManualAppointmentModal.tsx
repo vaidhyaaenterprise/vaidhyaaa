@@ -215,6 +215,12 @@ export function ManualAppointmentModal({
   const datePickerRef = useRef<HTMLDivElement | null>(null);
 
   const [showOverride, setShowOverride] = useState(false);
+  // Keep manual input separate from the selected DB slot. Until edited, seed
+  // the manual field from that slot without discarding the original selection.
+  const [manualOverrideTime, setManualOverrideTime] = useState<string | null>(null);
+  const effectiveAppointmentTime = showOverride
+    ? (manualOverrideTime ?? formData.appointmentTime)
+    : formData.appointmentTime;
   const [slotOptions, setSlotOptions] = useState<SlotOption[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
@@ -222,6 +228,10 @@ export function ManualAppointmentModal({
   const [checkingFollowupIdentity, setCheckingFollowupIdentity] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setManualOverrideTime(null);
+  }, [formData.appointmentDate, formData.doctorId, formData.serviceId]);
 
   const availableDoctors = useMemo(
     () => (isAdmin ? doctors : doctors.filter((doctor) => doctor.id === currentDoctorId)),
@@ -565,6 +575,7 @@ export function ManualAppointmentModal({
       appointmentEnd: undefined,
     });
     setShowOverride(false);
+    setManualOverrideTime(null);
     setSlotOptions([]);
     setSlotsError(null);
     setSubmitError(null);
@@ -616,7 +627,7 @@ export function ManualAppointmentModal({
       }
     }
 
-    if (!formData.appointmentDate || !formData.appointmentTime) {
+    if (!formData.appointmentDate || !effectiveAppointmentTime) {
       alert('Please select date and time.');
       return;
     }
@@ -640,6 +651,16 @@ export function ManualAppointmentModal({
     try {
       await onCreateAppointment({
         ...formData,
+        // A manual time must never be submitted with a retained slot ID/start/end,
+        // otherwise slot-backed booking would silently override the manual input.
+        ...(showOverride
+          ? {
+              appointmentTime: effectiveAppointmentTime,
+              slotId: undefined,
+              appointmentStart: undefined,
+              appointmentEnd: undefined,
+            }
+          : { overrideReason: undefined }),
         patientAge: String(parsedAge),
         ...(formData.patientDateOfBirth ? { patientDateOfBirth: formData.patientDateOfBirth } : {}),
       });
@@ -1035,10 +1056,14 @@ export function ManualAppointmentModal({
             </div>
 
             <div>
-              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+              <label
+                htmlFor="manual-appointment-slot"
+                className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+              >
                 Time *
               </label>
               <select
+                id="manual-appointment-slot"
                 value={formData.slotId ?? ''}
                 onChange={(e) => {
                   const selected = slotOptions.find((slot) => slot.slotId === e.target.value);
@@ -1090,21 +1115,17 @@ export function ManualAppointmentModal({
               )}
               {showOverride && (
                 <div className="mt-2">
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <label
+                    htmlFor="manual-appointment-override-time"
+                    className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                  >
                     Manual override time *
                   </label>
                   <input
+                    id="manual-appointment-override-time"
                     type="time"
-                    value={formData.appointmentTime}
-                    onChange={(e) =>
-                      setFormData((previous) => ({
-                        ...previous,
-                        slotId: '',
-                        appointmentTime: e.target.value,
-                        appointmentStart: undefined,
-                        appointmentEnd: undefined,
-                      }))
-                    }
+                    value={effectiveAppointmentTime}
+                    onChange={(e) => setManualOverrideTime(e.target.value)}
                     className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                     required={showOverride}
                   />
@@ -1167,30 +1188,7 @@ export function ManualAppointmentModal({
                 <input
                   type="checkbox"
                   checked={showOverride}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    setShowOverride(enabled);
-                    if (enabled) {
-                      setFormData((previous) => ({
-                        ...previous,
-                        slotId: '',
-                        appointmentTime: '',
-                        appointmentStart: undefined,
-                        appointmentEnd: undefined,
-                      }));
-                    } else {
-                      const firstSlot = slotOptions[0];
-                      if (firstSlot) {
-                        setFormData((previous) => ({
-                          ...previous,
-                          slotId: firstSlot.slotId,
-                          appointmentTime: extractTime(firstSlot.appointmentStart),
-                          appointmentStart: firstSlot.appointmentStart,
-                          appointmentEnd: firstSlot.appointmentEnd,
-                        }));
-                      }
-                    }
-                  }}
+                  onChange={(e) => setShowOverride(e.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
                 />
                 <span className="text-sm font-semibold text-slate-900">Override clinic hours</span>

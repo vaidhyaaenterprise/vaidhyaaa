@@ -67,12 +67,15 @@ vi.mock('@/lib/api/clinic-settings', () => ({
 vi.mock('@/components/pages/appointments/PendingAppointments', () => ({
   PendingAppointments: ({
     appointments,
+    emptyMessage,
     onEditPatientName,
   }: {
     appointments: Array<{ id: string; patientName: string }>;
+    emptyMessage?: string;
     onEditPatientName: (id: string, patientName: string) => Promise<void>;
   }) => (
     <section aria-label="Pending confirmation">
+      {appointments.length === 0 ? <p>{emptyMessage}</p> : null}
       {appointments.map((appointment) => (
         <div key={appointment.id}>
           <p>{appointment.patientName}</p>
@@ -119,10 +122,15 @@ vi.mock('@/components/pages/appointments/MissedAppointments', () => ({
 vi.mock('@/components/pages/appointments/RescheduleCancelRequests', () => ({
   RescheduleCancelRequests: ({
     activities,
+    requests,
   }: {
     activities: Array<{ id: string; patientName: string }>;
+    requests: Array<{ id: string; patientName: string }>;
   }) => (
     <section aria-label="Appointment requests">
+      {requests.map((request) => (
+        <p key={request.id}>{request.patientName}</p>
+      ))}
       {activities.map((activity) => (
         <p key={activity.id}>{activity.patientName}</p>
       ))}
@@ -272,9 +280,7 @@ describe('AppointmentsPageContent', () => {
   it('persists a patient name and reloads every appointment-related block', async () => {
     const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
     mockedFetchAppointments
-      .mockResolvedValueOnce([
-        appointmentRow('patient-name-1', 'Old Patient Name', clinicToday),
-      ])
+      .mockResolvedValueOnce([appointmentRow('patient-name-1', 'Old Patient Name', clinicToday)])
       .mockResolvedValueOnce([
         appointmentRow('patient-name-1', 'Updated Patient Name', clinicToday),
       ]);
@@ -337,6 +343,130 @@ describe('AppointmentsPageContent', () => {
     expect(dateInput).toHaveValue('');
     expect(screen.getByText('Current pending patient')).toBeInTheDocument();
     expect(screen.getByText('Future pending patient')).toBeInTheDocument();
+  });
+
+  it('filters the final reschedule or cancellation by its latest slot date and resets with All dates', async () => {
+    const today = getClinicDate(new Date(), 'Asia/Kolkata');
+    const selectedDate = shiftDate(today, 4);
+    const otherDate = shiftDate(today, 3);
+    mockedFetchAppointments.mockResolvedValue([]);
+    const earlier = appointmentActivityRow(
+      'earlier',
+      'Outdated change',
+      'reschedule',
+      today,
+      selectedDate,
+    );
+    const latest = {
+      ...appointmentActivityRow(
+        'latest',
+        'Latest other date',
+        'reschedule',
+        selectedDate,
+        otherDate,
+      ),
+      appointment_id: earlier.appointment_id,
+      occurred_at: `${today}T09:00:00Z`,
+    };
+    earlier.occurred_at = `${today}T08:00:00Z`;
+    mockedFetchAppointmentActivity.mockResolvedValue([
+      latest,
+      earlier,
+      {
+        ...appointmentActivityRow(
+          'matching',
+          'Matching reschedule',
+          'reschedule',
+          otherDate,
+          selectedDate,
+        ),
+        occurred_at: `${today}T07:00:00Z`,
+      },
+      {
+        ...appointmentActivityRow(
+          'cancelled',
+          'Matching cancellation',
+          'cancel',
+          today,
+          selectedDate,
+        ),
+        occurred_at: `${today}T06:00:00Z`,
+      },
+    ]);
+    render(<AppointmentsPageContent />);
+    const changes = await screen.findByRole('region', { name: 'Appointment requests' });
+    expect(within(changes).getByText('Latest other date')).toBeInTheDocument();
+    expect(within(changes).queryByText('Outdated change')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filter appointments by date'), {
+      target: { value: selectedDate },
+    });
+    expect(within(changes).queryByText('Latest other date')).not.toBeInTheDocument();
+    expect(within(changes).queryByText('Outdated change')).not.toBeInTheDocument();
+    expect(within(changes).getByText('Matching reschedule')).toBeInTheDocument();
+    expect(within(changes).getByText('Matching cancellation')).toBeInTheDocument();
+    const dateLabel = selectedDate.split('-').reverse().join('/');
+    expect(screen.getByText(`No pending appointments for ${dateLabel}.`)).toBeInTheDocument();
+    expect(screen.getByText(`No confirmed appointments for ${dateLabel}.`)).toBeInTheDocument();
+    expect(
+      screen.queryByText('Today and upcoming confirmed appointments.'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
+    expect(within(changes).getByText('Latest other date')).toBeInTheDocument();
+    expect(within(changes).queryByText('Outdated change')).not.toBeInTheDocument();
+    expect(screen.getByText('No current or upcoming pending appointments')).toBeInTheDocument();
+    expect(screen.getByText('Today and upcoming confirmed appointments.')).toBeInTheDocument();
+  });
+
+  it('filters pending requests by the current appointment date rather than an unapproved proposed date', async () => {
+    const today = getClinicDate(new Date(), 'Asia/Kolkata');
+    const selectedDate = shiftDate(today, 4);
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow('reschedule', 'Reschedule appointment', selectedDate, 'confirmed'),
+      appointmentRow('cancel', 'Cancel appointment', today, 'confirmed'),
+    ]);
+    const baseRequest = {
+      patient_name: 'Reschedule request',
+      doctor_id: 'doctor-1',
+      doctor_name: 'Doctor',
+      clinic_service_id: 'service-1',
+      service_name: 'Consultation',
+      requested_time_preference: 'morning',
+      requested_new_slot_id: null,
+      reason: 'Change plans',
+      status: 'pending',
+    };
+    mockedFetchAppointmentActionRequests.mockResolvedValue([
+      {
+        ...baseRequest,
+        id: 'reschedule-request',
+        appointment_id: 'reschedule',
+        action_type: 'reschedule',
+        requested_date: today,
+      },
+      {
+        ...baseRequest,
+        id: 'cancel-request',
+        appointment_id: 'cancel',
+        patient_name: 'Cancel request',
+        action_type: 'cancel',
+        requested_date: null,
+      },
+    ]);
+    render(<AppointmentsPageContent />);
+    const requests = await screen.findByRole('region', { name: 'Appointment requests' });
+    expect(within(requests).getByText('Cancel request')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Filter appointments by date'), {
+      target: { value: selectedDate },
+    });
+    expect(within(requests).getByText('Reschedule request')).toBeInTheDocument();
+    expect(within(requests).queryByText('Cancel request')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Filter appointments by date'), {
+      target: { value: today },
+    });
+    expect(within(requests).queryByText('Reschedule request')).not.toBeInTheDocument();
+    expect(within(requests).getByText('Cancel request')).toBeInTheDocument();
   });
 
   it('shows only today and future appointments in the confirmed block', async () => {

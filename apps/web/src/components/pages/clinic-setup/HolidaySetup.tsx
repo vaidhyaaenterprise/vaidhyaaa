@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RemoveIconButton } from '@/components/ui/RemoveIconButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
@@ -14,6 +15,7 @@ import {
   type HolidayApiRow,
 } from '@/lib/api/clinic-clinical';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
+import { getClinicDate } from '@/lib/home-dashboard';
 import { isAbortError, useAbortableLoad } from './useAbortableLoad';
 import { ScheduleConflictPanel } from './ScheduleConflictPanel';
 
@@ -79,18 +81,45 @@ function sameHoliday(left: Holiday, right: Holiday): boolean {
 export function HolidaySetup() {
   const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
+  const { profile, status: profileStatus, refresh: refreshProfile } = useClinicProfile();
   const isAdmin = effectiveRole === 'admin';
+  const [now, setNow] = useState(() => new Date());
+  const clinicDate = useMemo(() => {
+    if (profileStatus !== 'ready' || !profile?.timezone) return null;
+    try {
+      return getClinicDate(now, profile.timezone);
+    } catch {
+      return null;
+    }
+  }, [now, profile?.timezone, profileStatus]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [tempHolidays, setTempHolidays] = useState<Holiday[]>([]);
+  const [editingHolidayIds, setEditingHolidayIds] = useState<string[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
+  const visibleHolidays = clinicDate
+    ? holidays.filter((holiday) => holiday.active && holiday.date >= clinicDate)
+    : [];
+
+  useEffect(() => {
+    const refreshDate = () => setNow(new Date());
+    refreshDate();
+    const interval = window.setInterval(refreshDate, 60_000);
+    window.addEventListener('focus', refreshDate);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshDate);
+      document.removeEventListener('visibilitychange', refreshDate);
+    };
+  }, [clinicId]);
 
   const doctorNameById = useMemo(
     () => new Map(doctors.map((doctor) => [doctor.id, doctor.name])),
@@ -159,7 +188,8 @@ export function HolidaySetup() {
 
   const handleEdit = () => {
     setNotice(null);
-    setTempHolidays(holidays);
+    setTempHolidays(visibleHolidays);
+    setEditingHolidayIds(visibleHolidays.map((holiday) => holiday.id));
     setConflicts([]);
     setError(null);
     setIsEditing(true);
@@ -201,7 +231,9 @@ export function HolidaySetup() {
       const existingById = new Map(holidays.map((holiday) => [holiday.id, holiday]));
       const tempIds = new Set(tempHolidays.map((holiday) => holiday.id));
 
-      for (const holiday of holidays.filter((item) => !tempIds.has(item.id))) {
+      for (const holiday of holidays.filter(
+        (item) => editingHolidayIds.includes(item.id) && !tempIds.has(item.id),
+      )) {
         if (!isActive()) {
           return;
         }
@@ -211,7 +243,10 @@ export function HolidaySetup() {
         }
       }
 
-      const savedHolidays: Holiday[] = [];
+      // Hidden historical holidays were not removed by the administrator.
+      const savedHolidays: Holiday[] = holidays.filter(
+        (item) => !editingHolidayIds.includes(item.id),
+      );
       for (const holiday of tempHolidays) {
         if (!isActive()) {
           return;
@@ -358,11 +393,28 @@ export function HolidaySetup() {
     );
   }
 
-  if (loading) {
+  if (loading || profileStatus === 'idle' || profileStatus === 'loading') {
     return (
       <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading holidays" description="Fetching from the API." />
       </div>
+    );
+  }
+
+  if (!clinicDate) {
+    return (
+      <ErrorState
+        title="Could not load holidays"
+        description="Unable to determine the clinic's current date."
+      >
+        <button
+          type="button"
+          onClick={refreshProfile}
+          className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white"
+        >
+          Retry
+        </button>
+      </ErrorState>
     );
   }
 
@@ -403,41 +455,39 @@ export function HolidaySetup() {
       )}
       {!isEditing ? (
         <div className="space-y-2">
-          {holidays.length === 0 ? (
-            <p className="text-sm text-slate-500">No holidays configured</p>
+          {visibleHolidays.length === 0 ? (
+            <p className="text-sm text-slate-500">No current or upcoming holidays configured.</p>
           ) : (
-            holidays
-              .filter((holiday) => holiday.active)
-              .sort((left, right) => left.date.localeCompare(right.date))
-              .map((holiday) => (
-                <div
-                  key={holiday.id}
-                  className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words font-bold text-slate-900">
-                      {new Date(holiday.date).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </p>
-                    <p className="break-words text-sm text-slate-500">
-                      {holiday.reason || 'No reason set'}
-                    </p>
-                    <p className="break-words text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      {scopeLabel(holiday)}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => void removeSavedHoliday(holiday.id)}
-                    disabled={saving}
-                    className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
-                  >
-                    Remove
-                  </button>
+            visibleHolidays.map((holiday) => (
+              <div
+                key={holiday.id}
+                className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="break-words font-bold text-slate-900">
+                    {new Date(holiday.date).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                      timeZone: 'UTC',
+                    })}
+                  </p>
+                  <p className="break-words text-sm text-slate-500">
+                    {holiday.reason || 'No reason set'}
+                  </p>
+                  <p className="break-words text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {scopeLabel(holiday)}
+                  </p>
                 </div>
-              ))
+                <button
+                  onClick={() => void removeSavedHoliday(holiday.id)}
+                  disabled={saving}
+                  className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
+                >
+                  Remove
+                </button>
+              </div>
+            ))
           )}
         </div>
       ) : (

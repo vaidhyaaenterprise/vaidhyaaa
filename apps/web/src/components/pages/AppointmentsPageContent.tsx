@@ -51,7 +51,7 @@ import type {
   BookingRules,
 } from '@/components/pages/appointments/types';
 
-function filterByDate(appointments: Appointment[], date: string) {
+function filterByDate<T extends { appointmentDate: string }>(appointments: T[], date: string) {
   if (!date) {
     return appointments;
   }
@@ -426,16 +426,30 @@ export function AppointmentsPageContent() {
   const visibleMissed = filterByDate(missedPending, selectedDate);
   const visibleConfirmed = filterByDate(currentAndFutureConfirmed, selectedDate);
   const visibleVisited = filterByDate(visitedAppointments, selectedDate);
+  const selectedDateLabel = selectedDate ? selectedDate.split('-').reverse().join('/') : '';
+  // Pending requests still belong to their current appointment, not an unapproved proposed slot.
+  const appointmentDates = new Map(
+    [...pendingAppointments, ...confirmedAppointments, ...visitedAppointments].map(
+      (appointment) => [appointment.id, appointment.appointmentDate],
+    ),
+  );
+  const visibleActionRequests = selectedDate
+    ? actionRequests.filter((request) => appointmentDates.get(request.appointmentId) === selectedDate)
+    : actionRequests;
+  // Resolve the latest event before filtering so an older matching change cannot reappear.
   const visibleAppointmentActivities = useMemo(
     () =>
       clinicDate && clinicProfile?.timezone
-        ? filterRetainedAppointmentActivities(
-            appointmentActivities,
-            clinicDate,
-            clinicProfile.timezone,
+        ? filterByDate(
+            filterRetainedAppointmentActivities(
+              appointmentActivities,
+              clinicDate,
+              clinicProfile.timezone,
+            ),
+            selectedDate,
           )
         : [],
-    [appointmentActivities, clinicDate, clinicProfile?.timezone],
+    [appointmentActivities, clinicDate, clinicProfile?.timezone, selectedDate],
   );
 
   const pendingEmptyMessage =
@@ -443,7 +457,9 @@ export function AppointmentsPageContent() {
       ? 'Unable to determine the clinic date. Retry loading the clinic profile.'
       : clinicProfileStatus !== 'ready'
         ? 'Loading current and upcoming confirmations…'
-        : 'No current or upcoming pending appointments';
+        : selectedDateLabel
+          ? `No pending appointments for ${selectedDateLabel}.`
+          : 'No current or upcoming pending appointments';
 
   const handleConfirm = async (id: string) => {
     if (!clinicId) {
@@ -708,6 +724,7 @@ export function AppointmentsPageContent() {
           </button>
           <input
             type="date"
+            aria-label="Filter appointments by date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100"
@@ -744,7 +761,7 @@ export function AppointmentsPageContent() {
 
       {selectedDate && (
         <p className="mb-4 text-sm font-bold text-slate-600">
-          Showing appointments for: {selectedDate}
+          Showing appointments for: {selectedDateLabel}
         </p>
       )}
 
@@ -760,6 +777,7 @@ export function AppointmentsPageContent() {
         />
         <ConfirmedAppointments
           appointments={visibleConfirmed}
+          dateLabel={selectedDateLabel}
           minimumEditDate={clinicDate ?? undefined}
           onEditTime={handleEditTime}
           onCancel={handleCancel}
@@ -769,17 +787,20 @@ export function AppointmentsPageContent() {
         />
         <MissedAppointments
           appointments={visibleMissed}
+          dateLabel={selectedDateLabel}
           onEditPatientName={handleEditPatientName}
         />
         <VisitedPatients
           appointments={visibleVisited}
+          dateLabel={selectedDateLabel}
           onViewHistory={handleViewHistory}
           onEditPatientName={handleEditPatientName}
         />
         {isAdmin && (
           <RescheduleCancelRequests
-            requests={actionRequests}
+            requests={visibleActionRequests}
             activities={visibleAppointmentActivities}
+            dateLabel={selectedDateLabel}
             onApproveReschedule={handleApproveReschedule}
             onRejectRequest={handleRejectRequest}
             onCancelAppointment={handleCancelAppointment}

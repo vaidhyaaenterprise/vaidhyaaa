@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CallInboxPageContent } from '@/components/pages/call-inbox/CallInboxPageContent';
@@ -85,11 +85,7 @@ describe('CallInboxPageContent', () => {
     expect(screen.getByText('Callback summary')).toBeInTheDocument();
     expect(screen.getByText('Emergency summary')).toBeInTheDocument();
     expect(screen.queryByText('5:00')).not.toBeInTheDocument();
-    expect(mockedFetchCallInbox).toHaveBeenCalledWith(
-      CLINIC_ID,
-      [],
-      expect.any(AbortSignal),
-    );
+    expect(mockedFetchCallInbox).toHaveBeenCalledWith(CLINIC_ID, [], expect.any(AbortSignal));
     expect(mockedFetchCallInbox).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Emergency only')).not.toBeInTheDocument();
     expect(screen.queryByText('Callback only')).not.toBeInTheDocument();
@@ -116,6 +112,63 @@ describe('CallInboxPageContent', () => {
     expect(
       screen.queryByText('Transcript unavailable (expired or not available)'),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens lower calls in a viewport panel and restores focus without scrolling on close', async () => {
+    const { container } = render(<CallInboxPageContent />);
+    const callButton = await screen.findByRole('button', {
+      name: /View call details for Patient 6,/,
+    });
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    const previousOverflow = document.body.style.overflow;
+    callButton.focus();
+    fireEvent.click(callButton);
+
+    const panel = screen.getByRole('dialog', { name: 'Call details' });
+    expect(panel).toHaveAttribute('aria-modal', 'true');
+    expect(container.contains(panel)).toBe(false);
+    expect(panel.parentElement).toHaveClass('fixed', 'inset-0');
+    expect(within(panel).getByText('Patient 6')).toBeInTheDocument();
+    expect(within(panel).getByText('Emergency summary')).toBeInTheDocument();
+    const close = within(panel).getByRole('button', { name: 'Close call details' });
+    expect(close).toHaveFocus();
+    expect(document.body.style.overflow).toBe('hidden');
+
+    fireEvent.keyDown(close, { key: 'Tab' });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Call details' })).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe(previousOverflow);
+    expect(callButton).toHaveFocus();
+    expect(scrollTo).not.toHaveBeenCalled();
+    scrollTo.mockRestore();
+  });
+
+  it('closes with the button or backdrop, reopens another call, and cleans up on navigation', async () => {
+    const previousOverflow = document.body.style.overflow;
+    const { unmount } = render(<CallInboxPageContent />);
+    const first = await screen.findByRole('button', { name: /View call details for Patient 1,/ });
+    fireEvent.click(first);
+    fireEvent.mouseDown(screen.getByRole('heading', { name: 'Patient information' }));
+    expect(screen.getByRole('dialog', { name: 'Call details' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close call details' }));
+    expect(screen.queryByRole('dialog', { name: 'Call details' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /View call details for Patient 2,/ }));
+    let panel = screen.getByRole('dialog', { name: 'Call details' });
+    expect(within(panel).getByText('Cancelled summary')).toBeInTheDocument();
+    expect(within(panel).queryByText('Booked summary')).not.toBeInTheDocument();
+    fireEvent.mouseDown(panel.parentElement!);
+    expect(screen.queryByRole('dialog', { name: 'Call details' })).not.toBeInTheDocument();
+
+    fireEvent.click(first);
+    panel = screen.getByRole('dialog', { name: 'Call details' });
+    expect(within(panel).getByText('Booked summary')).toBeInTheDocument();
+    unmount();
+    expect(screen.queryByRole('dialog', { name: 'Call details' })).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe(previousOverflow);
   });
 
   it('supports checkbox multi-selection with OR semantics and All outcomes reset', async () => {
@@ -162,10 +215,11 @@ describe('CallInboxPageContent', () => {
     expect(mockedFetchCallInbox).toHaveBeenCalledTimes(1);
 
     await waitFor(() => expect(mockedFetchCallInbox).toHaveBeenCalledTimes(2));
-    expect(mockedFetchCallInbox).toHaveBeenLastCalledWith(CLINIC_ID, [
-      'appointment_cancelled',
-      'appointment_rescheduled',
-    ], expect.any(AbortSignal));
+    expect(mockedFetchCallInbox).toHaveBeenLastCalledWith(
+      CLINIC_ID,
+      ['appointment_cancelled', 'appointment_rescheduled'],
+      expect.any(AbortSignal),
+    );
   });
 
   it('closes the outcome menu with Escape', async () => {

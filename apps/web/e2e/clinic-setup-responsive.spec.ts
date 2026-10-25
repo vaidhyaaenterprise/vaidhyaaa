@@ -422,6 +422,7 @@ test('shows clear clinic conflicts and restricts manual patient phones to ten di
 test('holiday date edits clear old conflicts and saved holidays can be removed', async ({
   page,
 }) => {
+  await page.clock.setFixedTime(new Date('2026-10-19T12:00:00Z'));
   await mockClinicSetupApi(page);
   const holiday = {
     id: 'holiday-1',
@@ -484,7 +485,7 @@ test('holiday date edits clear old conflicts and saved holidays can be removed',
   await card.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(card.getByRole('status')).toContainText('Holidays saved');
   await card.getByRole('button', { name: 'Remove', exact: true }).click();
-  await expect(card).toContainText('No holidays configured');
+  await expect(card).toContainText('No current or upcoming holidays configured.');
 });
 
 test('shared doctor hours reject overlaps and save every active doctor through the bulk route', async ({

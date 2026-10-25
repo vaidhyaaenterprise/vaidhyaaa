@@ -3,5 +3,6 @@
   "framework": "nestjs",
   "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@vaidya/api && pnpm --filter @vaidya/api validate:deployment-env",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile --prod=false",
-  "outputDirectory": null
+  "outputDirectory": null,
+  "crons": [{ "path": "/internal/jobs/call-retention", "schedule": "30 3 * * *" }]
 }

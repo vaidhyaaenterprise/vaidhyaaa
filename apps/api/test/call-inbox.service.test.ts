@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DatabaseConnection, Repositories } from '@vaidya/db';
 
 import { CallInboxService } from '../src/modules/call-inbox/call-inbox.service';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-23T12:00:00Z'));
+});
+afterEach(() => vi.useRealTimers());
 
 function date(hour: number) {
   return new Date(`2026-09-22T${String(hour).padStart(2, '0')}:00:00.000Z`);
@@ -61,6 +67,70 @@ function call(id: string, sessionId: string | null, outcome: string, hour: numbe
 }
 
 describe('CallInboxService', () => {
+  it('enforces a fixed 30-day window on every source even when a caller requests older history', async () => {
+    const { service, callInbox } = makeService({});
+    await service.list({
+      clinicId: CLINIC_ID,
+      limit: 200,
+      from: new Date('2020-01-01'),
+      to: new Date('2030-01-01'),
+    });
+    for (const query of Object.values(callInbox)) {
+      expect(query).toHaveBeenCalledWith(CLINIC_ID, {
+        from: new Date('2026-08-24T12:00:00Z'),
+        to: new Date('2026-09-23T12:00:00Z'),
+      });
+    }
+  });
+
+  it('keeps the exact cutoff and null-start fallback but excludes older or future calls', async () => {
+    const old = {
+      ...call('old', null, 'general_inquiry', 1),
+      startedAt: new Date('2026-08-24T11:59:59.999Z'),
+    };
+    const boundary = { ...old, id: 'boundary', startedAt: new Date('2026-08-24T12:00:00Z') };
+    const fallback = { ...old, id: 'fallback', startedAt: null };
+    const future = { ...old, id: 'future', startedAt: new Date('2026-09-24T00:00:00Z') };
+    const { service } = makeService({ calls: [old, boundary, fallback, future] });
+    const result = await service.list({ clinicId: CLINIC_ID, limit: 200 });
+    expect(result.items.map((item) => item.id)).toEqual(['fallback', 'boundary']);
+  });
+
+  it('allows narrower ranges and returns no results for a wholly expired range', async () => {
+    const { service, callInbox } = makeService({});
+    await service.list({ clinicId: CLINIC_ID, limit: 200, from: date(1), to: date(5) });
+    expect(callInbox.listCalls).toHaveBeenCalledWith(CLINIC_ID, { from: date(1), to: date(5) });
+    vi.mocked(callInbox.listCalls).mockClear();
+    expect(
+      await service.list({ clinicId: CLINIC_ID, limit: 200, to: new Date('2026-01-01') }),
+    ).toEqual({ items: [], next_cursor: null });
+    expect(callInbox.listCalls).not.toHaveBeenCalled();
+  });
+
+  it('checks canonical entries against the displayed linked call timestamp, not appointment dates', async () => {
+    const linkedCall = call('linked-old-call', 'booking-session', 'appointment_booked', 1);
+    linkedCall.startedAt = new Date('2026-08-24T11:59:59.999Z');
+    const { service } = makeService({
+      calls: [linkedCall],
+      bookings: [
+        {
+          id: 'booking-1',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'booking-session',
+          patientPhone: '9876543210',
+          patientName: 'Patient',
+          patientId: null,
+          status: 'confirmed',
+          reasonForVisit: 'Review',
+          appointmentStart: '2026-11-01 09:00:00',
+          createdAt: date(1),
+          updatedAt: date(1),
+        },
+      ],
+    });
+    expect((await service.list({ clinicId: CLINIC_ID, limit: 200 })).items).toEqual([]);
+  });
+
   it('queries every canonical source for an unfiltered inbox request', async () => {
     const { service, callInbox } = makeService({});
 
@@ -217,10 +287,7 @@ describe('CallInboxService', () => {
     const result = await service.list({ clinicId: CLINIC_ID, limit: 200 });
 
     expect(result.items).toHaveLength(2);
-    expect(result.items.map((item) => item.source_id)).toEqual([
-      'booking-newer',
-      'booking-older',
-    ]);
+    expect(result.items.map((item) => item.source_id)).toEqual(['booking-newer', 'booking-older']);
     expect(result.items.map((item) => item.call_id)).toEqual(['raw-newer', 'raw-older']);
     expect(result.items.map((item) => item.occurred_at)).toEqual([
       date(2).toISOString(),

@@ -9,6 +9,7 @@ import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchCallInbox, type CallInboxApiRow } from '@/lib/api/clinic-clinical';
 
 import type { Call, CallFilters, CallOutcome } from './types';
+import { CallDetailsPanel } from './CallDetailsPanel';
 
 const OUTCOME_FILTER_DEBOUNCE_MS = 250;
 
@@ -62,6 +63,8 @@ export function CallInboxPageContent() {
   const requestSequence = useRef(0);
   const activeLoadControllerRef = useRef<AbortController | null>(null);
   const loadedClinicRef = useRef<string | null>(null);
+  const selectedCallTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const closeCallDetails = useCallback(() => setSelectedCall(null), []);
 
   const mapCallRows = (rows: unknown): Call[] => {
     if (!Array.isArray(rows)) {
@@ -216,7 +219,10 @@ export function CallInboxPageContent() {
   if (!isAdmin) {
     return (
       <>
-        <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
+        <PageHeader
+          title="Call inbox"
+          description="Review call outcomes and appointment details."
+        />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Call inbox is admin-only.</p>
         </div>
@@ -227,7 +233,10 @@ export function CallInboxPageContent() {
   if (loading) {
     return (
       <>
-        <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
+        <PageHeader
+          title="Call inbox"
+          description="Review call outcomes and appointment details."
+        />
         <LoadingState title="Loading calls" description="Fetching call inbox from the API." />
       </>
     );
@@ -236,7 +245,10 @@ export function CallInboxPageContent() {
   if (error) {
     return (
       <>
-        <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
+        <PageHeader
+          title="Call inbox"
+          description="Review call outcomes and appointment details."
+        />
         <ErrorState title="Could not load calls" description={error}>
           <button
             type="button"
@@ -412,122 +424,133 @@ export function CallInboxPageContent() {
         </div>
       </div>
 
-      <div className="portal-card-grid gap-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-lg font-bold text-slate-900">Call list</h3>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-1 text-lg font-bold text-slate-900">Call list</h3>
+        <p className="mb-4 text-sm text-slate-500">Calls from the last 30 days.</p>
 
-          {filteredCalls.length === 0 ? (
-            <p className="text-sm text-slate-500">No calls match the current filters</p>
-          ) : (
-            <div className="space-y-2">
-              {filteredCalls.map((call) => (
-                <div
-                  key={call.id}
-                  onClick={() => setSelectedCall(call)}
-                  className={`cursor-pointer rounded-xl border p-4 transition-colors ${
-                    selectedCall?.id === call.id
-                      ? 'border-teal-500 bg-teal-50'
-                      : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="mb-1 flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold text-slate-900">
-                          {formatTime(call.callTime)}
-                        </span>
-                        <span className="text-xs text-slate-500">{formatDate(call.callTime)}</span>
-                      </div>
-                      <p className="text-sm text-slate-600">{call.callerPhone}</p>
-                      {call.patientName && (
-                        <p className="text-sm font-semibold text-slate-900">{call.patientName}</p>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      {getOutcomeBadge(call.outcome, call.sourceStatus)}
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-500">{call.summary}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {selectedCall && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold text-slate-900">Call details</h3>
-
-            <div className="space-y-4">
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                  Patient information
-                </h4>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {selectedCall.patientName || 'Unknown'}
-                  </p>
-                  <p className="text-sm text-slate-600">{selectedCall.callerPhone}</p>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                  Summary
-                </h4>
-                <p className="text-sm text-slate-700">{selectedCall.summary}</p>
-              </div>
-
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                  Outcome
-                </h4>
-                {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
-              </div>
-
-              {selectedCall.linkedAppointmentStart && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Appointment date and time
-                  </h4>
-                  <p className="text-sm font-semibold text-slate-700">
-                    {formatAppointmentDateTime(selectedCall.linkedAppointmentStart)}
-                  </p>
-                </div>
-              )}
-
-              {selectedCall.linkedCallbackId && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Linked callback
-                  </h4>
-                  <p className="text-sm text-slate-700">{selectedCall.linkedCallbackId}</p>
-                </div>
-              )}
-
-              {selectedCall.linkedEmergencyId && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Linked emergency
-                  </h4>
-                  <p className="text-sm text-slate-700">{selectedCall.linkedEmergencyId}</p>
-                </div>
-              )}
-
-              {selectedCall.intent && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                    Intent/Source
-                  </h4>
-                  <p className="text-sm text-slate-700">
-                    {selectedCall.intent} · {selectedCall.source}
-                  </p>
-                </div>
-              )}
-            </div>
+        {filteredCalls.length === 0 ? (
+          <p className="text-sm text-slate-500">No calls in the last 30 days match the current filters.</p>
+        ) : (
+          <div className="space-y-2">
+            {filteredCalls.map((call) => (
+              <button
+                key={call.id}
+                type="button"
+                aria-haspopup="dialog"
+                aria-label={`View call details for ${call.patientName || call.callerPhone}, ${formatDate(call.callTime)} at ${formatTime(call.callTime)}`}
+                onClick={(event) => {
+                  selectedCallTriggerRef.current = event.currentTarget;
+                  setOutcomeMenuOpen(false);
+                  setSelectedCall(call);
+                }}
+                className={`block w-full rounded-xl border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2 ${
+                  selectedCall?.id === call.id
+                    ? 'border-teal-500 bg-teal-50'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <span className="mb-2 flex items-start justify-between gap-3">
+                  <span className="min-w-0 flex-1">
+                    <span className="mb-1 flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">
+                        {formatTime(call.callTime)}
+                      </span>
+                      <span className="text-xs text-slate-500">{formatDate(call.callTime)}</span>
+                    </span>
+                    <span className="block text-sm text-slate-600">{call.callerPhone}</span>
+                    {call.patientName && (
+                      <span className="block text-sm font-semibold text-slate-900">
+                        {call.patientName}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex shrink-0 flex-col gap-1">
+                    {getOutcomeBadge(call.outcome, call.sourceStatus)}
+                  </span>
+                </span>
+                <span className="block break-words text-xs text-slate-500">{call.summary}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>
+
+      {selectedCall && (
+        <CallDetailsPanel
+          key={selectedCall.id}
+          callTimeLabel={`${formatDate(selectedCall.callTime)} at ${formatTime(selectedCall.callTime)}`}
+          returnFocusTo={selectedCallTriggerRef.current}
+          onClose={closeCallDetails}
+        >
+          <div className="space-y-4">
+            <div>
+              <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                Patient information
+              </h4>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  {selectedCall.patientName || 'Unknown'}
+                </p>
+                <p className="text-sm text-slate-600">{selectedCall.callerPhone}</p>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                Summary
+              </h4>
+              <p className="text-sm text-slate-700">{selectedCall.summary}</p>
+            </div>
+
+            <div>
+              <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                Outcome
+              </h4>
+              {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
+            </div>
+
+            {selectedCall.linkedAppointmentStart && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Appointment date and time
+                </h4>
+                <p className="text-sm font-semibold text-slate-700">
+                  {formatAppointmentDateTime(selectedCall.linkedAppointmentStart)}
+                </p>
+              </div>
+            )}
+
+            {selectedCall.linkedCallbackId && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Linked callback
+                </h4>
+                <p className="text-sm text-slate-700">{selectedCall.linkedCallbackId}</p>
+              </div>
+            )}
+
+            {selectedCall.linkedEmergencyId && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Linked emergency
+                </h4>
+                <p className="text-sm text-slate-700">{selectedCall.linkedEmergencyId}</p>
+              </div>
+            )}
+
+            {selectedCall.intent && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Intent/Source
+                </h4>
+                <p className="text-sm text-slate-700">
+                  {selectedCall.intent} · {selectedCall.source}
+                </p>
+              </div>
+            )}
+          </div>
+        </CallDetailsPanel>
+      )}
     </>
   );
 }

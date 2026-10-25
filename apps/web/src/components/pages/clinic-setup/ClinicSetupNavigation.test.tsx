@@ -72,6 +72,10 @@ vi.mock('@/hooks/useActiveClinicId', () => ({
   useActiveClinicId: () => activeClinicId,
 }));
 
+vi.mock('@/components/clinic/ClinicProfileProvider', () => ({
+  useClinicProfile: () => ({ profile: { timezone: 'Asia/Kolkata' }, status: 'ready' }),
+}));
+
 vi.mock('@/lib/api/clinic-clinical', () => ({
   createDoctor: vi.fn(),
   createDoctorService: vi.fn(),

@@ -6,6 +6,7 @@ import type { Appointment } from './types';
 
 interface ConfirmedAppointmentsProps {
   appointments: Appointment[];
+  dateLabel?: string;
   minimumEditDate?: string | undefined;
   onEditTime: (id: string, newDate: string, newTime: string) => Promise<void>;
   onCancel: (id: string) => Promise<void>;
@@ -16,6 +17,7 @@ interface ConfirmedAppointmentsProps {
 
 export function ConfirmedAppointments({
   appointments,
+  dateLabel,
   minimumEditDate,
   onEditTime,
   onCancel,
@@ -26,6 +28,12 @@ export function ConfirmedAppointments({
   const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
   const currentDoctorId = clinicRole?.doctor_id;
+  const description = dateLabel
+    ? `Confirmed appointments for ${dateLabel}.`
+    : 'Today and upcoming confirmed appointments.';
+  const emptyMessage = dateLabel
+    ? `No confirmed appointments for ${dateLabel}.`
+    : 'No current or upcoming confirmed appointments';
 
   const filteredAppointments = isAdmin
     ? appointments
@@ -46,8 +54,8 @@ export function ConfirmedAppointments({
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-1 text-lg font-bold text-slate-900">Confirmed appointments</h3>
-        <p className="mb-4 text-sm text-slate-500">Today and upcoming confirmed appointments.</p>
-        <p className="text-sm text-slate-500">No current or upcoming confirmed appointments</p>
+        <p className="mb-4 text-sm text-slate-500">{description}</p>
+        <p className="text-sm text-slate-500">{emptyMessage}</p>
       </div>
     );
   }
@@ -55,7 +63,7 @@ export function ConfirmedAppointments({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="mb-1 text-lg font-bold text-slate-900">Confirmed appointments</h3>
-      <p className="mb-4 text-sm text-slate-500">Today and upcoming confirmed appointments.</p>
+      <p className="mb-4 text-sm text-slate-500">{description}</p>
       <div className="space-y-4">
         {Object.entries(groupedAppointments).map(([doctorId, group]) => (
           <div key={doctorId} className="rounded-xl border border-slate-200 bg-slate-50 p-4">

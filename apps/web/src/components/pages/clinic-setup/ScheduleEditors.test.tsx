@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ClinicHours } from '@/components/pages/clinic-setup/ClinicHours';
@@ -15,6 +15,7 @@ import {
   replaceAllDoctorSchedules,
   fetchHolidays,
   patchHoliday,
+  type HolidayApiRow,
 } from '@/lib/api/clinic-clinical';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
@@ -39,6 +40,10 @@ vi.mock('@/components/auth/AuthProvider', () => ({
 
 vi.mock('@/hooks/useActiveClinicId', () => ({
   useActiveClinicId: () => CLINIC_ID,
+}));
+
+vi.mock('@/components/clinic/ClinicProfileProvider', () => ({
+  useClinicProfile: () => ({ profile: { timezone: 'Asia/Kolkata' }, status: 'ready' }),
 }));
 
 vi.mock('@/lib/api/clinic-clinical', () => ({
@@ -317,6 +322,96 @@ describe('DoctorSchedule', () => {
 });
 
 describe('HolidaySetup', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-19T12:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function holiday(id: string, date: string, reason: string): HolidayApiRow {
+    return {
+      id,
+      holiday_date: date,
+      reason,
+      active: true,
+      is_full_day: true,
+      applies_to_clinic: true,
+      doctor_ids: [],
+    };
+  }
+
+  it('hides completed holidays in view and edit mode using the clinic date rather than UTC', async () => {
+    // UTC is still Oct 23, but the clinic in India has reached Oct 24.
+    vi.setSystemTime(new Date('2026-10-23T20:00:00Z'));
+    vi.mocked(fetchHolidays).mockResolvedValue([
+      holiday('old', '2026-10-23', 'Completed holiday'),
+      holiday('today', '2026-10-24', 'Today holiday'),
+      {
+        ...holiday('tomorrow', '2026-10-25', 'Doctor holiday'),
+        applies_to_clinic: false,
+        doctor_ids: [DOCTOR_ID],
+      },
+      { ...holiday('inactive', '2026-10-26', 'Inactive holiday'), active: false },
+    ]);
+    render(<HolidaySetup />);
+    expect(await screen.findByText('Today holiday')).toBeInTheDocument();
+    expect(screen.getByText('Doctor holiday')).toBeInTheDocument();
+    expect(screen.queryByText('Completed holiday')).not.toBeInTheDocument();
+    expect(screen.queryByText('Inactive holiday')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(
+      screen.getAllByLabelText('Holiday date').map((input) => (input as HTMLInputElement).value),
+    ).toEqual(['2026-10-24', '2026-10-25']);
+    expect(screen.queryByDisplayValue('Completed holiday')).not.toBeInTheDocument();
+    expect(patchHoliday).not.toHaveBeenCalled();
+  });
+
+  it('does not deactivate hidden historical holidays when a visible holiday is removed and saved', async () => {
+    vi.setSystemTime(new Date('2026-10-24T12:00:00Z'));
+    vi.mocked(fetchHolidays).mockResolvedValue([
+      {
+        ...holiday('old', '2026-10-23', 'Completed holiday'),
+        applies_to_clinic: false,
+        doctor_ids: [],
+      },
+      holiday('future', '2026-10-25', 'Future holiday'),
+    ]);
+    render(<HolidaySetup />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove holiday Future holiday' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(
+      await screen.findByText('No current or upcoming holidays configured.'),
+    ).toBeInTheDocument();
+    expect(patchHoliday).toHaveBeenCalledTimes(1);
+    expect(patchHoliday).toHaveBeenCalledWith(CLINIC_ID, 'future', { active: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.queryByLabelText('Holiday date')).not.toBeInTheDocument();
+  });
+
+  it.each(['focus', 'timer'])(
+    'hides a holiday after clinic midnight without reloading (%s)',
+    async (refresh) => {
+      vi.useRealTimers();
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+      vi.setSystemTime(new Date('2026-10-23T18:29:30Z'));
+      vi.mocked(fetchHolidays).mockResolvedValue([
+        holiday('ending', '2026-10-23', 'Ending holiday'),
+      ]);
+      render(<HolidaySetup />);
+      expect(await screen.findByText('Ending holiday')).toBeInTheDocument();
+      if (refresh === 'focus') {
+        vi.setSystemTime(new Date('2026-10-23T18:31:00Z'));
+        fireEvent(window, new Event('focus'));
+      } else {
+        act(() => vi.advanceTimersByTime(60_000));
+      }
+      expect(screen.queryByText('Ending holiday')).not.toBeInTheDocument();
+      expect(screen.getByText('No current or upcoming holidays configured.')).toBeInTheDocument();
+      expect(fetchHolidays).toHaveBeenCalledTimes(1);
+      expect(patchHoliday).not.toHaveBeenCalled();
+    },
+  );
   it('clears a stale conflict after the date changes and allows saving again', async () => {
     vi.mocked(patchHoliday).mockRejectedValueOnce(conflictError('outside_clinic_hours'));
     render(<HolidaySetup />);
@@ -346,7 +441,9 @@ describe('HolidaySetup', () => {
     await waitFor(() =>
       expect(patchHoliday).toHaveBeenCalledWith(CLINIC_ID, 'holiday-1', { active: false }),
     );
-    expect(await screen.findByText('No holidays configured')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No current or upcoming holidays configured.'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Disable' })).not.toBeInTheDocument();
   });
 });

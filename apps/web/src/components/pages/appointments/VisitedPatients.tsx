@@ -6,18 +6,23 @@ import type { Appointment } from './types';
 
 interface VisitedPatientsProps {
   appointments: Appointment[];
+  dateLabel?: string;
   onViewHistory: (patientPhone: string) => void;
   onEditPatientName: (id: string, patientName: string) => Promise<void>;
 }
 
 export function VisitedPatients({
   appointments,
+  dateLabel,
   onViewHistory,
   onEditPatientName,
 }: VisitedPatientsProps) {
   const { effectiveRole, clinicRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
   const currentDoctorId = clinicRole?.doctor_id;
+  const description = dateLabel
+    ? `Patients with appointments on ${dateLabel} who completed their consultation.`
+    : 'Patients who completed their consultation.';
 
   const filteredAppointments = isAdmin
     ? appointments
@@ -38,8 +43,10 @@ export function VisitedPatients({
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Visited</h3>
-        <p className="mb-2 text-sm text-slate-500">Patients who completed their consultation.</p>
-        <p className="text-sm text-slate-500">No visited patients yet.</p>
+        <p className="mb-2 text-sm text-slate-500">{description}</p>
+        <p className="text-sm text-slate-500">
+          {dateLabel ? `No visited patients for ${dateLabel}.` : 'No visited patients yet.'}
+        </p>
       </div>
     );
   }
@@ -47,7 +54,7 @@ export function VisitedPatients({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="mb-4 text-lg font-bold text-slate-900">Visited</h3>
-      <p className="mb-4 text-sm text-slate-500">Patients who completed their consultation.</p>
+      <p className="mb-4 text-sm text-slate-500">{description}</p>
       <div className="space-y-4">
         {Object.entries(groupedAppointments).map(([doctorId, group]) => (
           <div key={doctorId} className="rounded-xl border border-slate-200 bg-slate-50 p-4">

@@ -67,6 +67,10 @@ vi.mock('@/hooks/useActiveClinicId', () => ({
   useActiveClinicId: () => activeClinicId,
 }));
 
+vi.mock('@/components/clinic/ClinicProfileProvider', () => ({
+  useClinicProfile: () => ({ profile: { timezone: 'Asia/Kolkata' }, status: 'ready' }),
+}));
+
 vi.mock('@/lib/api/clinic-clinical', () => ({
   createHoliday: vi.fn(),
   fetchBookingRules: vi.fn(),
@@ -146,7 +150,10 @@ beforeEach(() => {
   );
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('Clinic Setup mutation navigation safety', () => {
   it('edits only the latest rule of each service, not the earlier effective snapshots', async () => {
@@ -268,6 +275,8 @@ describe('Clinic Setup mutation navigation safety', () => {
   });
 
   it('stops a multi-holiday save before issuing the next write after an A-B-A switch', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
     const firstPatch = deferred<HolidayApiRow>();
     mockedPatchHoliday.mockReturnValueOnce(firstPatch.promise);
 

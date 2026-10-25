@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gte, inArray, lt, lte, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -6,6 +6,7 @@ import {
   appointmentRequests,
   callbackRequests,
   calls,
+  callTranscripts,
   conversationMessages,
   conversationSessions,
   emergencyIncidents,
@@ -45,8 +46,9 @@ export class CallInboxRepository {
 
   listCalls(clinicId: string, range: InboxDateRange = {}) {
     const filters = [eq(calls.clinicId, clinicId)];
-    if (range.from) filters.push(gte(calls.startedAt, range.from));
-    if (range.to) filters.push(lte(calls.startedAt, range.to));
+    const occurredAt = sql`coalesce(${calls.startedAt}, ${calls.createdAt})`;
+    if (range.from) filters.push(gte(occurredAt, range.from));
+    if (range.to) filters.push(lte(occurredAt, range.to));
 
     return this.db
       .select({
@@ -89,6 +91,51 @@ export class CallInboxRepository {
       .where(and(...filters))
       .orderBy(desc(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`))
       .limit(MAX_SOURCE_ROWS);
+  }
+
+  listExpiredCalls(cutoff: Date, limit: number, clinicId?: string) {
+    return this.db
+      .select()
+      .from(calls)
+      .where(
+        and(
+          lt(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`, cutoff),
+          ...(clinicId ? [eq(calls.clinicId, clinicId)] : []),
+        ),
+      )
+      .orderBy(asc(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`), asc(calls.id))
+      .limit(limit);
+  }
+
+  /** Delete call history, not the operational records created during a call. */
+  deleteExpiredCall(clinicId: string, callId: string, cutoff: Date) {
+    return this.db.transaction(async (tx) => {
+      const callFilter = and(
+        eq(calls.clinicId, clinicId),
+        eq(calls.id, callId),
+        lt(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`, cutoff),
+      );
+      const [expired] = await tx
+        .select({ id: calls.id })
+        .from(calls)
+        .where(callFilter)
+        .for('update');
+      if (!expired) return false;
+
+      // Composite SET NULL foreign keys also include non-null clinic_id.
+      // Detach only source_call_id explicitly before deleting the parent.
+      for (const table of [appointmentActionRequests, callbackRequests, emergencyIncidents]) {
+        await tx
+          .update(table)
+          .set({ sourceCallId: null })
+          .where(and(eq(table.clinicId, clinicId), eq(table.sourceCallId, callId)));
+      }
+      await tx
+        .delete(callTranscripts)
+        .where(and(eq(callTranscripts.clinicId, clinicId), eq(callTranscripts.callId, callId)));
+      await tx.delete(calls).where(callFilter);
+      return true;
+    });
   }
 
   listVoiceAppointmentBookings(clinicId: string, range: InboxDateRange = {}) {

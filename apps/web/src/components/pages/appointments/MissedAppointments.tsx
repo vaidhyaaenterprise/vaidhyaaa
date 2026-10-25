@@ -6,6 +6,7 @@ import type { Appointment } from './types';
 
 interface MissedAppointmentsProps {
   appointments: Appointment[];
+  dateLabel?: string;
   onEditPatientName: (id: string, patientName: string) => Promise<void>;
 }
 
@@ -21,7 +22,11 @@ function formatDate(date: string) {
   return year && month && day ? `${day}/${month}/${year}` : date;
 }
 
-export function MissedAppointments({ appointments, onEditPatientName }: MissedAppointmentsProps) {
+export function MissedAppointments({
+  appointments,
+  dateLabel,
+  onEditPatientName,
+}: MissedAppointmentsProps) {
   const { effectiveRole, clinicRole } = useAuth();
   const currentDoctorId = clinicRole?.doctor_id;
   const visibleAppointments =
@@ -38,11 +43,15 @@ export function MissedAppointments({ appointments, onEditPatientName }: MissedAp
         Missed actions
       </h3>
       <p className="mb-4 text-sm text-slate-500">
-        Previous-day confirmations where no clinic-admin action was taken.
+        {dateLabel
+          ? `Appointments for ${dateLabel} where no clinic-admin action was taken.`
+          : 'Recent past appointments where no clinic-admin action was taken.'}
       </p>
 
       {visibleAppointments.length === 0 ? (
-        <p className="text-sm text-slate-500">No missed actions</p>
+        <p className="text-sm text-slate-500">
+          {dateLabel ? `No missed actions for ${dateLabel}.` : 'No missed actions'}
+        </p>
       ) : (
         <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
           {visibleAppointments.map((appointment) => (

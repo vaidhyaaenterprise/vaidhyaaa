@@ -9,6 +9,7 @@ import type { AppointmentActionRequest, AppointmentActivity } from './types';
 interface RescheduleCancelRequestsProps {
   requests: AppointmentActionRequest[];
   activities: AppointmentActivity[];
+  dateLabel?: string;
   onApproveReschedule: (requestId: string, newDate: string, newTime: string) => Promise<void>;
   onRejectRequest: (requestId: string) => Promise<void>;
   onCancelAppointment: (requestId: string) => Promise<void>;
@@ -18,6 +19,7 @@ interface RescheduleCancelRequestsProps {
 export function RescheduleCancelRequests({
   requests,
   activities,
+  dateLabel,
   onApproveReschedule,
   onRejectRequest,
   onCancelAppointment,
@@ -54,7 +56,11 @@ export function RescheduleCancelRequests({
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Reschedule / cancel requests</h3>
-        <p className="text-sm text-slate-500">No pending requests or recent changes</p>
+        <p className="text-sm text-slate-500">
+          {dateLabel
+            ? `No pending requests or recent changes for appointments on ${dateLabel}.`
+            : 'No pending requests or recent changes'}
+        </p>
       </div>
     );
   }
@@ -91,7 +97,9 @@ export function RescheduleCancelRequests({
           </div>
         </section>
       ) : (
-        <p className="mb-5 text-sm text-slate-500">No pending requests</p>
+        <p className="mb-5 text-sm text-slate-500">
+          {dateLabel ? `No pending requests for appointments on ${dateLabel}.` : 'No pending requests'}
+        </p>
       )}
 
       <section aria-labelledby="appointment-activity-heading">
@@ -102,7 +110,11 @@ export function RescheduleCancelRequests({
           Recent changes
         </h4>
         {latestActivities.length === 0 ? (
-          <p className="text-sm text-slate-500">No completed reschedules or cancellations</p>
+          <p className="text-sm text-slate-500">
+            {dateLabel
+              ? `No completed reschedules or cancellations for appointments on ${dateLabel}.`
+              : 'No completed reschedules or cancellations'}
+          </p>
         ) : (
           <ul className="space-y-3">
             {latestActivities.map((activity) => (
