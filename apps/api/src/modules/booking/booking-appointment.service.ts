@@ -36,6 +36,7 @@ export type CreateFromFreshHoldInput = {
   reasonForVisit: string;
   routingSource?: string | null;
   expectedDoctorId?: string;
+  expectedClinicServiceId?: string;
 };
 
 @Injectable()
@@ -107,6 +108,7 @@ export class BookingAppointmentService {
       reasonForVisit: input.reasonForVisit,
       routingSource: input.routingSource ?? null,
       ...(input.expectedDoctorId ? { expectedDoctorId: input.expectedDoctorId } : {}),
+      ...(input.expectedClinicServiceId ? { expectedClinicServiceId: input.expectedClinicServiceId } : {}),
     });
 
     const finalized = await this.finalizeAppointment(input, appointment);

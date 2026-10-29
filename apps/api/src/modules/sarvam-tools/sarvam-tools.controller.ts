@@ -37,8 +37,10 @@ import { SlotHoldService } from '../slots/slot-hold.service';
 import { SlotService } from '../slots/slot.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipApiEnvelope } from '../../common/decorators/skip-api-envelope.decorator';
+import { publicService, resolveSarvamRouting, type RoutingService } from './sarvam-routing';
 
 const CLINIC_INFO_TOPICS = [
+  'services',
   'fee',
   'timing',
   'location',
@@ -95,11 +97,12 @@ function parseTimePreference(value: unknown): TimePreference | null {
 function normalizeTimeTo24h(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim().replace(/^0+(?=\d)/, '');
-  const match = /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(trimmed);
+  const match = /^(\d{1,2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i.exec(trimmed);
   if (!match) return null;
   let hour = Number(match[1]);
-  const minute = Number(match[2]);
+  const minute = Number(match[2] ?? '0');
   const period = (match[3] ?? '').toUpperCase();
+  if (period && (hour < 1 || hour > 12)) return null;
   if (period === 'PM' && hour < 12) hour += 12;
   if (period === 'AM' && hour === 12) hour = 0;
   if (hour > 23 || minute > 59) return null;
@@ -172,7 +175,8 @@ function formatTimeText(startTime: string): string {
   if (!parsed) return startTime.slice(11, 16);
   const hour12 = parsed.hour % 12 === 0 ? 12 : parsed.hour % 12;
   const minute = String(parsed.minute).padStart(2, '0');
-  const period = parsed.hour < 12 ? 'in the morning' : 'in the evening';
+  const period =
+    parsed.hour < 12 ? 'in the morning' : parsed.hour < 17 ? 'in the afternoon' : 'in the evening';
   return `${hour12}:${minute} ${period}`;
 }
 
@@ -279,6 +283,8 @@ export class SarvamToolsController {
       sessionId,
       clinicId: clinic.id,
       clinicName: clinic.name,
+      currentDate: formatDateInTimezone(new Date(), timezone),
+      timezone,
       location: {
         address: addressParts.join(', ') || null,
         city: clinic.city ?? null,
@@ -302,6 +308,7 @@ export class SarvamToolsController {
     if (!topic || !CLINIC_INFO_TOPICS.includes(topic)) {
       return { error: 'invalid_topic', allowed: CLINIC_INFO_TOPICS };
     }
+    if (topic === 'services') return { topic, ...(await this.listServices(query, req)) };
 
     const doctorId = readParam(b, req, 'doctor_id');
     const day = readParam(b, req, 'day');
@@ -456,27 +463,13 @@ export class SarvamToolsController {
     const clinicId = readParam(b, req, 'clinic_id');
     if (!clinicId) return { error: 'clinic_id_required' };
 
-    const services = await this.repos.clinical.listServices(clinicId);
-    const active = services.filter((service) => service.active);
-
-    const servicesWithDoctors = [];
-    for (const service of active) {
-      const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
-        clinicId,
-        service.id,
-      );
-      servicesWithDoctors.push({
-        clinicServiceId: service.id,
-        name: service.serviceName,
-        serviceKey: service.serviceKey,
-        doctors: mappings.map((mapping) => ({
-          doctorId: mapping.doctorId,
-          doctorName: mapping.doctorName,
-        })),
-      });
-    }
-
-    return { found: servicesWithDoctors.length > 0, services: servicesWithDoctors };
+    const catalog = await this.serviceCatalog(clinicId);
+    return {
+      found: catalog.length > 0,
+      services: catalog.map(publicService),
+      serviceNames: catalog.map((service) => service.name),
+      servicesText: catalog.map((service) => service.name).join(', '),
+    };
   }
 
   @Public()
@@ -485,62 +478,15 @@ export class SarvamToolsController {
     const b = parseBody(query);
     const clinicId = readParam(b, req, 'clinic_id');
     if (!clinicId) return { error: 'clinic_id_required' };
-    const reasonForVisit = readParam(b, req, 'reason_for_visit');
-    const serviceKeyInput = readParam(b, req, 'service_key');
-    if (!reasonForVisit && !serviceKeyInput) {
-      return { matched: false, error: 'reason_or_service_key_required' };
-    }
-
-    const services = await this.repos.clinical.listServices(clinicId);
-    const activeClinicServices = services
-      .filter((s) => s.active)
-      .map((s) => ({
-        id: s.id,
-        serviceKey: s.serviceKey,
-        serviceName: s.serviceName,
-        handlesJson: s.handlesJson,
-        doesNotHandleJson: s.doesNotHandleJson,
-        redFlagsJson: s.redFlagsJson,
-        routingExamplesJson: s.routingExamplesJson,
-      }));
-
-    let resolvedServiceId: string | null = null;
-
-    if (serviceKeyInput) {
-      const byKey = activeClinicServices.find((s) => s.serviceKey === serviceKeyInput);
-      if (byKey) resolvedServiceId = byKey.id;
-    } else {
-      if (!reasonForVisit) return { matched: false, error: 'reason_for_visit_required' };
-      const routed = await this.serviceRouter.route({
-        clinicId,
-        reasonForVisit,
-        activeClinicServices,
-      });
-      if (routed.matched && routed.clinicServiceId) resolvedServiceId = routed.clinicServiceId;
-    }
-
-    if (!resolvedServiceId) {
-      return { matched: false, availableServices: activeClinicServices.map((s) => s.serviceName) };
-    }
-
-    const targetService = activeClinicServices.find((s) => s.id === resolvedServiceId);
-    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
+    const target = await this.resolveDoctorAndService(
       clinicId,
-      resolvedServiceId,
+      readParam(b, req, 'doctor_id'),
+      readParam(b, req, 'clinic_service_id'),
+      readParam(b, req, 'reason_for_visit'),
+      readParam(b, req, 'doctor_name'),
+      readParam(b, req, 'service_key'),
     );
-
-    return {
-      matched: true,
-      clinicServiceId: resolvedServiceId,
-      serviceName: targetService?.serviceName ?? null,
-      serviceKey: targetService?.serviceKey ?? null,
-      doctors: mappings.map((m) => ({
-        doctorId: m.doctorId,
-        doctorName: m.doctorName,
-      })),
-      doctorId: mappings[0]?.doctorId ?? null,
-      doctorName: mappings[0]?.doctorName ?? null,
-    };
+    return { matched: !('error' in target), ...target };
   }
 
   @Public()
@@ -563,6 +509,13 @@ export class SarvamToolsController {
     );
     const afterTimeRaw = readParam(b, req, 'after_time');
     const afterTime = afterTimeRaw ? normalizeTimeTo24h(afterTimeRaw) : null;
+    const beforeTimeRaw = readParam(b, req, 'before_time');
+    const beforeTime = beforeTimeRaw ? normalizeTimeTo24h(beforeTimeRaw) : null;
+    if (afterTimeRaw && !afterTime) return { success: false, error: 'invalid_after_time' };
+    if (beforeTimeRaw && !beforeTime) return { success: false, error: 'invalid_before_time' };
+    if (afterTime && beforeTime && afterTime >= beforeTime) {
+      return { success: false, error: 'invalid_time_range' };
+    }
 
     const preferredDate = dateInput
       ? (extractActivePreferredDate(dateInput, referenceDate) ??
@@ -576,6 +529,8 @@ export class SarvamToolsController {
       doctorId,
       clinicServiceId,
       reasonForVisit,
+      readParam(b, req, 'doctor_name'),
+      readParam(b, req, 'service_key'),
     );
     if ('error' in target) return { success: false, ...target };
 
@@ -586,15 +541,26 @@ export class SarvamToolsController {
       preferredDate,
     );
     const afterTimeNormalized = afterTime ? `${afterTime}:00` : undefined;
+    const beforeTimeNormalized = beforeTime ? `${beforeTime}:00` : undefined;
     const filtered = filterSlotsByDateAndPreference(
-      slots,
+      slots.map((slot) => ({ ...slot, start_time: slot.start_time.replace('T', ' ') })),
       preferredDate,
       timePreference ?? undefined,
       afterTimeNormalized ? preferredDate : undefined,
       afterTimeNormalized,
-    );
+    )
+      .filter((slot) => !beforeTimeNormalized || slot.start_time.slice(11) < beforeTimeNormalized)
+      .sort(
+        (left, right) =>
+          left.start_time.localeCompare(right.start_time) ||
+          left.slot_id.localeCompare(right.slot_id),
+      );
 
-    const times = filtered.slice(0, 4).map((slot) => slotDisplayTime(slot.start_time));
+    // Before-only queries take the closest three starts below the cutoff.
+    // With both bounds, offer the first three within [after_time, before_time).
+    const selected =
+      beforeTime && !afterTime ? filtered.slice(-3) : filtered.slice(0, afterTime ? 3 : 4);
+    const times = selected.map((slot) => slotDisplayTime(slot.start_time));
 
     return {
       success: true,
@@ -605,6 +571,18 @@ export class SarvamToolsController {
       dateDisplay: formatDateDisplay(preferredDate),
       timePreference,
       availableSlotsText: joinTimesText(times, timePreference),
+      slots: selected.map((slot) => ({
+        slotId: slot.slot_id,
+        doctorId: target.doctorId,
+        doctorName: target.doctorName,
+        clinicServiceId: target.clinicServiceId,
+        date: preferredDate,
+        dateDisplay: formatDateDisplay(preferredDate),
+        time: slot.start_time.slice(11, 16),
+        timeText: formatTimeText(slot.start_time),
+        appointmentStart: slot.start_time,
+        appointmentEnd: slot.end_time,
+      })),
       error: '',
     };
   }
@@ -638,8 +616,10 @@ export class SarvamToolsController {
       doctorId,
       clinicServiceId,
       reasonForVisit,
+      readParam(b, req, 'doctor_name'),
+      readParam(b, req, 'service_key'),
     );
-    if ('error' in target) return { error: target.error };
+    if ('error' in target) return target;
 
     let resolvedSlotId = slotId;
 
@@ -678,6 +658,7 @@ export class SarvamToolsController {
           routingSource: 'service_router',
           patientId: patient?.id ?? null,
           expectedDoctorId: target.doctorId,
+          expectedClinicServiceId: target.clinicServiceId,
         });
       return {
         status: appointment.status === 'confirmed' ? 'confirmed' : 'pending',
@@ -726,6 +707,14 @@ export class SarvamToolsController {
     if (!slotId && !timeInput) missing.push('slot_id_or_time');
     if (missing.length > 0) return { error: 'missing_fields', missing };
 
+    const target = await this.resolveDoctorAndService(
+      clinicId,
+      doctorId,
+      clinicServiceId,
+      null,
+      doctorName,
+    );
+    if ('error' in target) return target;
     let resolvedSlotId = slotId;
 
     if (!resolvedSlotId && timeInput) {
@@ -733,8 +722,8 @@ export class SarvamToolsController {
       if (!normalizedTime) return { error: 'invalid_slot_time', time: timeInput, date };
       const [timeSlot] = await this.repos.slots.findSlotByExactTime(
         clinicId,
-        doctorId!,
-        clinicServiceId!,
+        target.doctorId,
+        target.clinicServiceId,
         date!,
         normalizedTime,
       );
@@ -764,15 +753,16 @@ export class SarvamToolsController {
           reasonForVisit: reasonForVisit!,
           routingSource: 'service_router',
           patientId: patient?.id ?? null,
-          expectedDoctorId: doctorId!,
+          expectedDoctorId: target.doctorId,
+          expectedClinicServiceId: target.clinicServiceId,
         });
       return {
         status: appointment.status === 'confirmed' ? 'confirmed' : 'pending',
         appointmentId: appointment.id,
         patientId: patient?.id ?? null,
         holdId: hold.id,
-        doctorId,
-        doctorName: doctorName ?? 'Doctor',
+        doctorId: target.doctorId,
+        doctorName: target.doctorName,
         date,
         slotId: resolvedSlotId,
       };
@@ -810,11 +800,7 @@ export class SarvamToolsController {
       };
     }
 
-    const sessionId = await this.resolveSessionId(
-      clinicId,
-      readParam(b, req, 'session_id'),
-      phone,
-    );
+    const sessionId = await this.resolveSessionId(clinicId, readParam(b, req, 'session_id'), phone);
 
     await this.slotHoldService.cancelAppointment(clinicId, appointment.id);
     await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
@@ -1067,6 +1053,7 @@ export class SarvamToolsController {
         appointment.status === 'confirmed' ? 'confirmed' : 'pending confirmation from the clinic',
       doctorId: appointment.doctorId,
       doctorName: doctor?.name ?? 'Doctor',
+      clinicServiceId: appointment.clinicServiceId,
       patientName: appointment.patientName,
       patientPhone: appointment.patientPhone,
       reasonForVisit: appointment.reasonForVisit,
@@ -1103,66 +1090,80 @@ export class SarvamToolsController {
     return this.createSarvamSession(clinicId, patientPhone);
   }
 
+  private async serviceCatalog(clinicId: string): Promise<RoutingService[]> {
+    const [services, mappings] = await Promise.all([
+      this.repos.clinical.listServices(clinicId),
+      this.repos.clinical.listActiveDoctorServices(clinicId),
+    ]);
+    return services
+      .filter((service) => service.active)
+      .map((service) => ({
+        clinicServiceId: service.id,
+        name: service.serviceName,
+        serviceKey: service.serviceKey,
+        handlesJson: service.handlesJson,
+        doesNotHandleJson: service.doesNotHandleJson,
+        redFlagsJson: service.redFlagsJson,
+        routingExamplesJson: service.routingExamplesJson,
+        doctors: [
+          ...new Map(
+            mappings
+              .filter((mapping) => mapping.clinicServiceId === service.id)
+              .map((mapping) => [
+                mapping.doctorId,
+                {
+                  doctorId: mapping.doctorId,
+                  doctorName: mapping.doctorName,
+                  qualification: mapping.qualification,
+                },
+              ]),
+          ).values(),
+        ].sort(
+          (a, b) =>
+            a.doctorName.localeCompare(b.doctorName) || a.doctorId.localeCompare(b.doctorId),
+        ),
+      }))
+      .sort(
+        (a, b) =>
+          a.name.localeCompare(b.name) || a.clinicServiceId.localeCompare(b.clinicServiceId),
+      );
+  }
+
   private async resolveDoctorAndService(
     clinicId: string,
     doctorId: string | null,
     clinicServiceId: string | null,
     reasonForVisit: string | null,
-  ): Promise<
-    { doctorId: string; doctorName: string; clinicServiceId: string } | { error: string }
-  > {
-    let resolvedDoctorName = 'Doctor';
-
-    if (doctorId) {
-      const doctorMappings = await this.repos.clinical.listActiveDoctorServicesForDoctor(
-        clinicId,
+    doctorName?: string | null,
+    serviceKey?: string | null,
+  ) {
+    const catalog = await this.serviceCatalog(clinicId);
+    return resolveSarvamRouting(
+      catalog,
+      {
         doctorId,
-      );
-
-      if (doctorMappings.length === 0) return { error: 'no_service_for_doctor' };
-      resolvedDoctorName = doctorMappings[0]!.doctorName;
-
-      if (!clinicServiceId) {
-        clinicServiceId = doctorMappings[0]!.clinicServiceId;
-      } else if (!doctorMappings.some((m) => m.clinicServiceId === clinicServiceId)) {
-        clinicServiceId = doctorMappings[0]!.clinicServiceId;
-      }
-
-      return { doctorId, doctorName: resolvedDoctorName, clinicServiceId };
-    }
-
-    if (!clinicServiceId && reasonForVisit) {
-      const services = await this.repos.clinical.listServices(clinicId);
-      const activeClinicServices = services
-        .filter((s) => s.active)
-        .map((s) => ({
-          id: s.id,
-          serviceKey: s.serviceKey,
-          serviceName: s.serviceName,
-          handlesJson: s.handlesJson,
-          doesNotHandleJson: s.doesNotHandleJson,
-          redFlagsJson: s.redFlagsJson,
-          routingExamplesJson: s.routingExamplesJson,
-        }));
-      const routed = await this.serviceRouter.route({
-        clinicId,
+        doctorName: doctorName ?? null,
+        clinicServiceId,
         reasonForVisit,
-        activeClinicServices,
-      });
-      if (routed.matched && routed.clinicServiceId) clinicServiceId = routed.clinicServiceId;
-    }
-
-    if (!clinicServiceId) return { error: 'doctor_required' };
-
-    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
-      clinicId,
-      clinicServiceId,
+        serviceKey: serviceKey ?? null,
+      },
+      async (reason) => {
+        const routed = await this.serviceRouter.route({
+          clinicId,
+          reasonForVisit: reason,
+          activeClinicServices: catalog.map((service) => ({
+            id: service.clinicServiceId,
+            serviceName: service.name,
+            serviceKey: service.serviceKey,
+            handlesJson: service.handlesJson,
+            doesNotHandleJson: service.doesNotHandleJson,
+            redFlagsJson: service.redFlagsJson,
+            routingExamplesJson: service.routingExamplesJson,
+          })),
+        });
+        return routed.matched ? (routed.clinicServiceId ?? null) : null;
+      },
     );
-    if (mappings.length === 0) return { error: 'no_service_for_doctor' };
-    doctorId = mappings[0]!.doctorId;
-    resolvedDoctorName = mappings[0]!.doctorName;
-
-    return { doctorId, doctorName: resolvedDoctorName, clinicServiceId };
   }
 
   private async resolveAppointmentRef(

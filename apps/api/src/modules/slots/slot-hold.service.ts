@@ -136,6 +136,7 @@ export class SlotHoldService {
     reasonForVisit: string;
     routingSource?: string | null;
     expectedDoctorId?: string;
+    expectedClinicServiceId?: string;
   }) {
     return this.dbService.withSlotForUpdate(input.clinicId, input.slotId, async (slot, tx) => {
       if (slot.status !== 'open') {
@@ -150,6 +151,11 @@ export class SlotHoldService {
           clinic_id: input.clinicId,
           slot_id: input.slotId,
           doctor_id: input.expectedDoctorId,
+        });
+      }
+      if (input.expectedClinicServiceId && slot.clinicServiceId !== input.expectedClinicServiceId) {
+        throw new AppError('SLOT_NOT_AVAILABLE', 'Slot does not belong to the selected service.', {
+          clinic_id: input.clinicId, slot_id: input.slotId, clinic_service_id: input.expectedClinicServiceId,
         });
       }
 

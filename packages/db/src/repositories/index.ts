@@ -301,6 +301,20 @@ export class ClinicalRepository {
       );
   }
 
+  /** One clinic-scoped catalogue query for voice routing; inactive doctors cannot receive bookings. */
+  listActiveDoctorServices(clinicId: string) {
+    return this.db.select({
+      doctorId: doctors.id,
+      doctorName: doctors.name,
+      qualification: doctors.qualification,
+      clinicServiceId: clinicServices.id,
+    }).from(doctorServices)
+      .innerJoin(doctors, and(eq(doctors.clinicId, doctorServices.clinicId), eq(doctors.id, doctorServices.doctorId)))
+      .innerJoin(clinicServices, and(eq(clinicServices.clinicId, doctorServices.clinicId), eq(clinicServices.id, doctorServices.clinicServiceId)))
+      .where(and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.active, true),
+        eq(doctors.active, true), eq(clinicServices.active, true)));
+  }
+
   listActiveDoctorServicesForDoctor(clinicId: string, doctorId: string) {
     return this.db
       .select({
