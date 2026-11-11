@@ -2,6 +2,8 @@
 
 > Updated routing instructions: use [sarvam-system-instructions.txt](sarvam-system-instructions.txt) as the complete replacement system prompt, together with [sarvam-tool-configuration.md](sarvam-tool-configuration.md). Those files supersede the legacy prompt and tool mappings below, including first-doctor defaults, stale booking variables, missing recommendation parameters, and GET/POST differences. Do not combine the old system prompt with the replacement.
 
+> Current flow: the agent maps the problem using the symptom table in the replacement prompt and validates the key through recommendation, without calling the separate list-services tool. Every API fact is read through a saved scalar variable; the configuration guide contains all field-to-variable mappings. Recommendation defers doctor selection when none was requested. Availability searches eligible doctors, labels same-day alternatives, supports rejected-doctor exclusions, and lists dates/times only on explicit request. The legacy examples below do not describe this flow.
+
 Multi-clinic appointment booking agent for Sarvam. Fully dynamic: no clinic is hardcoded. Clinic identity is resolved at call start from the dialed number, and every fact stated to the caller comes from a live API response.
 
 ---
@@ -18,7 +20,7 @@ These three are load-bearing. Verify the exact variable names in your Sarvam das
 
 Sarvam variables set by tool responses (used across later tools in the same call):
 
-`{{clinic_id}}`, `{{clinic_name}}`, `{{clinic_hours_summary}}`, `{{clinic_address}}`, `{{appointment_id}}`, `{{selected_doctor_id}}`, `{{selected_service_id}}`, `{{selected_slot_id}}`
+`{{clinic_id}}`, `{{clinic_name}}`, `{{clinic_hours_summary}}`, `{{clinic_address}}`, `{{appointment_id}}`, `{{selected_doctor_id}}`, `{{selected_service_id}}`, `{{selected_time}}`
 
 ---
 
@@ -111,7 +113,7 @@ Replace `before_time` with `after_time` for an “after” request. Both paramet
 
 **Send fields from the API response to the agent:**
 ```
-Available times: @availableSlotsText. Resolved doctor: @doctorId and @doctorName. Resolved service: @clinicServiceId. Date requested: @date and @dateDisplay. Time preference: @timePreference. Error if any: @error. The response shape and existing spoken-time format remain unchanged.
+Success: @success. Available times in comma-separated 24-hour HH:mm: @availableSlotsText. Resolved doctor: @doctorId and @doctorName. Resolved service: @clinicServiceId. Date requested: @date and @dateDisplay. Time preference: @timePreference. Error if any: @error. No slots array is returned. Book using the chosen time, not a slot ID.
 ```
 
 **Error handling the agent must respect:**
@@ -167,7 +169,7 @@ Topic: @topic. Found: @found. Day: @day. Date: @date. Hours: @hours. Doctor: @do
 
 **What does this tool do?**
 ```
-Books the appointment. Call this only once, and only after the patient has explicitly confirmed a full read-back of the doctor, date, time, patient name, and phone number. Requires patient_name, phone, doctor_id, date, and a slot_id that came from the most recent check_available_slots response. Never tell the patient the appointment is booked unless this call returns status confirmed.
+Books the appointment. Call this only once, and only after the patient has explicitly confirmed a full read-back of the doctor, date, time, patient name, and phone number. Pass patient_name, phone, doctor_id, clinic_service_id, reason_for_visit, date, and time as an exact 24-hour HH:mm value from the latest availableSlotsText. Do not send slot_id; the backend resolves it internally. Never tell the patient the appointment is confirmed unless this call returns status confirmed; pending means awaiting clinic confirmation.
 ```
 
 **cURL:**
@@ -179,9 +181,10 @@ curl -X POST {{BASE_URL}}/v1/api/tools/create-appointment \
     "patient_name": "{{patient_name}}",
     "phone": "{{sarvam_variables.caller_number}}",
     "doctor_id": "{{doctor_id}}",
+    "clinic_service_id": "{{clinic_service_id}}",
     "reason_for_visit": "{{reason_for_visit}}",
     "date": "{{date}}",
-    "slot_id": "{{slot_id}}"
+    "time": "{{selected_time}}"
   }'
 ```
 
@@ -269,7 +272,7 @@ Cancelled: @cancelled. Appointment ID: @appointmentId. Status: @status. Error if
 
 **What does this tool do?**
 ```
-Moves an existing appointment to a new slot. Call this only after looking up the appointment with get_appointment_status, fetching real slots for the new date with check_available_slots, and getting the patient's explicit confirmation of the new date and time. Requires the appointment ID and a new slot ID from the latest slot check. A submitted true response means the request was accepted for processing.
+Requests a reschedule of an existing appointment. Call this only after looking up the appointment with get_appointment_status, fetching availability for the same doctor/service on the new date with check_available_slots, and getting the patient's explicit confirmation. Pass the appointment ID, new_date and new_time as an exact 24-hour HH:mm value from the latest availableSlotsText. A submitted true response means the request was accepted for processing, not that the appointment has already moved.
 ```
 
 **cURL:**
@@ -279,14 +282,14 @@ curl -X POST {{BASE_URL}}/v1/api/tools/reschedule-appointment \
   -d '{
     "clinic_id": "{{clinic_id}}",
     "appointment_id": "{{appointment_id}}",
-    "new_slot_id": "{{new_slot_id}}",
+    "new_time": "{{selected_time}}",
     "new_date": "{{new_date}}"
   }'
 ```
 
 **Send fields from the API response to the agent:**
 ```
-Submitted: @submitted. Appointment ID: @appointmentId. Request ID: @actionRequestId. New slot: @newSlotId. New date: @newDate. Error if any: @error.
+Submitted: @submitted. Appointment ID: @appointmentId. Request ID: @actionRequestId. New time: @newTime. New date: @newDate. Error if any: @error.
 ```
 
 **Wording note:** this returns `submitted`, not `confirmed`. The agent must say the reschedule request has been placed and the clinic will confirm — it must not claim the appointment is already moved.

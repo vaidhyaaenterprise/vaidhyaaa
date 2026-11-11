@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { SarvamToolsController } from '../src/modules/sarvam-tools/sarvam-tools.controller';
 import { normalizeDoctorName } from '../src/modules/sarvam-tools/sarvam-routing';
@@ -8,6 +8,11 @@ import { BookingAppointmentService } from '../src/modules/booking/booking-appoin
 const req = { headers: {} } as FastifyRequest;
 const clinicId = 'clinic-1';
 const date = '2026-11-02';
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-01T06:00:00Z'));
+});
+afterEach(() => vi.useRealTimers());
 const services = [
   {
     id: 'general',
@@ -66,6 +71,7 @@ function setup(extraMappings: typeof mappings = []) {
     },
     clinics: { getClinicLocation: vi.fn().mockResolvedValue([{ timezone: 'Asia/Kolkata' }]) },
     patients: { upsertByPhone: vi.fn().mockResolvedValue([{ id: 'patient-1' }]) },
+    slots: { findSlotByExactTime: vi.fn() },
   };
   dependency(controller, 'repos', repos);
   dependency(controller, 'serviceRouter', { route });
@@ -125,10 +131,10 @@ describe('Sarvam service and doctor routing', () => {
     expect(response).toMatchObject({
       success: true,
       doctorId: 'zed',
-      slots: [
-        { slotId: 'zed-general-slot', doctorId: 'zed', clinicServiceId: 'general', time: '09:00' },
-      ],
+      clinicServiceId: 'general',
+      availableSlotsText: '09:00',
     });
+    expect(response).not.toHaveProperty('slots');
     expect(findAvailableSlots).toHaveBeenCalledWith(clinicId, 'zed', 'general', date);
   });
 
@@ -214,12 +220,14 @@ describe('Sarvam service and doctor routing', () => {
   it('routes a changed concern afresh and fetches slots for the newly selected doctor', async () => {
     const { recommend, check, route, findAvailableSlots } = setup();
     expect(await recommend({ reason_for_visit: 'fever' })).toMatchObject({
-      doctorId: 'arun',
+      doctorId: null,
+      doctorSelection: 'pending_availability',
       clinicServiceId: 'general',
     });
     await check({ doctor_id: 'arun', clinic_service_id: 'general' });
     expect(await recommend({ reason_for_visit: 'skin rash' })).toMatchObject({
-      doctorId: 'ravi-skin',
+      doctorId: null,
+      doctorSelection: 'pending_availability',
       clinicServiceId: 'skin',
     });
     await check({ doctor_id: 'ravi-skin', clinic_service_id: 'skin' });
@@ -304,6 +312,122 @@ describe('Sarvam service and doctor routing', () => {
           expectedClinicServiceId: 'general',
         }),
       );
+    },
+  );
+
+  it.each(['createAppointment', 'createAppointmentFast'] as const)(
+    'books advertised 24-hour times through %s without a slot ID',
+    async (method) => {
+      const { controller, findAvailableSlots, repos, createAppointmentFromFreshHold, check } =
+        setup();
+      const times = ['00:00', '09:00', '12:00', '21:00'];
+      findAvailableSlots.mockResolvedValue(
+        times.map((time) => ({
+          slot_id: `slot-${time}`,
+          start_time: `${date} ${time}:00`,
+          end_time: `${date} ${time}:00`,
+          available_count: 1,
+        })),
+      );
+      repos.slots.findSlotByExactTime.mockImplementation(
+        async (_clinic: string, _doctor: string, _service: string, _date: string, time: string) =>
+          times.includes(time) ? [{ id: `slot-${time}` }] : [],
+      );
+      expect(await check({ doctor_id: 'zed', clinic_service_id: 'general' })).toMatchObject({
+        availableSlotsText: times.join(', '),
+      });
+      for (const time of times) {
+        expect(
+          await controller[method](
+            {
+              clinic_id: clinicId,
+              session_id: 'session-1',
+              patient_name: 'Patient',
+              phone: '9876543210',
+              doctor_id: 'zed',
+              clinic_service_id: 'general',
+              reason_for_visit: 'consultation',
+              date,
+              time,
+            },
+            req,
+          ),
+        ).toMatchObject({ status: 'confirmed', slotId: `slot-${time}` });
+        expect(createAppointmentFromFreshHold).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            slotId: `slot-${time}`,
+            expectedDoctorId: 'zed',
+            expectedClinicServiceId: 'general',
+          }),
+        );
+      }
+    },
+  );
+
+  it('does not book an unreturned 24-hour time as a matching morning slot', async () => {
+    const { controller, createAppointmentFromFreshHold } = setup();
+    expect(
+      await controller.createAppointment(
+        {
+          clinic_id: clinicId,
+          session_id: 'session-1',
+          patient_name: 'Patient',
+          phone: '9876543210',
+          doctor_id: 'zed',
+          clinic_service_id: 'general',
+          reason_for_visit: 'consultation',
+          date,
+          time: '21:00',
+        },
+        req,
+      ),
+    ).toEqual({ error: 'invalid_slot_time', time: '21:00', date });
+    expect(createAppointmentFromFreshHold).not.toHaveBeenCalled();
+  });
+
+  it.each(['00:00', '12:00', '21:00'])(
+    'reschedules by the advertised 24-hour time %s without confusing its period',
+    async (time) => {
+      const { controller, repos, findAvailableSlots } = setup();
+      const holdSlot = vi.fn().mockResolvedValue({ id: 'hold-1' });
+      dependency(controller, 'repos', {
+        ...repos,
+        appointmentLifecycle: {
+          findAppointmentById: vi.fn().mockResolvedValue([
+            {
+              id: 'appointment-1',
+              status: 'confirmed',
+              doctorId: 'zed',
+              clinicServiceId: 'general',
+            },
+          ]),
+          insertActionRequest: vi.fn().mockResolvedValue([{ id: 'request-1' }]),
+        },
+      });
+      dependency(controller, 'slotHoldService', { holdSlot });
+      dependency(controller, 'staffNotification', { notifyStaffActionRequest: vi.fn() });
+      findAvailableSlots.mockResolvedValue(
+        ['00:00', '09:00', '12:00', '21:00'].map((value) => ({
+          slot_id: `slot-${value}`,
+          start_time: `${date} ${value}:00`,
+          end_time: `${date} ${value}:00`,
+          available_count: 1,
+        })),
+      );
+      expect(
+        await controller.rescheduleAppointment(
+          {
+            clinic_id: clinicId,
+            session_id: 'session-1',
+            appointment_id: 'appointment-1',
+            phone: '9876543210',
+            new_date: date,
+            new_time: time,
+          },
+          req,
+        ),
+      ).toMatchObject({ submitted: true, newDate: date, newTime: time });
+      expect(holdSlot).toHaveBeenCalledWith(expect.objectContaining({ slotId: `slot-${time}` }));
     },
   );
 });

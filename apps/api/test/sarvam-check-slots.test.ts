@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import type { ApiEnv } from '@vaidya/config';
 import type { DatabaseConnection, Repositories } from '@vaidya/db';
@@ -12,6 +12,11 @@ import type { AppointmentLookupService } from '../src/modules/patient-action/app
 import type { StaffNotificationService } from '../src/modules/patient-action/staff-notification.service';
 
 const date = '2026-11-02';
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-01T06:00:00Z'));
+});
+afterEach(() => vi.useRealTimers());
 function slot(time: string, availableCount = 1, slotDate = date) {
   return {
     slot_id: `${slotDate}-${time}`,
@@ -54,16 +59,14 @@ function setup(rows = slots) {
         .mockResolvedValue([
           { id: 'service-1', active: true, serviceName: 'Consultation', serviceKey: 'general' },
         ]),
-      listActiveDoctorServices: vi
-        .fn()
-        .mockResolvedValue([
-          {
-            doctorId: 'doctor-1',
-            doctorName: 'Dr. Test',
-            clinicServiceId: 'service-1',
-            qualification: null,
-          },
-        ]),
+      listActiveDoctorServices: vi.fn().mockResolvedValue([
+        {
+          doctorId: 'doctor-1',
+          doctorName: 'Dr. Test',
+          clinicServiceId: 'service-1',
+          qualification: null,
+        },
+      ]),
     },
   } as unknown as Repositories;
   (controller as unknown as { repos: Repositories }).repos = repos;
@@ -91,7 +94,7 @@ describe('Sarvam check-slots time bounds', () => {
         date,
         doctorId: 'doctor-1',
         clinicServiceId: 'service-1',
-        availableSlotsText: '11:15, 11:30, or 11:45',
+        availableSlotsText: '11:15, 11:30, 11:45',
         error: '',
       });
       expect(findAvailableSlots).toHaveBeenCalledWith('clinic-1', 'doctor-1', 'service-1', date);
@@ -103,7 +106,7 @@ describe('Sarvam check-slots time bounds', () => {
     async (afterTime) => {
       expect(await setup().check({ after_time: afterTime })).toMatchObject({
         success: true,
-        availableSlotsText: '12:00, 12:30, or 1:00',
+        availableSlotsText: '12:00, 12:30, 13:00',
       });
     },
   );
@@ -111,17 +114,17 @@ describe('Sarvam check-slots time bounds', () => {
   it('reads before_time from underscored and hyphenated headers', async () => {
     for (const header of ['before_time', 'before-time']) {
       expect(await setup().check({}, { [header]: '12:00' })).toMatchObject({
-        availableSlotsText: '11:15, 11:30, or 11:45',
+        availableSlotsText: '11:15, 11:30, 11:45',
       });
     }
     expect(await setup().check({}, { 'after-time': '12:00' })).toMatchObject({
-      availableSlotsText: '12:00, 12:30, or 1:00',
+      availableSlotsText: '12:00, 12:30, 13:00',
     });
   });
 
   it('intersects both bounds and returns the first three matches', async () => {
     expect(await setup().check({ after_time: '11:15', before_time: '12:30' })).toMatchObject({
-      availableSlotsText: '11:15, 11:30, or 11:45',
+      availableSlotsText: '11:15, 11:30, 11:45',
     });
   });
 
@@ -135,30 +138,37 @@ describe('Sarvam check-slots time bounds', () => {
       slot('17:00'),
     ]);
     expect(await check({ before_time: '5 PM', time_preference: 'afternoon' })).toMatchObject({
-      availableSlotsText: '1:30, 4:00, or 4:30 in the afternoon',
+      availableSlotsText: '13:30, 16:00, 16:30',
     });
   });
 
-  it('returns fewer than three matches or no slots without falling back outside the bounds', async () => {
+  it('returns fewer matches and explicitly labels same-day alternatives outside the bounds', async () => {
     const { check } = setup();
     expect(await check({ before_time: '10:30' })).toMatchObject({
-      availableSlotsText: '9:00, or 10:00',
+      availableSlotsText: '09:00, 10:00',
     });
     expect(await check({ before_time: '9 AM' })).toMatchObject({
       success: true,
-      availableSlotsText: 'no slots',
+      availabilityStatus: 'same_day_alternative',
+      matchesPreference: false,
+      availableSlotsText: '09:00, 10:00, 11:15',
     });
     expect(await check({ after_time: '2 PM' })).toMatchObject({
       success: true,
-      availableSlotsText: 'no slots',
+      availabilityStatus: 'same_day_alternative',
+      matchesPreference: false,
+      availableSlotsText: '12:30, 13:00, 13:30',
     });
   });
 
   it('handles midnight and noon without confusing AM and PM', async () => {
     const { check } = setup([slot('00:00'), slot('00:30'), slot('01:00'), slot('12:00')]);
-    expect(await check({ before_time: '12 AM' })).toMatchObject({ availableSlotsText: 'no slots' });
+    expect(await check({ before_time: '12 AM' })).toMatchObject({
+      availabilityStatus: 'same_day_alternative',
+      availableSlotsText: '00:00, 00:30, 01:00',
+    });
     expect(await check({ after_time: '12 AM' })).toMatchObject({
-      availableSlotsText: '12:00, 12:30, or 1:00',
+      availableSlotsText: '00:00, 00:30, 01:00',
     });
   });
 
@@ -193,10 +203,40 @@ describe('Sarvam check-slots time bounds', () => {
       slots.map((row) => ({ ...row, start_time: row.start_time.replace(' ', 'T') })),
     );
     expect(await check({ before_time: '12:00' })).toMatchObject({
-      availableSlotsText: '11:15, 11:30, or 11:45',
+      availableSlotsText: '11:15, 11:30, 11:45',
     });
     expect(await check()).toMatchObject({
-      availableSlotsText: '9:00, 10:00, 11:15, or 11:30',
+      availableSlotsText: '09:00, 10:00, 11:15, 11:30',
+    });
+  });
+
+  it('returns only 24-hour times in text without a slots array', async () => {
+    const { check } = setup([slot('23:30'), slot('12:00'), slot('00:00'), slot('09:00')]);
+    const response = await check();
+    expect(response).toEqual({
+      success: true,
+      availabilityStatus: 'matched',
+      excludedDoctorIdsText: '',
+      hasAvailability: true,
+      matchesPreference: true,
+      suggestAnotherDate: false,
+      doctorSelection: 'requested',
+      doctorName: 'Dr. Test',
+      doctorId: 'doctor-1',
+      clinicServiceId: 'service-1',
+      date,
+      dateDisplay: 'Monday, November 2',
+      timePreference: null,
+      availableSlotsText: '00:00, 09:00, 12:00, 23:30',
+      error: '',
+    });
+    expect(response).not.toHaveProperty('slots');
+    expect(await check({ after_time: '23:00' })).toMatchObject({
+      availableSlotsText: '23:30',
+    });
+    expect(await check({ time_preference: 'evening', before_time: '18:00' })).toMatchObject({
+      availabilityStatus: 'same_day_alternative',
+      availableSlotsText: '09:00, 12:00, 23:30',
     });
   });
 });

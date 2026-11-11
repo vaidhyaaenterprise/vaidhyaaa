@@ -17,6 +17,16 @@ export type RoutingInput = {
   reasonForVisit?: string | null;
 };
 
+/** Flat text for Sarvam's response-field-to-variable mappings. IDs stay internal. */
+export function doctorChoicesText(doctors: DoctorChoice[]) {
+  return doctors
+    .map(
+      (doctor) =>
+        `${doctor.doctorName}${doctor.qualification ? ` (${doctor.qualification})` : ''} | doctor_id=${doctor.doctorId}`,
+    )
+    .join('\n');
+}
+
 export function publicService(service: RoutingService) {
   return {
     clinicServiceId: service.clinicServiceId,
@@ -24,6 +34,9 @@ export function publicService(service: RoutingService) {
     serviceName: service.name,
     serviceKey: service.serviceKey,
     doctors: service.doctors,
+    handles: service.handlesJson ?? [],
+    doesNotHandle: service.doesNotHandleJson ?? [],
+    routingExamples: service.routingExamplesJson ?? [],
   };
 }
 
@@ -70,30 +83,15 @@ export async function resolveSarvamRouting(
     doctors,
     services: services.map(publicService),
     availableServices: catalog.map((service) => service.name),
+    doctorChoicesText: doctorChoicesText(doctors),
+    availableServicesText: catalog.map((service) => service.name).join(', '),
+    serviceChoicesText: services
+      .map(
+        (service) =>
+          `${service.name} | service_key=${service.serviceKey} | clinic_service_id=${service.clinicServiceId}`,
+      )
+      .join('\n'),
   });
-  let requestedDoctors = allDoctors;
-  if (input.doctorName) {
-    requestedDoctors = allDoctors.filter((doctor) =>
-      doctorNameMatches(doctor.doctorName, input.doctorName!),
-    );
-    if (!requestedDoctors.length) return fail('doctor_not_found');
-    // Prefer a full-name match over a partial name that also matches longer names.
-    const exact = requestedDoctors.filter(
-      (doctor) => normalizeDoctorName(doctor.doctorName) === normalizeDoctorName(input.doctorName!),
-    );
-    if (exact.length) requestedDoctors = exact;
-  }
-  if (input.doctorId) {
-    const byId = requestedDoctors.find((doctor) => doctor.doctorId === input.doctorId);
-    if (!byId)
-      return fail(
-        input.doctorName ? 'doctor_name_id_mismatch' : 'doctor_not_found',
-        catalog,
-        requestedDoctors,
-        Boolean(input.doctorName),
-      );
-    requestedDoctors = [byId];
-  }
   let service: RoutingService | undefined;
   if (input.clinicServiceId) {
     service = catalog.find((item) => item.clinicServiceId === input.clinicServiceId);
@@ -110,6 +108,37 @@ export async function resolveSarvamRouting(
     const routedId = await routeReason(input.reasonForVisit);
     service = catalog.find((item) => item.clinicServiceId === routedId);
     if (!service) return fail('service_not_found');
+  }
+  let requestedDoctors = allDoctors;
+  if (input.doctorName) {
+    requestedDoctors = allDoctors.filter((doctor) =>
+      doctorNameMatches(doctor.doctorName, input.doctorName!),
+    );
+    if (!requestedDoctors.length)
+      return fail('doctor_not_found', service ? [service] : catalog, service?.doctors ?? [], true);
+    if (service) {
+      requestedDoctors = requestedDoctors.filter((doctor) =>
+        service!.doctors.some((candidate) => candidate.doctorId === doctor.doctorId),
+      );
+      if (!requestedDoctors.length)
+        return fail('doctor_service_mismatch', [service], service.doctors, true);
+    }
+    // Prefer a full-name match over a partial name that also matches longer names.
+    const exact = requestedDoctors.filter(
+      (doctor) => normalizeDoctorName(doctor.doctorName) === normalizeDoctorName(input.doctorName!),
+    );
+    if (exact.length) requestedDoctors = exact;
+  }
+  if (input.doctorId) {
+    const byId = requestedDoctors.find((doctor) => doctor.doctorId === input.doctorId);
+    if (!byId)
+      return fail(
+        input.doctorName ? 'doctor_name_id_mismatch' : 'doctor_not_found',
+        catalog,
+        requestedDoctors,
+        Boolean(input.doctorName),
+      );
+    requestedDoctors = [byId];
   }
   const hasDoctorPreference = Boolean(input.doctorId || input.doctorName);
   if (!service && hasDoctorPreference) {
@@ -143,15 +172,20 @@ export async function resolveSarvamRouting(
     );
   if (hasDoctorPreference && eligibleDoctors.length > 1)
     return fail('doctor_ambiguous', [service], eligibleDoctors, true);
-  const doctor = eligibleDoctors[0]!;
+  const doctor = hasDoctorPreference ? eligibleDoctors[0]! : null;
   return {
-    doctorId: doctor.doctorId,
-    doctorName: doctor.doctorName,
+    doctorId: doctor?.doctorId ?? null,
+    doctorName: doctor?.doctorName ?? null,
     clinicServiceId: service.clinicServiceId,
     serviceName: service.name,
     serviceKey: service.serviceKey,
     doctors: service.doctors,
+    doctorChoicesText: doctorChoicesText(service.doctors),
+    availableServicesText: catalog.map((item) => item.name).join(', '),
+    serviceChoicesText: `${service.name} | service_key=${service.serviceKey} | clinic_service_id=${service.clinicServiceId}`,
     needsClarification: false,
-    doctorSelection: hasDoctorPreference ? ('requested' as const) : ('automatic' as const),
+    doctorSelection: hasDoctorPreference
+      ? ('requested' as const)
+      : ('pending_availability' as const),
   };
 }
