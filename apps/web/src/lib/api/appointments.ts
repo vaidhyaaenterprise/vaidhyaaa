@@ -15,6 +15,7 @@ export type AppointmentApiRow = {
   routing_source: string | null;
   source: 'agent' | 'manual';
   status: string;
+  created_at: string;
   has_history: boolean;
   visit_reason?: string | null;
   examination_notes?: string | null;
@@ -38,6 +39,24 @@ export type AppointmentActionRequestApiRow = {
   status: string;
 };
 
+export type AppointmentActivityApiRow = {
+  id: string;
+  appointment_id: string;
+  patient_name: string;
+  patient_phone: string | null;
+  doctor_id: string;
+  doctor_name: string;
+  clinic_service_id: string;
+  service_name: string;
+  reason_for_visit: string;
+  action_type: 'reschedule' | 'cancel';
+  occurred_at: string;
+  previous_appointment_start: string | null;
+  previous_appointment_end: string | null;
+  appointment_start: string;
+  appointment_end: string;
+};
+
 export type AppointmentAvailableSlotApiRow = {
   slot_id: string;
   doctor_id: string;
@@ -47,19 +66,33 @@ export type AppointmentAvailableSlotApiRow = {
   available_count: number;
 };
 
-export async function fetchAppointments(clinicId: string, status?: string[]) {
+export async function fetchAppointments(
+  clinicId: string,
+  status?: readonly string[],
+  signal?: AbortSignal,
+) {
   const query = status?.length ? `?status=${status.join(',')}` : '';
   const data = await apiGet<{ appointments: AppointmentApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments${query}`,
+    signal,
   );
   return data.appointments;
 }
 
-export async function fetchAppointmentActionRequests(clinicId: string) {
+export async function fetchAppointmentActionRequests(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ action_requests: AppointmentActionRequestApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments/action-requests`,
+    signal,
   );
   return data.action_requests;
+}
+
+export async function fetchAppointmentActivity(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ activities: AppointmentActivityApiRow[] }>(
+    `/v1/clinics/${clinicId}/appointments/activity`,
+    signal,
+  );
+  return data.activities;
 }
 
 export async function fetchAvailableAppointmentSlots(
@@ -69,6 +102,7 @@ export async function fetchAvailableAppointmentSlots(
     clinic_service_id: string;
     date: string;
   },
+  signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({
     doctor_id: query.doctor_id,
@@ -78,6 +112,7 @@ export async function fetchAvailableAppointmentSlots(
 
   const data = await apiGet<{ slots: AppointmentAvailableSlotApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments/available-slots?${params.toString()}`,
+    signal,
   );
   return data.slots;
 }
@@ -91,6 +126,17 @@ export async function confirmAppointment(clinicId: string, appointmentId: string
 export async function cancelAppointment(clinicId: string, appointmentId: string) {
   return apiPatch<{ appointment: unknown }>(
     `/v1/clinics/${clinicId}/appointments/${appointmentId}/cancel`,
+  );
+}
+
+export async function updateAppointmentPatientName(
+  clinicId: string,
+  appointmentId: string,
+  patientName: string,
+) {
+  return apiPatch<{ appointment: unknown; updated_appointment_count: number }>(
+    `/v1/clinics/${clinicId}/appointments/${appointmentId}/patient-name`,
+    { patient_name: patientName },
   );
 }
 

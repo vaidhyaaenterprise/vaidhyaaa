@@ -1,4 +1,6 @@
 import postgres from 'postgres';
+import { randomUUID } from 'node:crypto';
+import { sql as query } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -268,6 +270,56 @@ describe('@vaidya/db integration', () => {
   it('10. no table stores MP3 binary data', async () => {
     const binaryColumns = await dbService.assertNoBinaryAudioColumns();
     expect(binaryColumns).toEqual([]);
+  });
+
+  it('11. call retention deletes expired logs/transcripts while preserving linked operational records', async () => {
+    const rollback = new Error('rollback call-retention test fixtures');
+    await expect(connection.db.transaction(async (tx) => {
+      const expiredId = randomUUID();
+      const boundaryId = randomUUID();
+      const appointmentId = randomUUID();
+      const patientId = randomUUID();
+      const callbackId = randomUUID();
+      const emergencyId = randomUUID();
+      const actionId = randomUUID();
+      const cutoff = new Date('2026-09-09T12:00:00Z');
+      await tx.execute(query`INSERT INTO patients (id, clinic_id, name)
+        VALUES (${patientId}, ${SEED_CLINIC_ID}, 'Retention test patient')`);
+      await tx.execute(query`INSERT INTO appointment_requests
+        (id, clinic_id, patient_id, patient_name, doctor_id, clinic_service_id,
+         reason_for_visit, appointment_start, appointment_end, status)
+        VALUES (${appointmentId}, ${SEED_CLINIC_ID}, ${patientId}, 'Retention test patient',
+          ${SEED_DOCTOR_ID}, ${SEED_SERVICE_ID}, 'Review', '2026-11-01 09:00', '2026-11-01 09:15', 'confirmed')`);
+      await tx.execute(query`INSERT INTO calls (id, clinic_id, patient_id, started_at, created_appointment_request_id)
+        VALUES (${expiredId}, ${SEED_CLINIC_ID}, ${patientId}, '2026-09-01T12:00:00Z', ${appointmentId}),
+          (${boundaryId}, ${SEED_CLINIC_ID}, ${patientId}, ${cutoff.toISOString()}, NULL)`);
+      await tx.execute(query`INSERT INTO call_transcripts (clinic_id, call_id, speaker, transcript_text)
+        VALUES (${SEED_CLINIC_ID}, ${expiredId}, 'patient', 'Expired transcript')`);
+      await tx.execute(query`INSERT INTO callback_requests (id, clinic_id, source_call_id)
+        VALUES (${callbackId}, ${SEED_CLINIC_ID}, ${expiredId})`);
+      await tx.execute(query`INSERT INTO emergency_incidents (id, clinic_id, source_call_id)
+        VALUES (${emergencyId}, ${SEED_CLINIC_ID}, ${expiredId})`);
+      await tx.execute(query`INSERT INTO appointment_action_requests
+        (id, clinic_id, appointment_id, request_type, requested_by, source_call_id)
+        VALUES (${actionId}, ${SEED_CLINIC_ID}, ${appointmentId}, 'cancel', 'patient_call', ${expiredId})`);
+      const repository = createRepositories(tx as unknown as typeof connection.db).callInbox;
+      expect(await repository.deleteExpiredCall(SEED_CLINIC_ID, expiredId, cutoff)).toBe(true);
+      expect(await repository.deleteExpiredCall(SEED_CLINIC_ID, boundaryId, cutoff)).toBe(false);
+      expect(await tx.execute(query`SELECT id FROM calls WHERE id = ${expiredId}`)).toHaveLength(0);
+      expect(await tx.execute(query`SELECT id FROM call_transcripts WHERE call_id = ${expiredId}`)).toHaveLength(0);
+      expect(await tx.execute(query`SELECT id FROM patients WHERE id = ${patientId}`)).toHaveLength(1);
+      expect(await tx.execute(query`SELECT id FROM appointment_requests WHERE id = ${appointmentId} AND status = 'confirmed'`)).toHaveLength(1);
+      for (const [table, id] of [
+        ['callback_requests', callbackId], ['emergency_incidents', emergencyId],
+        ['appointment_action_requests', actionId],
+      ] as const) {
+        const rows = await tx.execute(query`SELECT id FROM ${query.identifier(table)}
+          WHERE id = ${id} AND clinic_id = ${SEED_CLINIC_ID} AND source_call_id IS NULL`);
+        expect(rows).toHaveLength(1);
+      }
+      // No test fixture or deletion is committed to the shared test database.
+      throw rollback;
+    })).rejects.toBe(rollback);
   });
 });
 

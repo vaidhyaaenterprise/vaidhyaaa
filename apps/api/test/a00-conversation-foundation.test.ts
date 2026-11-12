@@ -108,7 +108,7 @@ describe('A00 conversation foundation', () => {
     expect(data.patient_message.message_text).toBe('Hello');
     expect(data.assistant_message.sender).toBe('assistant');
     expect(data.assistant_message.reply_template_key).toBe('booking.greeting');
-    expect(data.assistant_message.message_text).toContain('Vaidya');
+    expect(data.assistant_message.message_text).toContain('Vaidhyaa');
     expect(data.session.current_flow).toBe('booking');
     expect(data.session.current_state).toBe('ASK_PROBLEM_OR_DOCTOR');
 

@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { BOOKING_HORIZON_DAYS } from '@vaidya/shared';
 
 import {
   addDays,
@@ -12,6 +13,7 @@ import {
   intervalsOverlap,
   normalizeTimeString,
   toStoredDayOfWeek,
+  sql,
   type Repositories,
 } from '@vaidya/db';
 
@@ -30,45 +32,77 @@ export type GenerateSlotsInput = {
 export class SlotGenerationService {
   private readonly repos: Repositories;
 
-  constructor(@Inject(DATABASE_CONNECTION) connection: DatabaseConnection) {
+  constructor(@Inject(DATABASE_CONNECTION) private readonly connection: DatabaseConnection) {
     this.repos = createRepositories(connection.db);
   }
 
   async generateSlots(input: GenerateSlotsInput = {}) {
     const targets = await this.repos.slots.listActiveGenerationTargets(input.clinicId);
+    const clinicIds = [...new Set(targets.map((target) => target.clinicId))];
     const summaries = [];
+    for (const clinicId of clinicIds) {
+      const results = await this.withClinicLock(clinicId, async (repos) => {
+        // Reload after acquiring the same lock used by settings saves. Never
+        // commit a stale generation plan over a newer configuration.
+        const currentTargets = await repos.slots.listActiveGenerationTargets(clinicId);
+        const results = [];
+        for (const target of currentTargets) {
+          if (input.doctorId && target.doctorId !== input.doctorId) {
+            continue;
+          }
+          if (input.clinicServiceId && target.clinicServiceId !== input.clinicServiceId) {
+            continue;
+          }
 
-    for (const target of targets) {
-      if (input.doctorId && target.doctorId !== input.doctorId) {
-        continue;
-      }
-      if (input.clinicServiceId && target.clinicServiceId !== input.clinicServiceId) {
-        continue;
-      }
+          // Internal repair jobs may generate a smaller range, but clinic settings
+          // (including legacy values) cannot change the 45-day booking window.
+          const targetHorizonDays = Math.min(
+            input.horizonDays ?? BOOKING_HORIZON_DAYS,
+            BOOKING_HORIZON_DAYS,
+          );
+          if (input.date) {
+            const targetToday = formatDateInTimezone(new Date(), target.clinicTimezone);
+            const targetEndDate = addDays(targetToday, targetHorizonDays, target.clinicTimezone);
+            if (input.date < targetToday || input.date > targetEndDate) {
+              continue;
+            }
+          }
 
-      const targetHorizonDays = input.horizonDays ?? target.rule.bookingHorizonDays;
-      if (input.date) {
-        const targetToday = formatDateInTimezone(new Date(), target.clinicTimezone);
-        const targetEndDate = addDays(targetToday, targetHorizonDays, target.clinicTimezone);
-        if (input.date < targetToday || input.date > targetEndDate) {
-          continue;
+          const summary = await this.generateForTarget(
+            target.clinicId,
+            target.clinicTimezone,
+            target.doctorId,
+            target.doctorServiceId,
+            target.clinicServiceId,
+            target.rule,
+            targetHorizonDays,
+            input.date,
+            repos,
+            currentTargets
+              .filter(
+                (peer) =>
+                  peer.doctorId === target.doctorId &&
+                  peer.clinicServiceId === target.clinicServiceId,
+              )
+              .map((peer) => peer.rule),
+          );
+          if (summary) results.push(summary);
         }
-      }
-
-      const summary = await this.generateForTarget(
-        target.clinicId,
-        target.clinicTimezone,
-        target.doctorId,
-        target.doctorServiceId,
-        target.clinicServiceId,
-        target.rule,
-        input.horizonDays,
-        input.date,
-      );
-      summaries.push(summary);
+        return results;
+      });
+      summaries.push(...results);
     }
 
     return summaries;
+  }
+
+  private withClinicLock<T>(clinicId: string, work: (repos: Repositories) => Promise<T>) {
+    return this.connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`clinic-schedule:${clinicId}`}))`,
+      );
+      return work(createRepositories(tx));
+    });
   }
 
   private async generateForTarget(
@@ -81,50 +115,78 @@ export class SlotGenerationService {
       id: string;
       slotDurationMinutes: number;
       capacityPerSlot: number;
-      bookingHorizonDays: number;
       version: number;
+      effectiveFrom?: string;
+      effectiveTo?: string | null;
     },
-    horizonOverride?: number,
+    horizonDays: number,
     requestedDate?: string,
+    repos: Repositories = this.repos,
+    effectiveVersions: Array<{
+      id: string;
+      version: number;
+      effectiveFrom?: string;
+      effectiveTo?: string | null;
+    }> = [rule],
   ) {
-    const horizonDays = horizonOverride ?? rule.bookingHorizonDays;
     const today = formatDateInTimezone(new Date(), timezone);
     const endDate = addDays(today, horizonDays, timezone);
-    const generationStartDate = requestedDate ?? today;
-    const generationEndDate = requestedDate ?? endDate;
+    const generationStartDate = [requestedDate ?? today, rule.effectiveFrom ?? today]
+      .sort()
+      .at(-1)!;
+    const generationEndDate = [requestedDate ?? endDate, rule.effectiveTo ?? endDate].sort()[0]!;
+    if (generationStartDate > generationEndDate) return null;
 
-    const rangeStart = `${generationStartDate} 00:00:00`;
-    const rangeEnd = `${generationEndDate} 23:59:59`;
-    const [[batch], schedules, clinicHours, holidays, blocked, existingSlots] = await Promise.all([
-      this.repos.slots.insertBatch({
-        clinicId,
-        triggerSource: 'daily_job',
-        ruleId: rule.id,
-        status: 'running',
-        summaryJson: {},
-      }),
-      this.repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId),
-      this.repos.slots.listClinicHours(clinicId),
-      this.repos.slots.listClinicHolidays(
-        clinicId,
-        generationStartDate,
-        generationEndDate,
-        doctorId,
-      ),
-      this.repos.slots.listDoctorBlockedSlots(
-        clinicId,
-        doctorId,
-        combineDateAndTime(generationStartDate, '00:00:00', timezone),
-        combineDateAndTime(generationEndDate, '23:59:59', timezone),
-      ),
-      this.repos.slots.listExistingSlotWindows(
-        clinicId,
-        doctorId,
-        clinicServiceId,
-        rangeStart,
-        rangeEnd,
-      ),
-    ]);
+    const generationDates: string[] = [];
+    for (
+      let date = generationStartDate;
+      date <= generationEndDate;
+      date = addDays(date, 1, timezone)
+    ) {
+      const newer = effectiveVersions.some(
+        (peer) =>
+          peer.version > rule.version &&
+          (!peer.effectiveFrom || peer.effectiveFrom <= date) &&
+          (!peer.effectiveTo || peer.effectiveTo >= date),
+      );
+      if (!newer) generationDates.push(date);
+    }
+    if (generationDates.length === 0) return null;
+    const ownedDates = new Set(generationDates);
+    const rangeStart = `${generationDates[0]} 00:00:00`;
+    const rangeEnd = `${generationDates.at(-1)} 23:59:59`;
+    const [[batch], schedules, clinicHours, holidays, blocked, existingWindows] = await Promise.all(
+      [
+        repos.slots.insertBatch({
+          clinicId,
+          triggerSource: 'daily_job',
+          ruleId: rule.id,
+          status: 'running',
+          summaryJson: {},
+        }),
+        repos.slots.listDoctorSchedules(clinicId, doctorId, doctorServiceId),
+        repos.slots.listClinicHours(clinicId),
+        repos.slots.listClinicHolidays(clinicId, generationStartDate, generationEndDate, doctorId),
+        repos.slots.listDoctorBlockedSlots(
+          clinicId,
+          doctorId,
+          combineDateAndTime(generationStartDate, '00:00:00', timezone),
+          combineDateAndTime(generationEndDate, '23:59:59', timezone),
+        ),
+        repos.slots.listExistingSlotWindows(
+          clinicId,
+          doctorId,
+          clinicServiceId,
+          rangeStart,
+          rangeEnd,
+        ),
+      ],
+    );
+    // Legacy active versions can overlap. A lower version must not retire or
+    // rewrite slots on dates owned by a newer effective version, in any order.
+    const existingSlots = existingWindows.filter((slot) =>
+      ownedDates.has(slot.startTime.slice(0, 10)),
+    );
     const holidayDates = new Set(
       holidays.filter((holiday) => holiday.isFullDay).map((holiday) => holiday.holidayDate),
     );
@@ -142,16 +204,20 @@ export class SlotGenerationService {
       holidayWindowsByDate.set(key, list);
     }
 
+    const existingIds = existingSlots.map((slot) => slot.id);
+    const [appointmentCounts, holdCounts] = await Promise.all([
+      repos.slots.countActiveAppointmentsBySlots(clinicId, existingIds),
+      repos.slots.countActiveHoldsBySlots(clinicId, existingIds),
+    ]);
+    const occupiedSlots = existingSlots.filter(
+      (slot) => (appointmentCounts.get(slot.id) ?? 0) + (holdCounts.get(slot.id) ?? 0) > 0,
+    );
     let skipped = 0;
     const knownSlotWindows = new Set(
       existingSlots.map((slot) => `${slot.startTime}|${slot.endTime}`),
     );
     const desiredSlotWindows = new Set<string>();
     const slotsToInsert: Array<typeof appointmentSlots.$inferInsert> = [];
-
-    const generationDates = requestedDate
-      ? [requestedDate]
-      : Array.from({ length: horizonDays + 1 }, (_, offset) => addDays(today, offset, timezone));
 
     for (const dateStr of generationDates) {
       if (holidayDates.has(dateStr)) {
@@ -204,7 +270,13 @@ export class SlotGenerationService {
               (windowRange) => slotStartTime < windowRange.end && slotEndTime > windowRange.start,
             );
 
-            if (!overlapsBlocked && !overlapsHoliday) {
+            const overlapsOccupied = occupiedSlots.some(
+              (slot) =>
+                slot.startTime < endLocal &&
+                slot.endTime > startLocal &&
+                (slot.startTime !== startLocal || slot.endTime !== endLocal),
+            );
+            if (!overlapsBlocked && !overlapsHoliday && !overlapsOccupied) {
               const windowKey = `${startLocal}|${endLocal}`;
               desiredSlotWindows.add(windowKey);
               if (!knownSlotWindows.has(windowKey)) {
@@ -234,19 +306,32 @@ export class SlotGenerationService {
       }
     }
 
-    const insertedSlots = await this.repos.slots.insertSlots(slotsToInsert);
+    const insertedSlots = await repos.slots.insertSlots(slotsToInsert);
     const inserted = insertedSlots.length;
     skipped += slotsToInsert.length - inserted;
     const staleOpenSlotIds = existingSlots
       .filter(
         (slot) =>
-          slot.status === 'open' && !desiredSlotWindows.has(`${slot.startTime}|${slot.endTime}`),
+          slot.status === 'open' &&
+          !occupiedSlots.includes(slot) &&
+          !desiredSlotWindows.has(`${slot.startTime}|${slot.endTime}`),
       )
       .map((slot) => slot.id);
-    const supersededSlots = await this.repos.slots.supersedeFutureOpenSlotsByIds(
+    const supersededSlots = await repos.slots.supersedeFutureOpenSlotsByIds(
       clinicId,
       staleOpenSlotIds,
     );
+    const matchingIds = existingSlots
+      .filter(
+        (slot) =>
+          slot.status === 'open' && desiredSlotWindows.has(`${slot.startTime}|${slot.endTime}`),
+      )
+      .map((slot) => slot.id);
+    await repos.slots.updateGeneratedSlotConfiguration(clinicId, matchingIds, {
+      generatedFromRuleId: rule.id,
+      configVersion: rule.version,
+      capacityTotal: rule.capacityPerSlot,
+    });
 
     const summary = {
       clinic_id: clinicId,
@@ -259,7 +344,7 @@ export class SlotGenerationService {
     };
 
     if (batch) {
-      await this.repos.slots.completeBatch(batch.id, clinicId, summary);
+      await repos.slots.completeBatch(batch.id, clinicId, summary);
     }
 
     return summary;

@@ -1,15 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  formatKnowledgeCategoryName,
+  getKnowledgeCategoryDisplayName,
+} from './knowledge-categories';
 import type { KnowledgeEntry, Category } from './types';
 
 interface ReviewQueueProps {
   entries: KnowledgeEntry[];
   categories: Category[];
   onApprove: (id: string) => void;
-  onBulkApprove: (ids: string[]) => void;
-  onEdit: (id: string, entry: Partial<KnowledgeEntry>) => void;
+  onBulkApprove: (ids: string[]) => Promise<{ approvedIds: string[]; skippedIds: string[] }>;
+  onEdit: (id: string, entry: Partial<KnowledgeEntry>) => Promise<void>;
   onDisable: (id: string) => void;
+}
+
+function hasAnsweredReviewEntry(entry: KnowledgeEntry) {
+  return typeof entry.answer === 'string' && entry.answer.trim().length > 0;
+}
+
+function isEntryApprovable(entry: KnowledgeEntry) {
+  return entry.applicable !== false && hasAnsweredReviewEntry(entry);
 }
 
 export function ReviewQueue({
@@ -23,8 +35,26 @@ export function ReviewQueue({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<KnowledgeEntry>>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isBulkApproving, setIsBulkApproving] = useState(false);
+
+  useEffect(() => {
+    const selectableIds = new Set(
+      entries.filter((entry) => isEntryApprovable(entry)).map((entry) => entry.id),
+    );
+    setSelectedIds((current) => {
+      const visibleSelection = new Set(Array.from(current).filter((id) => selectableIds.has(id)));
+      return visibleSelection.size === current.size ? current : visibleSelection;
+    });
+  }, [entries]);
 
   const handleSelect = (id: string) => {
+    const entry = entries.find((candidate) => candidate.id === id);
+    if (!entry || !isEntryApprovable(entry)) {
+      return;
+    }
+
     const newSelected = new Set(selectedIds);
     if (newSelected.has(id)) {
       newSelected.delete(id);
@@ -35,22 +65,45 @@ export function ReviewQueue({
   };
 
   const handleSelectAll = () => {
-    if (selectedIds.size === entries.length) {
+    const selectableIds = entries
+      .filter((entry) => isEntryApprovable(entry))
+      .map((entry) => entry.id);
+    const allSelectableEntriesSelected =
+      selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+
+    if (allSelectableEntriesSelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(entries.map(e => e.id)));
+      setSelectedIds(new Set(selectableIds));
     }
   };
 
-  const handleBulkApprove = () => {
-    if (selectedIds.size > 0) {
-      onBulkApprove(Array.from(selectedIds));
-      setSelectedIds(new Set());
+  const handleBulkApprove = async () => {
+    if (selectedIds.size === 0 || isBulkApproving) {
+      return;
+    }
+
+    const ids = Array.from(selectedIds);
+    setIsBulkApproving(true);
+    try {
+      const result = await onBulkApprove(ids);
+      const approvedIds = new Set(result.approvedIds);
+      setSelectedIds((current) => {
+        const remaining = new Set(current);
+        approvedIds.forEach((id) => remaining.delete(id));
+        return remaining;
+      });
+    } catch {
+      // The parent displays the API error. Keep unapproved entries selected so
+      // the admin can retry without rebuilding the selection.
+    } finally {
+      setIsBulkApproving(false);
     }
   };
 
   const handleEditStart = (entry: KnowledgeEntry) => {
     setEditingId(entry.id);
+    setEditError(null);
     setEditForm({
       question: entry.question,
       answer: entry.answer,
@@ -59,9 +112,22 @@ export function ReviewQueue({
     });
   };
 
-  const handleEditSave = () => {
-    if (editingId && editForm.question && editForm.answer && editForm.category) {
-      onEdit(editingId, editForm);
+  const handleEditSave = async () => {
+    if (editingId && editForm.question && editForm.answer && editForm.category && !isSavingEdit) {
+      setIsSavingEdit(true);
+      setEditError(null);
+      try {
+        await onEdit(editingId, editForm);
+      } catch (error) {
+        setEditError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Failed to save the answer. Please try again.',
+        );
+        return;
+      } finally {
+        setIsSavingEdit(false);
+      }
       setEditingId(null);
       setEditForm({});
     }
@@ -70,21 +136,15 @@ export function ReviewQueue({
   const handleEditCancel = () => {
     setEditingId(null);
     setEditForm({});
+    setEditError(null);
   };
 
-  const getCategoryName = (categoryId: string) => {
-    return categories.find(c => c.id === categoryId)?.name || categoryId;
-  };
+  // Template/import rows are created before the clinic supplies an answer. They
+  // belong in the editing workflow, not the approval queue. Keep this filter at
+  // the rendering boundary as a defensive guard even if the API returns them.
+  const visibleEntries = entries.filter((entry) => hasAnsweredReviewEntry(entry));
 
-  const getLanguageBadge = (language: string) => {
-    return (
-      <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-        {language}
-      </span>
-    );
-  };
-
-  if (entries.length === 0) {
+  if (visibleEntries.length === 0) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-900">Review queue</h3>
@@ -93,36 +153,42 @@ export function ReviewQueue({
     );
   }
 
+  const selectableEntries = visibleEntries.filter((entry) => isEntryApprovable(entry));
+  const allSelectableEntriesSelected =
+    selectableEntries.length > 0 && selectableEntries.every((entry) => selectedIds.has(entry.id));
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <h3 className="text-lg font-bold text-slate-900">Review queue</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {selectedIds.size > 0 && (
             <button
-              onClick={handleBulkApprove}
-              className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800"
+              onClick={() => void handleBulkApprove()}
+              disabled={isBulkApproving}
+              className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Approve selected ({selectedIds.size})
+              {isBulkApproving
+                ? `Approving ${selectedIds.size}...`
+                : `Approve selected (${selectedIds.size})`}
             </button>
           )}
           <button
             onClick={handleSelectAll}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+            disabled={isBulkApproving || selectableEntries.length === 0}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {selectedIds.size === entries.length ? 'Deselect all' : 'Select all'}
+            {allSelectableEntriesSelected ? 'Deselect all' : 'Select all'}
           </button>
         </div>
       </div>
 
       <div className="space-y-3">
-        {entries.map((entry) => (
+        {visibleEntries.map((entry) => (
           <div
             key={entry.id}
             className={`rounded-xl border p-4 ${
-              editingId === entry.id
-                ? 'border-teal-300 bg-teal-50'
-                : 'border-slate-200 bg-slate-50'
+              editingId === entry.id ? 'border-teal-300 bg-teal-50' : 'border-slate-200 bg-slate-50'
             }`}
           >
             <div className="mb-3 flex items-start gap-3">
@@ -130,6 +196,7 @@ export function ReviewQueue({
                 type="checkbox"
                 checked={selectedIds.has(entry.id)}
                 onChange={() => handleSelect(entry.id)}
+                disabled={isBulkApproving || !isEntryApprovable(entry)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
               />
               <div className="flex-1">
@@ -142,6 +209,7 @@ export function ReviewQueue({
                       <textarea
                         value={editForm.question}
                         onChange={(e) => setEditForm({ ...editForm, question: e.target.value })}
+                        disabled={isSavingEdit}
                         className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                         rows={2}
                       />
@@ -153,6 +221,7 @@ export function ReviewQueue({
                       <textarea
                         value={editForm.answer}
                         onChange={(e) => setEditForm({ ...editForm, answer: e.target.value })}
+                        disabled={isSavingEdit}
                         className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                         rows={3}
                       />
@@ -164,31 +233,56 @@ export function ReviewQueue({
                       <select
                         value={editForm.category}
                         onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                        disabled={isSavingEdit}
                         className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                       >
                         {categories.map((cat) => (
-                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
                         ))}
+                        {editForm.category &&
+                          !categories.some((category) => category.id === editForm.category) && (
+                            <option value={editForm.category}>
+                              {formatKnowledgeCategoryName(editForm.category)}
+                            </option>
+                          )}
                       </select>
                     </div>
+                    {editError && (
+                      <p role="alert" className="text-xs font-semibold text-red-700">
+                        {editError}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <>
-                    <div className="mb-2 flex items-center gap-2 flex-wrap">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
                       <h4 className="text-sm font-bold text-slate-900">{entry.question}</h4>
-                      {getLanguageBadge(entry.language)}
                     </div>
                     <p className="text-sm text-slate-600">{entry.answer}</p>
+                    {entry.applicable === false && (
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        Not applicable — enable this entry before approval
+                      </p>
+                    )}
                     <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                      <span className="font-semibold">{getCategoryName(entry.category)}</span>
+                      <span className="font-semibold">
+                        {getKnowledgeCategoryDisplayName(entry, categories)}
+                      </span>
                       {entry.source === 'upload' && <span>• Uploaded from DOCX</span>}
                     </div>
-                    {entry.alternativePhrases.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-xs font-semibold text-slate-500">Alternative phrases:</p>
-                        <p className="text-xs text-slate-600">{entry.alternativePhrases.join(', ')}</p>
-                      </div>
-                    )}
+                    {Array.isArray(entry.alternativePhrases) &&
+                      entry.alternativePhrases.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs font-semibold text-slate-500">
+                            Alternative phrases:
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            {entry.alternativePhrases.join(', ')}
+                          </p>
+                        </div>
+                      )}
                   </>
                 )}
               </div>
@@ -198,14 +292,16 @@ export function ReviewQueue({
               {editingId === entry.id ? (
                 <>
                   <button
-                    onClick={handleEditSave}
-                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800"
+                    onClick={() => void handleEditSave()}
+                    disabled={isBulkApproving || isSavingEdit}
+                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Save
+                    {isSavingEdit ? 'Saving...' : 'Save'}
                   </button>
                   <button
                     onClick={handleEditCancel}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    disabled={isBulkApproving || isSavingEdit}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Cancel
                   </button>
@@ -214,19 +310,22 @@ export function ReviewQueue({
                 <>
                   <button
                     onClick={() => onApprove(entry.id)}
-                    className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100"
+                    disabled={isBulkApproving || !isEntryApprovable(entry)}
+                    className="rounded-xl border-2 border-green-300 bg-green-50 px-3 py-1.5 text-xs font-bold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Approve
                   </button>
                   <button
                     onClick={() => handleEditStart(entry)}
-                    className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
+                    disabled={isBulkApproving}
+                    className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => onDisable(entry.id)}
-                    className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
+                    disabled={isBulkApproving}
+                    className="rounded-xl border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Disable
                   </button>

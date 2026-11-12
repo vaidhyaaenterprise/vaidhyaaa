@@ -1,11 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AgentSettings } from '@/components/pages/settings/AgentSettings';
 import { NotificationSettings } from '@/components/pages/settings/NotificationSettings';
-import { LanguageSettings } from '@/components/pages/settings/LanguageSettings';
 import { SubscriptionDisplay } from '@/components/pages/settings/SubscriptionDisplay';
 import { PlatformSubscriptionManager } from '@/components/pages/settings/PlatformSubscriptionManager';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
@@ -16,7 +15,6 @@ import {
   fetchClinicLanguages,
   fetchClinicSubscription,
   fetchClinicUsage,
-  fetchSupportedLanguages,
   replaceClinicLanguages,
 } from '@/lib/api/clinic-subscription';
 import {
@@ -26,21 +24,25 @@ import {
 } from '@/lib/api/clinic-settings';
 import type {
   AgentSettings as AgentSettingsType,
-  Language,
-  LanguageSettings as LanguageSettingsType,
+  AgentLanguage,
   NotificationSettings as NotificationSettingsType,
   SubscriptionPlan,
   NotificationEvent,
   PlatformSubscriptionChange,
 } from '@/components/pages/settings/types';
 
-function mapSettingsToAgent(settings: ClinicSettingsResponse): AgentSettingsType {
+function normalizeAgentLanguage(languageCode?: string | null): AgentLanguage {
+  return languageCode === 'english' ? 'english' : 'ta_tanglish';
+}
+
+function mapSettingsToAgent(
+  settings: ClinicSettingsResponse,
+  language: AgentLanguage = 'ta_tanglish',
+): AgentSettingsType {
   return {
     agentEnabled: settings.agent_enabled,
-    answeringMode: settings.answering_mode as AgentSettingsType['answeringMode'],
     bookingMode: settings.booking_mode as AgentSettingsType['bookingMode'],
-    fallbackPhone: settings.fallback_phone ?? '',
-    overflowAfterRings: settings.overflow_after_rings ?? 4,
+    language,
     onboardingComplete: true,
   };
 }
@@ -48,12 +50,78 @@ function mapSettingsToAgent(settings: ClinicSettingsResponse): AgentSettingsType
 function mapSettingsToNotification(settings: ClinicSettingsResponse): NotificationSettingsType {
   return {
     notifyStaffOnPendingAppointment: settings.notify_staff_on_pending_appointment,
-    pendingNotificationChannel:
-      (settings.pending_appointment_notification_channel as NotificationSettingsType['pendingNotificationChannel']) ??
-      'whatsapp',
     notificationContacts: [],
   };
 }
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  );
+}
+
+async function readOptional<T>(request: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await request;
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return fallback;
+  }
+}
+
+type OptionalSettingsData = {
+  subscriptionRow: Awaited<ReturnType<typeof fetchClinicSubscription>> | null;
+  usageRow: Awaited<ReturnType<typeof fetchClinicUsage>> | null;
+};
+
+async function loadOptionalSettingsData(clinicId: string, isAdmin: boolean, signal: AbortSignal) {
+  const result: OptionalSettingsData = {
+    subscriptionRow: null,
+    usageRow: null,
+  };
+  const tasks: Array<() => Promise<void>> = isAdmin
+    ? [
+        async () => {
+          result.subscriptionRow = await readOptional(
+            fetchClinicSubscription(clinicId, signal),
+            null,
+          );
+        },
+        async () => {
+          result.usageRow = await readOptional(fetchClinicUsage(clinicId, signal), null);
+        },
+      ]
+    : [];
+
+  // Keep optional reads behind the required settings request and cap their
+  // concurrency. A worker starts the next read as soon as its current read
+  // settles, avoiding both a serverless request burst and batch head-of-line
+  // blocking while preserving the existing optional-data fallbacks.
+  let nextTaskIndex = 0;
+  const runWorker = async () => {
+    while (nextTaskIndex < tasks.length) {
+      const task = tasks[nextTaskIndex];
+      nextTaskIndex += 1;
+      await task?.();
+    }
+  };
+  await Promise.all([runWorker(), runWorker()]);
+
+  return result;
+}
+
+const DEFAULT_SUBSCRIPTION: SubscriptionPlan = {
+  planKey: 'pilot',
+  planName: 'Pilot',
+  status: 'manual_free',
+  includedVoiceMinutes: 500,
+  usedVoiceMinutes: 0,
+  maxConcurrentCalls: 3,
+  recordingRetentionDays: 10,
+  transcriptRetentionDays: 30,
+};
 
 export function SettingsPageContent() {
   const { effectiveRole } = useAuth();
@@ -62,61 +130,97 @@ export function SettingsPageContent() {
   const isDoctor = effectiveRole === 'doctor';
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; requestId?: string } | null>(null);
   const [agentSettings, setAgentSettings] = useState<AgentSettingsType | null>(null);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType | null>(
     null,
   );
-  const [languageSettings, setLanguageSettings] = useState<LanguageSettingsType>({
-    supportedLanguages: ['ta_tanglish', 'english'],
-    clinicLanguages: ['ta_tanglish', 'english'],
-    defaultLanguage: 'ta_tanglish',
-    missingTemplates: [],
-  });
-  const [subscription, setSubscription] = useState<SubscriptionPlan>({
-    planKey: 'pilot',
-    planName: 'Pilot',
-    status: 'manual_free',
-    includedVoiceMinutes: 500,
-    usedVoiceMinutes: 0,
-    maxConcurrentCalls: 3,
-    recordingRetentionDays: 10,
-    transcriptRetentionDays: 30,
-  });
+  const [subscription, setSubscription] = useState<SubscriptionPlan>(DEFAULT_SUBSCRIPTION);
   const [notificationEvents] = useState<NotificationEvent[]>([]);
+  const activeLoadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
+  const activeClinicIdRef = useRef(clinicId);
+  const postMutationReadAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      postMutationReadAbortRef.current?.abort();
+      postMutationReadAbortRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    activeClinicIdRef.current = clinicId;
+    postMutationReadAbortRef.current?.abort();
+    postMutationReadAbortRef.current = null;
+  }, [clinicId]);
 
   const loadSettings = useCallback(async () => {
+    activeLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeLoadControllerRef.current = controller;
+    const loadSequence = ++loadSequenceRef.current;
+    const isCurrentLoad = () =>
+      !controller.signal.aborted && loadSequence === loadSequenceRef.current;
+
     if (!clinicId) {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setAgentSettings(null);
+        setNotificationSettings(null);
+        setSubscription(DEFAULT_SUBSCRIPTION);
+        setLoading(false);
+        activeLoadControllerRef.current = null;
+      }
       return;
     }
     setLoading(true);
     setError(null);
+    setAgentSettings(null);
+    setNotificationSettings(null);
+    setSubscription(DEFAULT_SUBSCRIPTION);
     try {
-      const [settings, subscriptionRow, usageRow, languagesRow, supported] = await Promise.all([
-        isAdmin ? fetchClinicSettings(clinicId) : Promise.resolve(null),
-        fetchClinicSubscription(clinicId).catch(() => null),
-        fetchClinicUsage(clinicId).catch(() => null),
-        fetchClinicLanguages(clinicId).catch(() => null),
-        fetchSupportedLanguages().catch(() => []),
-      ]);
+      // Core settings are required. Give this read priority so an optional
+      // request cannot consume the last available upstream/database capacity.
+      // The shared API client already applies one bounded retry to GETs. Keep
+      // one retry budget here so a persistent outage cannot multiply timeouts.
+      const settings = isAdmin ? await fetchClinicSettings(clinicId, controller.signal) : null;
+
+      if (!isCurrentLoad()) {
+        return;
+      }
 
       if (settings) {
-        setAgentSettings(mapSettingsToAgent(settings));
         setNotificationSettings(mapSettingsToNotification(settings));
       }
 
-      if (languagesRow) {
-        setLanguageSettings({
-          supportedLanguages: supported
-            .filter((row) => row.enabled_platform_wide)
-            .map((row) => row.language_code as Language),
-          clinicLanguages: languagesRow.languages
-            .filter((row) => row.enabled)
-            .map((row) => row.language_code as Language),
-          defaultLanguage: languagesRow.default_language_code as Language,
-          missingTemplates: [],
-        });
+      const languagesRow = isAdmin
+        ? await readOptional(fetchClinicLanguages(clinicId, controller.signal), null)
+        : null;
+
+      if (!isCurrentLoad()) {
+        return;
+      }
+
+      if (settings) {
+        setAgentSettings(
+          mapSettingsToAgent(
+            settings,
+            normalizeAgentLanguage(languagesRow?.default_language_code),
+          ),
+        );
+      }
+
+      const { subscriptionRow, usageRow } = await loadOptionalSettingsData(
+        clinicId,
+        isAdmin,
+        controller.signal,
+      );
+
+      if (!isCurrentLoad()) {
+        return;
       }
 
       if (subscriptionRow) {
@@ -141,84 +245,120 @@ export function SettingsPageContent() {
         }));
       }
     } catch (err) {
-      setError(
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
+      const message =
         err instanceof ApiRequestError
           ? err.apiError.message
-          : 'Failed to load clinic settings from the API.',
-      );
+          : 'Failed to load clinic settings from the API.';
+      const requestId = err instanceof ApiRequestError ? err.apiError.requestId : undefined;
+      setError({ message, ...(requestId ? { requestId } : {}) });
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+        if (activeLoadControllerRef.current === controller) {
+          activeLoadControllerRef.current = null;
+        }
+      }
     }
   }, [clinicId, isAdmin]);
 
   useEffect(() => {
     void loadSettings();
+    return () => {
+      activeLoadControllerRef.current?.abort();
+      activeLoadControllerRef.current = null;
+      loadSequenceRef.current += 1;
+    };
   }, [loadSettings]);
 
   const handleUpdateAgentSettings = async (settings: Partial<AgentSettingsType>) => {
     if (!clinicId || !agentSettings) {
       return;
     }
+    const targetClinicId = clinicId;
     const next = { ...agentSettings, ...settings };
-    const saved = await patchClinicSettings(clinicId, {
-      agent_enabled: next.agentEnabled,
-      answering_mode: next.answeringMode,
-      booking_mode: next.bookingMode,
-      fallback_phone: next.fallbackPhone,
-      overflow_after_rings: next.overflowAfterRings,
-    });
-    setAgentSettings(mapSettingsToAgent(saved));
+    const [saved, savedLanguages] = await Promise.all([
+      patchClinicSettings(targetClinicId, {
+        agent_enabled: next.agentEnabled,
+        booking_mode: next.bookingMode,
+      }),
+      next.language !== agentSettings.language
+        ? replaceClinicLanguages(targetClinicId, {
+            default_language_code: next.language,
+            languages: [
+              {
+                language_code: 'ta_tanglish',
+                enabled: true,
+                is_default: next.language === 'ta_tanglish',
+              },
+              {
+                language_code: 'english',
+                enabled: true,
+                is_default: next.language === 'english',
+              },
+            ],
+          })
+        : Promise.resolve(null),
+    ]);
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      setAgentSettings(
+        mapSettingsToAgent(
+          saved,
+          normalizeAgentLanguage(savedLanguages?.default_language_code ?? next.language),
+        ),
+      );
+    }
   };
 
   const handleUpdateNotificationSettings = async (settings: Partial<NotificationSettingsType>) => {
     if (!clinicId || !notificationSettings) {
       return;
     }
+    const targetClinicId = clinicId;
     const next = { ...notificationSettings, ...settings };
-    const saved = await patchClinicSettings(clinicId, {
+    const saved = await patchClinicSettings(targetClinicId, {
       notify_staff_on_pending_appointment: next.notifyStaffOnPendingAppointment,
-      pending_appointment_notification_channel: next.pendingNotificationChannel,
     });
-    setNotificationSettings(mapSettingsToNotification(saved));
-  };
-
-  const handleTestNotification = () => {
-    // Notification test API not yet exposed
-  };
-
-  const handleUpdateLanguageSettings = async (settings: Partial<LanguageSettingsType>) => {
-    if (!clinicId || !isAdmin) {
-      return;
+    if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+      setNotificationSettings(mapSettingsToNotification(saved));
     }
-    const next = { ...languageSettings, ...settings };
-    const saved = await replaceClinicLanguages(clinicId, {
-      default_language_code: next.defaultLanguage,
-      languages: next.supportedLanguages.map((language) => ({
-        language_code: language,
-        enabled: next.clinicLanguages.includes(language),
-        is_default: language === next.defaultLanguage,
-      })),
-    });
-    setLanguageSettings({
-      ...next,
-      clinicLanguages: saved.languages
-        .filter((language) => language.enabled)
-        .map((language) => language.language_code as Language),
-      defaultLanguage: saved.default_language_code as Language,
-    });
   };
 
   const handlePlanChange = async (change: PlatformSubscriptionChange) => {
     if (!clinicId) {
       return;
     }
-    await changeClinicSubscription(clinicId, {
+    const targetClinicId = clinicId;
+    await changeClinicSubscription(targetClinicId, {
       plan_key: change.planKey,
       status: change.status,
       trial_end: change.trialEnd ?? null,
       notes: change.notes ?? null,
     });
-    const saved = await fetchClinicSubscription(clinicId);
+    if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+      return;
+    }
+    postMutationReadAbortRef.current?.abort();
+    const controller = new AbortController();
+    postMutationReadAbortRef.current = controller;
+    let saved: Awaited<ReturnType<typeof fetchClinicSubscription>>;
+    try {
+      saved = await fetchClinicSubscription(targetClinicId, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) {
+        return;
+      }
+      throw error;
+    } finally {
+      if (postMutationReadAbortRef.current === controller) {
+        postMutationReadAbortRef.current = null;
+      }
+    }
+    if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+      return;
+    }
     setSubscription((previous) => ({
       planKey: saved.plan_key,
       planName: saved.plan_name,
@@ -241,7 +381,10 @@ export function SettingsPageContent() {
 
   if (error) {
     return (
-      <ErrorState title="Could not load settings" description={error}>
+      <ErrorState
+        title="Could not load settings"
+        description={`${error.message}${error.requestId ? ` Reference ID: ${error.requestId}.` : ''}`}
+      >
         <button
           type="button"
           onClick={() => void loadSettings()}
@@ -259,12 +402,12 @@ export function SettingsPageContent() {
         title="Settings"
         description={
           isDoctor
-            ? 'View clinic settings and language preferences.'
-            : 'Configure agent behavior, notifications, languages, and view subscription details.'
+            ? 'View clinic settings.'
+            : 'Configure agent behavior, notifications, and view subscription details.'
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="portal-card-grid gap-4">
         {isAdmin && agentSettings && notificationSettings && (
           <>
             <AgentSettings settings={agentSettings} onUpdateSettings={handleUpdateAgentSettings} />
@@ -272,15 +415,9 @@ export function SettingsPageContent() {
               settings={notificationSettings}
               notificationEvents={notificationEvents}
               onUpdateSettings={handleUpdateNotificationSettings}
-              onTestNotification={handleTestNotification}
             />
           </>
         )}
-
-        <LanguageSettings
-          settings={languageSettings}
-          onUpdateSettings={handleUpdateLanguageSettings}
-        />
 
         {isAdmin && <SubscriptionDisplay subscription={subscription} />}
 

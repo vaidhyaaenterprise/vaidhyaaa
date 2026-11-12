@@ -10,8 +10,8 @@ function normalizeName(value: string): string {
 export class PatientsRepository {
   constructor(private readonly db: Database) {}
 
-  findByPhone(clinicId: string, normalizedPhone: string) {
-    return this.db
+  findByPhone(clinicId: string, normalizedPhone: string, db: Database = this.db) {
+    return db
       .select()
       .from(patients)
       .where(and(eq(patients.clinicId, clinicId), eq(patients.normalizedPhone, normalizedPhone)))
@@ -34,8 +34,9 @@ export class PatientsRepository {
     clinicId: string,
     patientId: string,
     values: Partial<typeof patients.$inferInsert>,
+    db: Database = this.db,
   ) {
-    return this.db
+    return db
       .update(patients)
       .set({ ...values, updatedAt: new Date() })
       .where(and(eq(patients.clinicId, clinicId), eq(patients.id, patientId)))
@@ -85,17 +86,20 @@ export class PatientsRepository {
       .returning();
   }
 
-  async upsertByPhone(input: {
-    clinicId: string;
-    name: string;
-    phone: string;
-    normalizedPhone: string;
-    normalizedName?: string;
-    ageYears?: number | null;
-    dateOfBirth?: string | null;
-  }) {
+  async upsertByPhone(
+    input: {
+      clinicId: string;
+      name: string;
+      phone: string;
+      normalizedPhone: string;
+      normalizedName?: string;
+      ageYears?: number | null;
+      dateOfBirth?: string | null;
+    },
+    db: Database = this.db,
+  ) {
     const normalizedName = input.normalizedName ?? normalizeName(input.name);
-    const candidates = await this.findByPhone(input.clinicId, input.normalizedPhone);
+    const candidates = await this.findByPhone(input.clinicId, input.normalizedPhone, db);
 
     const existing = normalizedName
       ? candidates.find((row) => {
@@ -105,7 +109,7 @@ export class PatientsRepository {
       : candidates[0];
 
     if (existing) {
-      const [updated] = await this.db
+      const [updated] = await db
         .update(patients)
         .set({
           name: input.name,
@@ -120,7 +124,7 @@ export class PatientsRepository {
       return updated ? [updated] : [];
     }
 
-    return this.db
+    return db
       .insert(patients)
       .values({
         clinicId: input.clinicId,
@@ -134,8 +138,8 @@ export class PatientsRepository {
       .returning();
   }
 
-  insertVisit(values: typeof patientVisits.$inferInsert) {
-    return this.db.insert(patientVisits).values(values).returning();
+  insertVisit(values: typeof patientVisits.$inferInsert, db: Database = this.db) {
+    return db.insert(patientVisits).values(values).returning();
   }
 
   listVisitsByAppointmentIds(clinicId: string, appointmentIds: string[]) {

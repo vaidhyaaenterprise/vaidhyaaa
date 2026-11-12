@@ -8,14 +8,12 @@ interface NotificationSettingsProps {
   settings: NotificationSettings;
   notificationEvents: NotificationEvent[];
   onUpdateSettings: (settings: Partial<NotificationSettings>) => Promise<void>;
-  onTestNotification: () => void;
 }
 
 export function NotificationSettings({
   settings,
   notificationEvents,
   onUpdateSettings,
-  onTestNotification,
 }: NotificationSettingsProps) {
   const { effectiveRole } = useAuth();
   const isAdmin = effectiveRole === 'admin';
@@ -141,12 +139,6 @@ export function NotificationSettings({
               {settings.notifyStaffOnPendingAppointment ? 'Enabled' : 'Disabled'}
             </span>
           </div>
-          <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-            <span className="text-sm font-semibold text-slate-600">
-              Pending notification channel
-            </span>
-            {getChannelBadge(settings.pendingNotificationChannel)}
-          </div>
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
             <p className="text-xs font-bold text-blue-800">
               ℹ Patients are notified only after appointment confirmation
@@ -174,27 +166,6 @@ export function NotificationSettings({
             </label>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-              Pending notification channel
-            </label>
-            <select
-              value={tempSettings.pendingNotificationChannel}
-              onChange={(e) =>
-                setTempSettings({
-                  ...tempSettings,
-                  pendingNotificationChannel: e.target.value as NotificationChannel,
-                })
-              }
-              className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-            >
-              <option value="whatsapp">WhatsApp</option>
-              <option value="sms">SMS</option>
-              <option value="email">Email</option>
-              <option value="none">None</option>
-            </select>
-          </div>
-
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
             <p className="text-xs font-bold text-blue-800">
               ℹ Patients are notified only after appointment confirmation
@@ -219,13 +190,6 @@ export function NotificationSettings({
             >
               Cancel
             </button>
-            <button
-              onClick={onTestNotification}
-              disabled={saving}
-              className="rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100"
-            >
-              Test notification
-            </button>
           </div>
         </div>
       )}
@@ -238,14 +202,16 @@ export function NotificationSettings({
           <div className="space-y-2">
             {notificationEvents.slice(0, 5).map((event) => (
               <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{event.recipient}</p>
+                <div className="mb-2 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold text-slate-900">
+                      {event.recipient}
+                    </p>
                     <p className="text-xs text-slate-500">
                       {new Date(event.timestamp).toLocaleString()}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex shrink-0 flex-wrap gap-2">
                     {getChannelBadge(event.channel)}
                     {getStatusBadge(event.status)}
                   </div>

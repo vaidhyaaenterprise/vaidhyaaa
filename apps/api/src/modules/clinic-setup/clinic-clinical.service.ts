@@ -4,7 +4,11 @@ import { createRepositories, formatDateInTimezone, type Repositories } from '@va
 import type { DatabaseConnection } from '@vaidya/db';
 import {
   AppError,
+  BOOKING_HORIZON_DAYS,
+  MIN_SLOT_DURATION_MINUTES,
+  updateBookingRuleSchema,
   findPredefinedClinicService,
+  replaceDoctorSchedulesSchema,
   type CreateDoctorServiceMappingInput,
   type CreateClinicHolidayInput,
   type PatchClinicHolidayInput,
@@ -16,7 +20,7 @@ import {
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 import { ScheduleChangeImpactService } from '../slots/schedule-change-impact.service';
-import { SlotGenerationService } from '../slots/slot-generation.service';
+import { SlotReconciliationService } from '../slots/slot-reconciliation.service';
 
 function formatTime(value: string): string {
   return value.slice(0, 5);
@@ -137,14 +141,14 @@ export class ClinicClinicalService {
     @Inject(DATABASE_CONNECTION) connection: DatabaseConnection,
     @Inject(ScheduleChangeImpactService)
     private readonly scheduleChangeImpact: ScheduleChangeImpactService,
-    @Inject(SlotGenerationService)
-    private readonly slotGeneration: SlotGenerationService,
+    @Inject(SlotReconciliationService)
+    private readonly slotReconciliation: SlotReconciliationService,
   ) {
     this.repos = createRepositories(connection.db);
   }
 
   async listDoctors(clinicId: string) {
-    const rows = await this.repos.clinicalSetup.listDoctors(clinicId);
+    const rows = await this.repos.clinicalSetup.listActiveDoctors(clinicId);
     return rows.map((row) => ({
       id: row.id,
       clinic_id: row.clinicId,
@@ -418,13 +422,14 @@ export class ClinicClinicalService {
           clinicId,
           doctorId: mapping.doctorId,
           clinicServiceId: mapping.clinicServiceId,
-          slotDurationMinutes: latestRule?.slotDurationMinutes ?? 15,
+          slotDurationMinutes: Math.max(
+            MIN_SLOT_DURATION_MINUTES,
+            latestRule?.slotDurationMinutes ?? MIN_SLOT_DURATION_MINUTES,
+          ),
           capacityPerSlot: latestRule?.capacityPerSlot ?? 3,
-          bookingHorizonDays: latestRule?.bookingHorizonDays ?? 45,
+          bookingHorizonDays: BOOKING_HORIZON_DAYS,
           minBookingNoticeMinutes: latestRule?.minBookingNoticeMinutes ?? 0,
           maxAdvanceBookingDays: latestRule?.maxAdvanceBookingDays ?? null,
-          manualEditCutoffBeforeStartMinutes: latestRule?.manualEditCutoffBeforeStartMinutes ?? 60,
-          manualEditMaxShiftMinutes: latestRule?.manualEditMaxShiftMinutes ?? 60,
           effectiveFrom: today,
           effectiveTo: null,
           active: true,
@@ -465,13 +470,14 @@ export class ClinicClinicalService {
       clinicId,
       doctorId,
       clinicServiceId,
-      slotDurationMinutes: latestRule?.slotDurationMinutes ?? 15,
+      slotDurationMinutes: Math.max(
+        MIN_SLOT_DURATION_MINUTES,
+        latestRule?.slotDurationMinutes ?? MIN_SLOT_DURATION_MINUTES,
+      ),
       capacityPerSlot: latestRule?.capacityPerSlot ?? 3,
-      bookingHorizonDays: latestRule?.bookingHorizonDays ?? 45,
+      bookingHorizonDays: BOOKING_HORIZON_DAYS,
       minBookingNoticeMinutes: latestRule?.minBookingNoticeMinutes ?? 0,
       maxAdvanceBookingDays: latestRule?.maxAdvanceBookingDays ?? null,
-      manualEditCutoffBeforeStartMinutes: latestRule?.manualEditCutoffBeforeStartMinutes ?? 60,
-      manualEditMaxShiftMinutes: latestRule?.manualEditMaxShiftMinutes ?? 60,
       effectiveFrom: today,
       effectiveTo: null,
       active: true,
@@ -491,7 +497,7 @@ export class ClinicClinicalService {
     if (clinicServiceId) {
       generationInput.clinicServiceId = clinicServiceId;
     }
-    await this.slotGeneration.generateSlots(generationInput);
+    await this.slotReconciliation.enqueue(clinicId, generationInput);
   }
 
   async patchDoctorServiceMapping(
@@ -556,15 +562,11 @@ export class ClinicClinicalService {
   }
 
   async deleteDoctor(clinicId: string, doctorId: string) {
-    // Cascade: delete booking rules, then mappings, then schedules, then the doctor
-    await this.repos.clinicalSetup.deleteBookingRulesForDoctor(clinicId, doctorId);
-    await this.repos.clinicalSetup.deleteDoctorServiceMappingsForDoctor(clinicId, doctorId);
-    await this.repos.clinicalSetup.deleteDoctorSchedulesForDoctor(clinicId, doctorId);
-    const [deleted] = await this.repos.clinicalSetup.deleteDoctor(clinicId, doctorId);
-    if (!deleted) {
+    const archived = await this.repos.clinicalSetup.archiveDoctor(clinicId, doctorId);
+    if (!archived) {
       throw new AppError('NOT_FOUND', 'Doctor not found.');
     }
-    return { deleted: true };
+    return { deleted: true, archived: true };
   }
 
   async deleteClinicService(clinicId: string, serviceId: string) {
@@ -616,11 +618,9 @@ export class ClinicClinicalService {
         clinic_service_id: row.clinicServiceId,
         slot_duration_minutes: row.slotDurationMinutes,
         capacity_per_slot: row.capacityPerSlot,
-        booking_horizon_days: row.bookingHorizonDays,
+        booking_horizon_days: BOOKING_HORIZON_DAYS,
         min_booking_notice_minutes: row.minBookingNoticeMinutes,
         max_advance_booking_days: row.maxAdvanceBookingDays,
-        manual_edit_cutoff_before_start_minutes: row.manualEditCutoffBeforeStartMinutes,
-        manual_edit_max_shift_minutes: row.manualEditMaxShiftMinutes,
         effective_from: row.effectiveFrom,
         effective_to: row.effectiveTo,
         active: row.active,
@@ -663,9 +663,9 @@ export class ClinicClinicalService {
   }
 
   async patchBookingRule(clinicId: string, ruleId: string, input: UpdateBookingRuleInput) {
-    const bookingRuleInput = input as UpdateBookingRuleInput & {
-      implement_from?: string;
-    };
+    const parsed = updateBookingRuleSchema.safeParse(input);
+    if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
+    const bookingRuleInput = parsed.data;
 
     const hasCapacityOrDurationChange =
       bookingRuleInput.capacity_per_slot !== undefined ||
@@ -692,58 +692,54 @@ export class ClinicClinicalService {
         );
       }
 
-      if (bookingRuleInput.capacity_per_slot !== undefined) {
-        await this.scheduleChangeImpact.applyBookingRuleChange(clinicId, ruleId, {
-          capacity_per_slot: bookingRuleInput.capacity_per_slot,
-          ...(bookingRuleInput.implement_from !== undefined
-            ? { implement_from: bookingRuleInput.implement_from }
-            : {}),
-        });
-      }
-
-      if (bookingRuleInput.slot_duration_minutes !== undefined) {
-        await this.scheduleChangeImpact.applyBookingRuleChange(clinicId, ruleId, {
-          slot_duration_minutes: bookingRuleInput.slot_duration_minutes,
-          ...(bookingRuleInput.implement_from !== undefined
-            ? { implement_from: bookingRuleInput.implement_from }
-            : {}),
-        });
-      }
+      const row = await this.scheduleChangeImpact.applyBookingRuleUpdate(
+        clinicId,
+        ruleId,
+        bookingRuleInput,
+      );
+      return {
+        id: row.id,
+        clinic_id: row.clinicId,
+        doctor_id: row.doctorId,
+        clinic_service_id: row.clinicServiceId,
+        slot_duration_minutes: row.slotDurationMinutes,
+        capacity_per_slot: row.capacityPerSlot,
+        booking_horizon_days: BOOKING_HORIZON_DAYS,
+        effective_from: row.effectiveFrom,
+        active: row.active,
+        version: row.version,
+      };
     }
 
-    const [row] = await this.repos.clinicalSetup.patchBookingRule(clinicId, ruleId, {
-      ...(bookingRuleInput.slot_duration_minutes !== undefined
-        ? { slotDurationMinutes: bookingRuleInput.slot_duration_minutes }
-        : {}),
-      ...(bookingRuleInput.capacity_per_slot !== undefined
-        ? { capacityPerSlot: bookingRuleInput.capacity_per_slot }
-        : {}),
-      ...(bookingRuleInput.booking_horizon_days !== undefined
-        ? { bookingHorizonDays: bookingRuleInput.booking_horizon_days }
-        : {}),
-      ...(bookingRuleInput.min_booking_notice_minutes !== undefined
-        ? { minBookingNoticeMinutes: bookingRuleInput.min_booking_notice_minutes }
-        : {}),
-      ...(bookingRuleInput.max_advance_booking_days !== undefined
-        ? { maxAdvanceBookingDays: bookingRuleInput.max_advance_booking_days }
-        : {}),
-      ...(bookingRuleInput.manual_edit_cutoff_before_start_minutes !== undefined
-        ? {
-            manualEditCutoffBeforeStartMinutes:
-              bookingRuleInput.manual_edit_cutoff_before_start_minutes,
-          }
-        : {}),
-      ...(bookingRuleInput.manual_edit_max_shift_minutes !== undefined
-        ? { manualEditMaxShiftMinutes: bookingRuleInput.manual_edit_max_shift_minutes }
-        : {}),
-      ...(bookingRuleInput.effective_from !== undefined
-        ? { effectiveFrom: bookingRuleInput.effective_from }
-        : {}),
-      ...(bookingRuleInput.effective_to !== undefined
-        ? { effectiveTo: bookingRuleInput.effective_to }
-        : {}),
-      ...(bookingRuleInput.active !== undefined ? { active: bookingRuleInput.active } : {}),
-    });
+    const [existingRule] = await this.repos.slots.findBookingRule(clinicId, ruleId);
+    if (!existingRule) throw new AppError('NOT_FOUND', 'Booking rule not found.');
+    const [row] = await this.slotReconciliation.save(
+      clinicId,
+      { doctorId: existingRule.doctorId, clinicServiceId: existingRule.clinicServiceId },
+      (repos) =>
+        repos.clinicalSetup.patchBookingRule(clinicId, ruleId, {
+          ...(bookingRuleInput.slot_duration_minutes !== undefined
+            ? { slotDurationMinutes: bookingRuleInput.slot_duration_minutes }
+            : {}),
+          ...(bookingRuleInput.capacity_per_slot !== undefined
+            ? { capacityPerSlot: bookingRuleInput.capacity_per_slot }
+            : {}),
+          bookingHorizonDays: BOOKING_HORIZON_DAYS,
+          ...(bookingRuleInput.min_booking_notice_minutes !== undefined
+            ? { minBookingNoticeMinutes: bookingRuleInput.min_booking_notice_minutes }
+            : {}),
+          ...(bookingRuleInput.max_advance_booking_days !== undefined
+            ? { maxAdvanceBookingDays: bookingRuleInput.max_advance_booking_days }
+            : {}),
+          ...(bookingRuleInput.effective_from !== undefined
+            ? { effectiveFrom: bookingRuleInput.effective_from }
+            : {}),
+          ...(bookingRuleInput.effective_to !== undefined
+            ? { effectiveTo: bookingRuleInput.effective_to }
+            : {}),
+          ...(bookingRuleInput.active !== undefined ? { active: bookingRuleInput.active } : {}),
+        }),
+    );
     if (!row) {
       throw new AppError('NOT_FOUND', 'Booking rule not found.');
     }
@@ -754,9 +750,8 @@ export class ClinicClinicalService {
       clinic_service_id: row.clinicServiceId,
       slot_duration_minutes: row.slotDurationMinutes,
       capacity_per_slot: row.capacityPerSlot,
-      booking_horizon_days: row.bookingHorizonDays,
-      manual_edit_cutoff_before_start_minutes: row.manualEditCutoffBeforeStartMinutes,
-      manual_edit_max_shift_minutes: row.manualEditMaxShiftMinutes,
+      booking_horizon_days: BOOKING_HORIZON_DAYS,
+      effective_from: row.effectiveFrom,
       active: row.active,
       version: row.version,
     };
@@ -772,23 +767,35 @@ export class ClinicClinicalService {
     if (preview.blocked) {
       throw new AppError(
         'CONFLICTING_APPOINTMENTS',
-        'Clinic hours change conflicts with active appointments.',
+        'Clinic hours must include existing doctor schedules and booked appointments.',
         {
           conflicts: preview.conflicts,
         },
       );
     }
 
-    const rows = await this.repos.clinicalSetup.replaceClinicHours(
-      clinicId,
-      input.windows.map((window) => ({
-        dayOfWeek: window.day_of_week,
-        startTime: window.start_time,
-        endTime: window.end_time,
-        active: window.active ?? true,
-      })),
-    );
-    await this.slotGeneration.generateSlots({ clinicId });
+    const rows = await this.slotReconciliation.save(clinicId, {}, async (repos) => {
+      const current = await this.scheduleChangeImpact.previewClinicHoursReplace(
+        clinicId,
+        input,
+        repos,
+      );
+      if (current.blocked)
+        throw new AppError(
+          'CONFLICTING_APPOINTMENTS',
+          'Clinic hours conflict with current schedules or appointments.',
+          { conflicts: current.conflicts },
+        );
+      return repos.clinicalSetup.replaceClinicHours(
+        clinicId,
+        input.windows.map((window) => ({
+          dayOfWeek: window.day_of_week,
+          startTime: window.start_time,
+          endTime: window.end_time,
+          active: window.active ?? true,
+        })),
+      );
+    });
     return rows.map(mapClinicHoursRow);
   }
 
@@ -829,22 +836,38 @@ export class ClinicClinicalService {
       }
     }
 
-    const [row] = await this.repos.clinicalSetup.insertHoliday({
-      clinicId,
-      holidayDate: input.holiday_date,
-      isFullDay: input.is_full_day ?? true,
-      startTime: input.start_time ?? null,
-      endTime: input.end_time ?? null,
-      reason: input.reason ?? null,
-      active: input.active ?? true,
-      createdByUserId: actorUserId,
-    });
-    if (!row) {
-      throw new AppError('INTERNAL_ERROR', 'Failed to create holiday.');
-    }
+    return this.slotReconciliation.save(clinicId, {}, async (repos) => {
+      if (input.active ?? true) {
+        const current = await this.scheduleChangeImpact.previewHolidayDate(
+          clinicId,
+          input.holiday_date,
+          doctorIds,
+          repos,
+        );
+        if (current.blocked)
+          throw new AppError(
+            'CONFLICTING_APPOINTMENTS',
+            'Holiday conflicts with active appointments.',
+            { conflicts: current.conflicts },
+          );
+      }
+      const [row] = await repos.clinicalSetup.insertHoliday({
+        clinicId,
+        holidayDate: input.holiday_date,
+        isFullDay: input.is_full_day ?? true,
+        startTime: input.start_time ?? null,
+        endTime: input.end_time ?? null,
+        reason: input.reason ?? null,
+        active: input.active ?? true,
+        createdByUserId: actorUserId,
+      });
+      if (!row) {
+        throw new AppError('INTERNAL_ERROR', 'Failed to create holiday.');
+      }
 
-    await this.repos.clinicalSetup.replaceHolidayDoctors(clinicId, row.id, doctorIds);
-    return mapHolidayRow(row, doctorIds);
+      await repos.clinicalSetup.replaceHolidayDoctors(clinicId, row.id, doctorIds);
+      return mapHolidayRow(row, doctorIds);
+    });
   }
 
   async patchHoliday(clinicId: string, holidayId: string, input: PatchClinicHolidayInput) {
@@ -889,23 +912,39 @@ export class ClinicClinicalService {
       }
     }
 
-    const [row] = await this.repos.clinicalSetup.patchHoliday(clinicId, holidayId, {
-      ...(input.holiday_date !== undefined ? { holidayDate: input.holiday_date } : {}),
-      ...(input.is_full_day !== undefined ? { isFullDay: input.is_full_day } : {}),
-      ...(input.start_time !== undefined ? { startTime: input.start_time } : {}),
-      ...(input.end_time !== undefined ? { endTime: input.end_time } : {}),
-      ...(input.reason !== undefined ? { reason: input.reason } : {}),
-      ...(input.active !== undefined ? { active: input.active } : {}),
+    return this.slotReconciliation.save(clinicId, {}, async (repos) => {
+      if (shouldPreview) {
+        const current = await this.scheduleChangeImpact.previewHolidayDate(
+          clinicId,
+          nextHolidayDate,
+          nextDoctorIds,
+          repos,
+        );
+        if (current.blocked)
+          throw new AppError(
+            'CONFLICTING_APPOINTMENTS',
+            'Holiday conflicts with active appointments.',
+            { conflicts: current.conflicts },
+          );
+      }
+      const [row] = await repos.clinicalSetup.patchHoliday(clinicId, holidayId, {
+        ...(input.holiday_date !== undefined ? { holidayDate: input.holiday_date } : {}),
+        ...(input.is_full_day !== undefined ? { isFullDay: input.is_full_day } : {}),
+        ...(input.start_time !== undefined ? { startTime: input.start_time } : {}),
+        ...(input.end_time !== undefined ? { endTime: input.end_time } : {}),
+        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        ...(input.active !== undefined ? { active: input.active } : {}),
+      });
+      if (!row) {
+        throw new AppError('NOT_FOUND', 'Holiday not found.');
+      }
+
+      if (input.doctor_ids !== undefined) {
+        await repos.clinicalSetup.replaceHolidayDoctors(clinicId, holidayId, nextDoctorIds);
+      }
+
+      return mapHolidayRow(row, nextDoctorIds);
     });
-    if (!row) {
-      throw new AppError('NOT_FOUND', 'Holiday not found.');
-    }
-
-    if (input.doctor_ids !== undefined) {
-      await this.repos.clinicalSetup.replaceHolidayDoctors(clinicId, holidayId, nextDoctorIds);
-    }
-
-    return mapHolidayRow(row, nextDoctorIds);
   }
 
   async listDoctorSchedules(clinicId: string, doctorId?: string) {
@@ -918,6 +957,8 @@ export class ClinicClinicalService {
     doctorId: string,
     input: ReplaceDoctorSchedulesInput,
   ) {
+    const parsed = replaceDoctorSchedulesSchema.safeParse(input);
+    if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
     const preview = await this.scheduleChangeImpact.previewDoctorSchedulesReplace(
       clinicId,
       doctorId,
@@ -926,27 +967,105 @@ export class ClinicClinicalService {
     if (preview.blocked) {
       throw new AppError(
         'CONFLICTING_APPOINTMENTS',
-        'Doctor schedule change conflicts with active appointments.',
+        'Doctor working hours must fit within clinic hours and include booked appointments.',
         {
           conflicts: preview.conflicts,
         },
       );
     }
 
-    const rows = await this.repos.clinicalSetup.replaceDoctorSchedules(
-      clinicId,
-      doctorId,
-      input.windows.map((window) => ({
-        doctorServiceId: window.doctor_service_id ?? null,
-        dayOfWeek: window.day_of_week,
-        startTime: window.start_time,
-        endTime: window.end_time,
-        effectiveFrom: window.effective_from ?? null,
-        effectiveTo: window.effective_to ?? null,
-        active: window.active ?? true,
-      })),
+    const rows = await this.slotReconciliation.save(clinicId, { doctorId }, async (repos) => {
+      const current = await this.scheduleChangeImpact.previewDoctorSchedulesReplace(
+        clinicId,
+        doctorId,
+        input,
+        repos,
+      );
+      if (current.blocked)
+        throw new AppError(
+          'CONFLICTING_APPOINTMENTS',
+          'Doctor working hours conflict with current clinic hours or appointments.',
+          { conflicts: current.conflicts },
+        );
+      return repos.clinicalSetup.replaceDoctorSchedules(
+        clinicId,
+        doctorId,
+        input.windows.map((window) => ({
+          doctorServiceId: window.doctor_service_id ?? null,
+          dayOfWeek: window.day_of_week,
+          startTime: window.start_time,
+          endTime: window.end_time,
+          effectiveFrom: window.effective_from ?? null,
+          effectiveTo: window.effective_to ?? null,
+          active: window.active ?? true,
+        })),
+      );
+    });
+    return rows.map(mapScheduleRow);
+  }
+
+  async replaceAllDoctorSchedules(clinicId: string, input: ReplaceDoctorSchedulesInput) {
+    const parsed = replaceDoctorSchedulesSchema.safeParse(input);
+    if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
+    if (input.windows.some((window) => window.doctor_service_id)) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Shared working hours cannot target one doctor’s service.',
+      );
+    }
+    const doctors = await this.repos.clinicalSetup.listActiveDoctors(clinicId);
+    if (doctors.length === 0)
+      throw new AppError('VALIDATION_ERROR', 'Add an active doctor before setting shared hours.');
+    // Validate every doctor before any schedule is changed. A conflict leaves all schedules intact.
+    const previews = await Promise.all(
+      doctors.map((doctor) =>
+        this.scheduleChangeImpact.previewDoctorSchedulesReplace(clinicId, doctor.id, input),
+      ),
     );
-    await this.regenerateSlotsForDoctorService(clinicId, doctorId, undefined);
+    const conflicts = previews.flatMap((preview) => preview.conflicts);
+    if (conflicts.length > 0)
+      throw new AppError(
+        'CONFLICTING_APPOINTMENTS',
+        'Shared working hours must fit within clinic hours and include every doctor’s booked appointments.',
+        { conflicts },
+      );
+    const rows = await this.slotReconciliation.save(clinicId, {}, async (repos) => {
+      const currentPreviews = await Promise.all(
+        doctors.map((doctor) =>
+          this.scheduleChangeImpact.previewDoctorSchedulesReplace(
+            clinicId,
+            doctor.id,
+            input,
+            repos,
+          ),
+        ),
+      );
+      const currentConflicts = currentPreviews.flatMap((preview) => preview.conflicts);
+      if (currentConflicts.length > 0)
+        throw new AppError(
+          'CONFLICTING_APPOINTMENTS',
+          'Shared working hours conflict with current clinic hours or appointments.',
+          { conflicts: currentConflicts },
+        );
+      const saved = [];
+      for (const doctor of doctors) {
+        saved.push(
+          ...(await repos.clinicalSetup.replaceDoctorSchedules(
+            clinicId,
+            doctor.id,
+            input.windows.map((window) => ({
+              dayOfWeek: window.day_of_week,
+              startTime: window.start_time,
+              endTime: window.end_time,
+              effectiveFrom: window.effective_from ?? null,
+              effectiveTo: window.effective_to ?? null,
+              active: window.active ?? true,
+            })),
+          )),
+        );
+      }
+      return saved;
+    });
     return rows.map(mapScheduleRow);
   }
 

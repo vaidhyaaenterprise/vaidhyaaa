@@ -1,26 +1,41 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  formatKnowledgeCategoryName,
+  getKnowledgeCategoryDisplayName,
+} from './knowledge-categories';
 import type { KnowledgeEntry, Category } from './types';
 
 interface ApprovedQAProps {
   entries: KnowledgeEntry[];
   categories: Category[];
-  onEdit: (id: string, entry: Partial<KnowledgeEntry>) => void;
+  onEdit: (id: string, entry: Partial<KnowledgeEntry>) => Promise<void>;
   onDisable: (id: string) => void;
 }
 
-export function ApprovedQA({
-  entries,
-  categories,
-  onEdit,
-  onDisable,
-}: ApprovedQAProps) {
+function formatUpdatedDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+}
+
+export function ApprovedQA({ entries, categories, onEdit, onDisable }: ApprovedQAProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<KnowledgeEntry>>({});
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const handleEditStart = (entry: KnowledgeEntry) => {
     setEditingId(entry.id);
+    setEditError(null);
     setEditForm({
       question: entry.question,
       answer: entry.answer,
@@ -29,9 +44,22 @@ export function ApprovedQA({
     });
   };
 
-  const handleEditSave = () => {
-    if (editingId && editForm.question && editForm.answer && editForm.category) {
-      onEdit(editingId, editForm);
+  const handleEditSave = async () => {
+    if (editingId && editForm.question && editForm.answer && editForm.category && !isSavingEdit) {
+      setIsSavingEdit(true);
+      setEditError(null);
+      try {
+        await onEdit(editingId, editForm);
+      } catch (error) {
+        setEditError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Failed to save the answer. Please try again.',
+        );
+        return;
+      } finally {
+        setIsSavingEdit(false);
+      }
       setEditingId(null);
       setEditForm({});
     }
@@ -40,18 +68,7 @@ export function ApprovedQA({
   const handleEditCancel = () => {
     setEditingId(null);
     setEditForm({});
-  };
-
-  const getCategoryName = (categoryId: string) => {
-    return categories.find(c => c.id === categoryId)?.name || categoryId;
-  };
-
-  const getLanguageBadge = (language: string) => {
-    return (
-      <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-        {language}
-      </span>
-    );
+    setEditError(null);
   };
 
   const getVersionBadge = (version?: number) => {
@@ -75,15 +92,13 @@ export function ApprovedQA({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="mb-4 text-lg font-bold text-slate-900">Approved Q&A</h3>
-      
+
       <div className="space-y-3">
         {entries.map((entry) => (
           <div
             key={entry.id}
             className={`rounded-xl border p-4 ${
-              editingId === entry.id
-                ? 'border-teal-300 bg-teal-50'
-                : 'border-slate-200 bg-slate-50'
+              editingId === entry.id ? 'border-teal-300 bg-teal-50' : 'border-slate-200 bg-slate-50'
             }`}
           >
             <div className="mb-3">
@@ -96,6 +111,7 @@ export function ApprovedQA({
                     <textarea
                       value={editForm.question}
                       onChange={(e) => setEditForm({ ...editForm, question: e.target.value })}
+                      disabled={isSavingEdit}
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                       rows={2}
                     />
@@ -107,6 +123,7 @@ export function ApprovedQA({
                     <textarea
                       value={editForm.answer}
                       onChange={(e) => setEditForm({ ...editForm, answer: e.target.value })}
+                      disabled={isSavingEdit}
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                       rows={3}
                     />
@@ -118,33 +135,51 @@ export function ApprovedQA({
                     <select
                       value={editForm.category}
                       onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                      disabled={isSavingEdit}
                       className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                     >
                       {categories.map((cat) => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        <option key={cat.id} value={cat.id}>
+                          {cat.name}
+                        </option>
                       ))}
+                      {editForm.category &&
+                        !categories.some((category) => category.id === editForm.category) && (
+                          <option value={editForm.category}>
+                            {formatKnowledgeCategoryName(editForm.category)}
+                          </option>
+                        )}
                     </select>
                   </div>
+                  {editError && (
+                    <p role="alert" className="text-xs font-semibold text-red-700">
+                      {editError}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>
-                  <div className="mb-2 flex items-center gap-2 flex-wrap">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
                     <h4 className="text-sm font-bold text-slate-900">{entry.question}</h4>
-                    {getLanguageBadge(entry.language)}
                     {getVersionBadge(entry.version)}
                   </div>
                   <p className="text-sm text-slate-600">{entry.answer}</p>
                   <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                    <span className="font-semibold">{getCategoryName(entry.category)}</span>
+                    <span className="font-semibold">
+                      {getKnowledgeCategoryDisplayName(entry, categories)}
+                    </span>
                     <span>•</span>
-                    <span>Updated {new Date(entry.updatedAt).toLocaleDateString()}</span>
+                    <span>Updated {formatUpdatedDate(entry.updatedAt)}</span>
                   </div>
-                  {entry.alternativePhrases.length > 0 && (
-                    <div className="mt-2">
-                      <p className="text-xs font-semibold text-slate-500">Alternative phrases:</p>
-                      <p className="text-xs text-slate-600">{entry.alternativePhrases.join(', ')}</p>
-                    </div>
-                  )}
+                  {Array.isArray(entry.alternativePhrases) &&
+                    entry.alternativePhrases.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs font-semibold text-slate-500">Alternative phrases:</p>
+                        <p className="text-xs text-slate-600">
+                          {entry.alternativePhrases.join(', ')}
+                        </p>
+                      </div>
+                    )}
                 </>
               )}
             </div>
@@ -153,14 +188,16 @@ export function ApprovedQA({
               {editingId === entry.id ? (
                 <>
                   <button
-                    onClick={handleEditSave}
-                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800"
+                    onClick={() => void handleEditSave()}
+                    disabled={isSavingEdit}
+                    className="rounded-xl bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Save
+                    {isSavingEdit ? 'Saving...' : 'Save'}
                   </button>
                   <button
                     onClick={handleEditCancel}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                    disabled={isSavingEdit}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Cancel
                   </button>

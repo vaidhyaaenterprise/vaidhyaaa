@@ -16,7 +16,12 @@ import {
   sql,
   type Repositories,
 } from '@vaidya/db';
-import { AppError, type ClinicSettingsPatchInput } from '@vaidya/shared';
+import {
+  AppError,
+  clinicProfileDetailsSchema,
+  type ClinicProfilePatchInput,
+  type ClinicSettingsPatchInput,
+} from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 import type { DatabaseConnection } from '@vaidya/db';
@@ -53,6 +58,72 @@ export class ClinicSettingsService {
       throw new AppError('NOT_FOUND', 'Clinic not found.', { clinic_id: clinicId });
     }
     return profile;
+  }
+
+  async patchClinicProfile(clinicId: string, patch: ClinicProfilePatchInput, actorUserId: string) {
+    const current = await this.dbService.findClinicById(clinicId);
+    const validated = clinicProfileDetailsSchema.safeParse({
+      name: current.name,
+      primary_phone: current.primaryPhone,
+      address_line1: current.addressLine1,
+      address_line2: current.addressLine2,
+      city: current.city,
+      state: current.state,
+      postal_code: current.postalCode,
+      country: current.country,
+      ...patch,
+    });
+    if (!validated.success) {
+      throw new AppError('VALIDATION_ERROR', validated.error.issues[0]!.message, {
+        fields: validated.error.issues,
+      });
+    }
+    const [updated] = await this.repos.clinics.updateClinicProfile(clinicId, {
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.primary_phone !== undefined ? { primaryPhone: patch.primary_phone } : {}),
+      ...(patch.address_line1 !== undefined ? { addressLine1: patch.address_line1 } : {}),
+      ...(patch.address_line2 !== undefined ? { addressLine2: patch.address_line2 } : {}),
+      ...(patch.city !== undefined ? { city: patch.city } : {}),
+      ...(patch.state !== undefined ? { state: patch.state } : {}),
+      ...(patch.postal_code !== undefined ? { postalCode: patch.postal_code } : {}),
+      ...(patch.country !== undefined ? { country: patch.country } : {}),
+    });
+
+    if (!updated) {
+      throw new AppError('INTERNAL_ERROR', 'Failed to update clinic profile.');
+    }
+
+    await this.dbService.insertAuditLog({
+      clinicId,
+      actorUserId,
+      actorType: 'clinic_admin',
+      eventType: 'clinic.profile.updated',
+      entityType: 'clinic',
+      entityId: clinicId,
+      oldValues: {
+        ...(patch.name !== undefined ? { name: current.name } : {}),
+        ...(patch.primary_phone !== undefined ? { primary_phone: current.primaryPhone } : {}),
+        ...(patch.address_line1 !== undefined ? { address_line1: current.addressLine1 } : {}),
+        ...(patch.address_line2 !== undefined ? { address_line2: current.addressLine2 } : {}),
+        ...(patch.city !== undefined ? { city: current.city } : {}),
+        ...(patch.state !== undefined ? { state: current.state } : {}),
+        ...(patch.postal_code !== undefined ? { postal_code: current.postalCode } : {}),
+        ...(patch.country !== undefined ? { country: current.country } : {}),
+      },
+      newValues: {
+        ...(patch.name !== undefined ? { name: updated.name } : {}),
+        ...(patch.primary_phone !== undefined ? { primary_phone: updated.primaryPhone } : {}),
+        ...(patch.address_line1 !== undefined ? { address_line1: updated.addressLine1 } : {}),
+        ...(patch.address_line2 !== undefined ? { address_line2: updated.addressLine2 } : {}),
+        ...(patch.city !== undefined ? { city: updated.city } : {}),
+        ...(patch.state !== undefined ? { state: updated.state } : {}),
+        ...(patch.postal_code !== undefined ? { postal_code: updated.postalCode } : {}),
+        ...(patch.country !== undefined ? { country: updated.country } : {}),
+      },
+      source: 'clinic_profile',
+    });
+
+    return updated;
   }
 
   async assessAgentReadiness(clinicId: string): Promise<AgentReadinessResult> {
@@ -93,7 +164,12 @@ export class ClinicSettingsService {
     const activeRules = await db
       .select({ id: doctorServiceBookingRules.id })
       .from(doctorServiceBookingRules)
-      .where(and(eq(doctorServiceBookingRules.clinicId, clinicId), eq(doctorServiceBookingRules.active, true)))
+      .where(
+        and(
+          eq(doctorServiceBookingRules.clinicId, clinicId),
+          eq(doctorServiceBookingRules.active, true),
+        ),
+      )
       .limit(1);
     if (activeRules.length === 0) {
       missing.push('booking_rule');
@@ -119,10 +195,7 @@ export class ClinicSettingsService {
       .select({ id: appointmentSlots.id })
       .from(appointmentSlots)
       .where(
-        and(
-          eq(appointmentSlots.clinicId, clinicId),
-          gt(appointmentSlots.startTime, sql`now()`),
-        ),
+        and(eq(appointmentSlots.clinicId, clinicId), gt(appointmentSlots.startTime, sql`now()`)),
       )
       .limit(1);
 
@@ -134,11 +207,7 @@ export class ClinicSettingsService {
     return { ready: missing.length === 0, missing };
   }
 
-  async patchSettings(
-    clinicId: string,
-    patch: ClinicSettingsPatchInput,
-    actorUserId: string,
-  ) {
+  async patchSettings(clinicId: string, patch: ClinicSettingsPatchInput, actorUserId: string) {
     if (patch.agent_enabled === true) {
       const readiness = await this.assessAgentReadiness(clinicId);
       if (!readiness.ready) {
@@ -152,10 +221,14 @@ export class ClinicSettingsService {
           newValues: { missing: readiness.missing },
           source: 'clinic_settings',
         });
-        throw new AppError('CLINIC_SETUP_INCOMPLETE', 'Clinic setup is incomplete for agent enable.', {
-          clinic_id: clinicId,
-          missing: readiness.missing,
-        });
+        throw new AppError(
+          'CLINIC_SETUP_INCOMPLETE',
+          'Clinic setup is incomplete for agent enable.',
+          {
+            clinic_id: clinicId,
+            missing: readiness.missing,
+          },
+        );
       }
     }
 
@@ -186,8 +259,7 @@ export class ClinicSettingsService {
         : {}),
       ...(patch.pending_appointment_notification_channel !== undefined
         ? {
-            pendingAppointmentNotificationChannel:
-              patch.pending_appointment_notification_channel,
+            pendingAppointmentNotificationChannel: patch.pending_appointment_notification_channel,
           }
         : {}),
       ...(patch.allow_doctor_service_edit !== undefined

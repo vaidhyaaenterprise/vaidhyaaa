@@ -13,6 +13,7 @@ import { LoggerModule } from './common/logger/logger.module';
 import { AppLogger } from './common/logger/logger.service';
 import { DatabaseModule } from './modules/database/database.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { SlotReconciliationService } from './modules/slots/slot-reconciliation.service';
 
 loadLocalEnv();
 
@@ -39,6 +40,7 @@ async function bootstrapWorker(): Promise<void> {
 
   const worker = app.get<WorkerBootstrap>(ADAPTER_TOKENS.WorkerBootstrap);
   await worker.start();
+  app.get(SlotReconciliationService).startWorker();
 
   logger.log(
     JSON.stringify({

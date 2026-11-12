@@ -114,6 +114,21 @@ describe('api client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('does not start a retry after the last GET consumer cancels', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('network failure'));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const request = apiGet('/v1/cancel-before-retry', controller.signal);
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('retries a timed-out read once before reporting failure', async () => {
     vi.useFakeTimers();
     const fetchMock = vi
@@ -162,6 +177,140 @@ describe('api client', () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual([{ ok: true }, { ok: true }]);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('does not share an in-flight GET across different role or doctor contexts', async () => {
+    let releaseResponses: (() => void) | undefined;
+    const responsesReady = new Promise<void>((resolve) => {
+      releaseResponses = resolve;
+    });
+    const fetchMock = vi.fn(async () => {
+      await responsesReady;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => toApiSuccessBody({ ok: true }, 'req_role_scoped'),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const sharedIdentity = {
+      userId: '00000000-0000-0000-0000-000000000555',
+      clinicId: '00000000-0000-0000-0000-000000000001',
+    };
+
+    window.localStorage.setItem(
+      DEV_AUTH_STORAGE_KEY,
+      JSON.stringify({ ...sharedIdentity, role: 'clinic_admin' }),
+    );
+    const adminRequest = apiGet('/v1/role-scoped');
+
+    window.localStorage.setItem(
+      DEV_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        ...sharedIdentity,
+        role: 'doctor',
+        doctorId: '00000000-0000-0000-0000-000000000202',
+      }),
+    );
+    const doctorRequest = apiGet('/v1/role-scoped');
+    releaseResponses?.();
+
+    await expect(Promise.all([adminRequest, doctorRequest])).resolves.toEqual([
+      { ok: true },
+      { ok: true },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels a GET when its only consumer aborts', async () => {
+    let underlyingSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      underlyingSignal = init.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const request = apiGet('/v1/cancel-single', controller.signal);
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(underlyingSignal?.aborted).toBe(true);
+  });
+
+  it('keeps a shared GET alive when only one consumer aborts', async () => {
+    let releaseResponse: (() => void) | undefined;
+    let underlyingSignal: AbortSignal | undefined;
+    const responseReady = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      underlyingSignal = init.signal ?? undefined;
+      await responseReady;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => toApiSuccessBody({ ok: true }, 'req_shared_partial_abort'),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const firstController = new AbortController();
+
+    const first = apiGet('/v1/shared-cancel', firstController.signal);
+    const second = apiGet<{ ok: boolean }>('/v1/shared-cancel');
+    firstController.abort();
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    expect(underlyingSignal?.aborted).toBe(false);
+
+    releaseResponse?.();
+    await expect(second).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('aborts a shared GET after all consumers abort and lets the next caller start fresh', async () => {
+    let firstUnderlyingSignal: AbortSignal | undefined;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        firstUnderlyingSignal = init.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => toApiSuccessBody({ version: 'fresh' }, 'req_after_all_abort'),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    const first = apiGet('/v1/all-cancel', firstController.signal);
+    const second = apiGet('/v1/all-cancel', secondController.signal);
+    firstController.abort();
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    expect(firstUnderlyingSignal?.aborted).toBe(false);
+
+    secondController.abort();
+    await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+    expect(firstUnderlyingSignal?.aborted).toBe(true);
+
+    await expect(apiGet('/v1/all-cancel')).resolves.toEqual({ version: 'fresh' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('does not let an older read discard a newer post-mutation in-flight read', async () => {

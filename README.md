@@ -1,6 +1,6 @@
-# Vaidya
+# Vaidhyaa
 
-Vaidya is a text-first, voice-ready clinic receptionist platform.
+Vaidhyaa is a text-first, voice-ready clinic receptionist platform.
 
 ## Monorepo layout
 
@@ -48,6 +48,16 @@ The root Vercel project deploys the Next.js web application only. The Nest API m
 Use a separate Supabase/staging database for Vercel Preview deployments. If Preview must temporarily share the production project, it must still use the Transaction pooler URL; never configure Production and Preview with the session-pooler URL.
 
 For production background jobs, use `QUEUE_MODE=bullmq`, provide `REDIS_URL`, and run `pnpm --filter @vaidya/api worker` as a separate persistent worker service. Run `pnpm db:migrate` as a release step rather than on every application startup.
+
+Call Inbox has a fixed rolling **30-day display window**, enforced by the API for every inbox source, including explicit date-range queries. Call logs and their transcripts are permanently deleted once older than **45 days** (call start time, falling back to creation time); linked appointments, patient records, callback requests, and emergency/action records are preserved. The existing object-storage adapter is invoked before deleting managed recording keys (provider-hosted media has its own retention). A daily `CLEANUP_EXPIRED_CALLS` job runs in the persistent BullMQ worker. For Vercel, `apps/api/vercel.json` schedules `GET /internal/jobs/call-retention` daily at 03:30 UTC; set a strong `CRON_SECRET` on the API so Vercel can authenticate it. Internal routes are excluded from the `/v1` prefix. Other hosts must schedule the same endpoint with `Authorization: Bearer <CRON_SECRET>` or run the persistent worker. Cleanup is not dependent on someone opening the inbox. Monitor scheduler/worker failures: storage/database failures or an unfinished serverless batch return an error, never a false success. Retry an unfinished run with `pnpm --filter @vaidya/api jobs:run call-retention` until it completes; BullMQ retries failed jobs automatically. Daily cleanup means deletion occurs on the first successful run after expiry. This change requires deployment and an active scheduler, but no new database migration. It does not delete existing production data merely by editing/building the code.
+
+Clinic hours, doctor schedules, holidays and booking-rule changes save their configuration with a durable slot-reconciliation job in the existing `background_jobs` table. The web API proxy runs these jobs with Next.js `after()` after returning the save response. Slot generation and retirement do not delay Save; appointment-conflict validation still runs before accepting the change. Affected slots cannot be offered or booked until reconciliation completes.
+
+For recovery after a serverless timeout or process restart, keep the persistent worker above running (it also polls slot-reconciliation jobs, with or without Redis), **or** configure a scheduler to call `GET /v1/internal/jobs/slot-reconciliation` on the API at least once per minute with `Authorization: Bearer <CRON_SECRET>`. Set `CRON_SECRET` on the API only; the endpoint rejects calls when it is unset. Scheduling frequency depends on your hosting plan. No new migration is required. Failed jobs retry up to five times with backoff; exhausted failures appear in platform job health and keep stale slots unavailable. After resolving the underlying failure, replay them with `pnpm --filter @vaidya/api jobs:run slot-reconciliation --retry-failed`. Normal recovery/draining can be run with `pnpm --filter @vaidya/api jobs:run slot-reconciliation`.
+
+Booking-rule cutovers retain an earlier effective configuration and reconcile each version only within its own date range. Generation, retirement and capacity updates share one clinic-locked database transaction, so a failed attempt cannot commit half a replacement. Existing appointments and active holds are preserved. Booking rules polls a clinic/doctor-scoped status endpoint and shows updating or failed work; clinic administrators can use **Retry slot update** to requeue failed jobs and request a fresh clinic repair without resaving configuration. Availability requests return `SLOT_UPDATE_PENDING` or `SLOT_UPDATE_FAILED` instead of a misleading empty list while reconciliation blocks booking. The runner reports failed counts explicitly; `processed` is an attempt count, not a success count. Deploy both API and web changes before using the new status/retry controls. Already-failed production jobs are not replayed merely by deploying: use the scoped UI retry or the operator command after deployment.
+
+Saving **All doctors** replaces the weekly schedules of every currently active doctor in that clinic, in one transaction, after validating every doctor’s appointments and clinic-hour coverage. It does not create a default for doctors added later. Select one doctor before editing to change only that doctor.
 
 Tests are the only supported local-database workflow. Set `NODE_ENV=test`/`APP_ENV=local` and use `TEST_DATABASE_URL` for the test Postgres container.
 

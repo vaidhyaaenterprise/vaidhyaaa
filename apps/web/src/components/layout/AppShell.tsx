@@ -16,14 +16,14 @@ export function AppShell({ children }: AppShellProps) {
   const signedInName = me?.user.name ?? 'Signed-in user';
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
+    <div className="grid min-h-screen w-full max-w-full lg:grid-cols-[280px_minmax(0,1fr)]">
       <aside className="hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:bg-sidebar lg:px-[22px] lg:py-[22px] lg:text-slate-200">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-400 to-blue-600 text-xl font-black text-white">
             V
           </div>
           <div>
-            <p className="text-[21px] font-bold text-white">Vaidya</p>
+            <p className="text-[21px] font-bold text-white">Vaidhyaa</p>
             <p className="text-[13px] text-slate-400">AI voice receptionist</p>
           </div>
         </div>
@@ -37,7 +37,7 @@ export function AppShell({ children }: AppShellProps) {
         <SignedInCard name={signedInName} />
       </aside>
 
-      <main className="min-w-0 px-4 py-4 pb-10 sm:px-6 sm:py-6 sm:pb-12 lg:px-8">
+      <main className="portal-main min-w-0 px-4 py-4 pb-10 sm:px-6 sm:py-6 sm:pb-12 lg:px-8">
         {children}
         <div className="mt-6 lg:hidden">
           <SignedInCard name={signedInName} />

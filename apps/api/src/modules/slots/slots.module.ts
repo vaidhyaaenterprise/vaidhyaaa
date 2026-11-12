@@ -9,10 +9,14 @@ import { SlotJobsRegistrar } from './slot-jobs.registrar';
 import { ScheduleChangeImpactService } from './schedule-change-impact.service';
 import { SlotRuleChangeImpactService } from './slot-rule-change-impact.service';
 import { SlotService } from './slot.service';
+import { SlotReconciliationService } from './slot-reconciliation.service';
+import { SlotReconciliationController } from './slot-reconciliation.controller';
 
 @Module({
   imports: [DatabaseModule],
+  controllers: [SlotReconciliationController],
   providers: [
+    SlotReconciliationService,
     SlotService,
     SlotHoldService,
     SlotGenerationService,
@@ -22,6 +26,7 @@ import { SlotService } from './slot.service';
     SlotJobsRegistrar,
   ],
   exports: [
+    SlotReconciliationService,
     SlotService,
     SlotHoldService,
     SlotGenerationService,

@@ -1,12 +1,7 @@
 import { and, eq, isNull, lt, lte, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
-import {
-  callTranscripts,
-  calls,
-  clinicKnowledgeBase,
-  knowledgeFiles,
-} from '../schema';
+import { callTranscripts, calls, clinicKnowledgeBase, knowledgeFiles } from '../schema';
 
 export class PlatformOpsRepository {
   constructor(private readonly db: Database) {}
@@ -72,11 +67,7 @@ export class PlatformOpsRepository {
       .limit(1);
   }
 
-  updateKnowledgeFileStatus(
-    clinicId: string,
-    knowledgeFileId: string,
-    status: string,
-  ) {
+  updateKnowledgeFileStatus(clinicId: string, knowledgeFileId: string, status: string) {
     return this.db
       .update(knowledgeFiles)
       .set({ status, updatedAt: new Date() })
@@ -96,7 +87,10 @@ export class PlatformOpsRepository {
   }
 
   listKnowledgeEntriesByClinic(clinicId: string, status?: string) {
-    const conditions = [eq(clinicKnowledgeBase.clinicId, clinicId)];
+    const conditions = [
+      eq(clinicKnowledgeBase.clinicId, clinicId),
+      isNull(clinicKnowledgeBase.removedAt),
+    ];
     if (status) {
       conditions.push(eq(clinicKnowledgeBase.status, status));
     }

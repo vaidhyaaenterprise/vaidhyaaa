@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import { and, desc, eq, inArray, sql as drizzleSql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or, sql as drizzleSql } from 'drizzle-orm';
 
 import type { Database } from '../client';
-import { clinicKnowledgeBase } from '../schema';
+import { clinicKnowledgeBase, clinicKnowledgeSections } from '../schema';
 
 export type KnowledgeEntryRow = typeof clinicKnowledgeBase.$inferSelect;
 
@@ -19,6 +19,7 @@ export type KnowledgeVectorSearchRow = {
 };
 
 export type ManualTemplateEntryRow = KnowledgeEntryRow;
+export type KnowledgeSectionRow = typeof clinicKnowledgeSections.$inferSelect;
 
 export type KnowledgeEmbeddingStatusSummary = {
   approvedTotal: number;
@@ -27,6 +28,11 @@ export type KnowledgeEmbeddingStatusSummary = {
   failedCount: number;
   staleCount: number;
   notRequiredCount: number;
+};
+
+export type KnowledgeApprovalCandidate = {
+  id: string;
+  answer: string;
 };
 
 export class KnowledgeRepository {
@@ -57,6 +63,111 @@ export class KnowledgeRepository {
       .orderBy(desc(clinicKnowledgeBase.updatedAt));
   }
 
+  listKnowledgeSections(clinicId: string): Promise<KnowledgeSectionRow[]> {
+    return this.db
+      .select()
+      .from(clinicKnowledgeSections)
+      .where(eq(clinicKnowledgeSections.clinicId, clinicId))
+      .orderBy(asc(clinicKnowledgeSections.sortOrder), asc(clinicKnowledgeSections.createdAt));
+  }
+
+  upsertKnowledgeSection(values: typeof clinicKnowledgeSections.$inferInsert) {
+    return this.db
+      .insert(clinicKnowledgeSections)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [clinicKnowledgeSections.clinicId, clinicKnowledgeSections.sectionKey],
+        set: {
+          title: values.title,
+          isCustom: values.isCustom,
+          active: values.active,
+          sortOrder: values.sortOrder,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+  }
+
+  archiveKnowledgeSection(values: typeof clinicKnowledgeSections.$inferInsert) {
+    return this.db.transaction(async (transaction) => {
+      const approvedEntry = await transaction
+        .select({ id: clinicKnowledgeBase.id })
+        .from(clinicKnowledgeBase)
+        .where(
+          and(
+            eq(clinicKnowledgeBase.clinicId, values.clinicId),
+            eq(clinicKnowledgeBase.sectionKey, values.sectionKey),
+            isNull(clinicKnowledgeBase.removedAt),
+            eq(clinicKnowledgeBase.applicable, true),
+            eq(clinicKnowledgeBase.status, 'approved'),
+            eq(clinicKnowledgeBase.qaApproved, true),
+            drizzleSql`length(trim(${clinicKnowledgeBase.answer})) > 0`,
+          ),
+        )
+        .limit(1);
+
+      if (approvedEntry.length > 0) {
+        return { blocked: true, section: null };
+      }
+
+      const removedAt = new Date();
+      await transaction
+        .update(clinicKnowledgeBase)
+        .set({ removedAt, updatedAt: removedAt })
+        .where(
+          and(
+            eq(clinicKnowledgeBase.clinicId, values.clinicId),
+            eq(clinicKnowledgeBase.sectionKey, values.sectionKey),
+            isNull(clinicKnowledgeBase.removedAt),
+          ),
+        );
+
+      const [section] = await transaction
+        .insert(clinicKnowledgeSections)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [clinicKnowledgeSections.clinicId, clinicKnowledgeSections.sectionKey],
+          set: {
+            title: values.title,
+            isCustom: values.isCustom,
+            active: false,
+            sortOrder: values.sortOrder,
+            updatedAt: removedAt,
+          },
+        })
+        .returning();
+
+      return { blocked: false, section: section ?? null };
+    });
+  }
+
+  listVisibleSectionEntries(clinicId: string, sectionKey: string) {
+    return this.db
+      .select()
+      .from(clinicKnowledgeBase)
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.sectionKey, sectionKey),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      );
+  }
+
+  removeKnowledgeEntry(clinicId: string, knowledgeId: string) {
+    return this.db
+      .update(clinicKnowledgeBase)
+      .set({ removedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.id, knowledgeId),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      )
+      .returning();
+  }
+
   async findPotentialDuplicates(clinicId: string, normalizedSignature: string, limit = 5) {
     const rows = await this.db
       .select({
@@ -66,7 +177,9 @@ export class KnowledgeRepository {
         status: clinicKnowledgeBase.status,
       })
       .from(clinicKnowledgeBase)
-      .where(eq(clinicKnowledgeBase.clinicId, clinicId));
+      .where(
+        and(eq(clinicKnowledgeBase.clinicId, clinicId), isNull(clinicKnowledgeBase.removedAt)),
+      );
 
     return rows
       .filter((row) => normalizeQuestionSignature(row.question) === normalizedSignature)
@@ -77,7 +190,13 @@ export class KnowledgeRepository {
     return this.db
       .select()
       .from(clinicKnowledgeBase)
-      .where(and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.id, knowledgeId)))
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.id, knowledgeId),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      )
       .limit(1);
   }
 
@@ -86,7 +205,11 @@ export class KnowledgeRepository {
       .select()
       .from(clinicKnowledgeBase)
       .where(
-        and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.status, 'approved')),
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.status, 'approved'),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
       );
   }
 
@@ -94,15 +217,36 @@ export class KnowledgeRepository {
     return this.db
       .select()
       .from(clinicKnowledgeBase)
-      .where(eq(clinicKnowledgeBase.clinicId, clinicId))
+      .where(and(eq(clinicKnowledgeBase.clinicId, clinicId), isNull(clinicKnowledgeBase.removedAt)))
       .orderBy(desc(clinicKnowledgeBase.updatedAt));
   }
 
-  listKnowledgeForEmbeddingRegenerate(clinicId: string, onlyStatus: 'approved' | 'all' = 'approved') {
+  findKnowledgeEntriesByIds(clinicId: string, knowledgeIds: string[]) {
+    return this.db
+      .select()
+      .from(clinicKnowledgeBase)
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          inArray(clinicKnowledgeBase.id, knowledgeIds),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      );
+  }
+
+  listKnowledgeForEmbeddingRegenerate(
+    clinicId: string,
+    onlyStatus: 'approved' | 'all' = 'approved',
+  ) {
     const statusFilter =
       onlyStatus === 'approved'
         ? eq(clinicKnowledgeBase.status, 'approved')
-        : inArray(clinicKnowledgeBase.status, ['approved', 'pending_review', 'disabled', 'needs_update']);
+        : inArray(clinicKnowledgeBase.status, [
+            'approved',
+            'pending_review',
+            'disabled',
+            'needs_update',
+          ]);
 
     return this.db
       .select({
@@ -110,7 +254,13 @@ export class KnowledgeRepository {
         status: clinicKnowledgeBase.status,
       })
       .from(clinicKnowledgeBase)
-      .where(and(eq(clinicKnowledgeBase.clinicId, clinicId), statusFilter));
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          statusFilter,
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      );
   }
 
   updateKnowledgeEntry(
@@ -121,8 +271,73 @@ export class KnowledgeRepository {
     return this.db
       .update(clinicKnowledgeBase)
       .set({ ...values, updatedAt: new Date() })
-      .where(and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.id, knowledgeId)))
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.id, knowledgeId),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      )
       .returning();
+  }
+
+  bulkApproveKnowledgeEntries(
+    clinicId: string,
+    candidates: KnowledgeApprovalCandidate[],
+    approvedByUserId?: string,
+  ) {
+    const approvedAt = new Date();
+    const validatedCandidateFilter =
+      or(
+        ...candidates.map((candidate) =>
+          and(
+            eq(clinicKnowledgeBase.id, candidate.id),
+            eq(clinicKnowledgeBase.answer, candidate.answer),
+          ),
+        ),
+      ) ?? drizzleSql`false`;
+
+    return this.db
+      .update(clinicKnowledgeBase)
+      .set({
+        status: 'approved',
+        qaApproved: true,
+        embeddingStatus: 'pending',
+        embeddingError: null,
+        approvedAt,
+        ...(approvedByUserId ? { approvedByUserId } : {}),
+        updatedAt: approvedAt,
+      })
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          validatedCandidateFilter,
+          inArray(clinicKnowledgeBase.status, ['pending_review', 'needs_update']),
+          eq(clinicKnowledgeBase.applicable, true),
+          isNull(clinicKnowledgeBase.removedAt),
+          drizzleSql`btrim(${clinicKnowledgeBase.answer}) <> ''`,
+        ),
+      )
+      .returning({ id: clinicKnowledgeBase.id });
+  }
+
+  bulkMarkEmbeddingFailed(clinicId: string, knowledgeIds: string[], errorMessage: string) {
+    return this.db
+      .update(clinicKnowledgeBase)
+      .set({
+        embeddingStatus: 'failed',
+        embeddingError: errorMessage,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          inArray(clinicKnowledgeBase.id, knowledgeIds),
+          eq(clinicKnowledgeBase.embeddingStatus, 'pending'),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
+      )
+      .returning({ id: clinicKnowledgeBase.id });
   }
 
   async searchApprovedByVector(
@@ -156,6 +371,7 @@ export class KnowledgeRepository {
         AND qa_approved = true
         AND applicable = true
         AND embedding_status = 'generated'
+        AND removed_at IS NULL
         AND embedding IS NOT NULL
       ORDER BY embedding <=> ${vectorLiteral}::vector
       LIMIT ${limit}
@@ -203,6 +419,7 @@ export class KnowledgeRepository {
         updated_at = now()
       WHERE clinic_id = ${input.clinicId}::uuid
         AND id = ${input.knowledgeId}::uuid
+        AND removed_at IS NULL
     `);
   }
 
@@ -215,6 +432,7 @@ export class KnowledgeRepository {
         updated_at = now()
       WHERE clinic_id = ${clinicId}::uuid
         AND id = ${knowledgeId}::uuid
+        AND removed_at IS NULL
     `);
   }
 
@@ -226,6 +444,7 @@ export class KnowledgeRepository {
         updated_at = now()
       WHERE clinic_id = ${clinicId}::uuid
         AND id = ${knowledgeId}::uuid
+        AND removed_at IS NULL
     `);
   }
 
@@ -247,6 +466,7 @@ export class KnowledgeRepository {
         count(*) FILTER (WHERE embedding_status = 'not_required')::int AS not_required_count
       FROM clinic_knowledge_base
       WHERE clinic_id = ${clinicId}::uuid
+        AND removed_at IS NULL
     `);
 
     return {

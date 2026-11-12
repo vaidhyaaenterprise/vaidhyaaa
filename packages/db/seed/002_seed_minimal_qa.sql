@@ -1,4 +1,4 @@
--- Vaidya minimal QA seed data
+-- Vaidhyaa minimal QA seed data
 -- Run after 001_initial_schema_production.sql
 
 BEGIN;
@@ -143,8 +143,8 @@ ON CONFLICT DO NOTHING;
 -- Minimal templates
 INSERT INTO message_templates (template_key, language_code, template_text, required_variables_json)
 VALUES
-('booking.greeting','ta_tanglish','Vanakkam. {clinic_name} Vaidya pesuren. Enna problem-ku appointment venum?','["clinic_name"]'),
-('booking.greeting','english','Hello. This is Vaidya from {clinic_name}. What problem do you need the appointment for?','["clinic_name"]'),
+('booking.greeting','ta_tanglish','Vanakkam. {clinic_name} Vaidhyaa pesuren. Enna problem-ku appointment venum?','["clinic_name"]'),
+('booking.greeting','english','Hello. This is Vaidhyaa from {clinic_name}. What problem do you need the appointment for?','["clinic_name"]'),
 ('booking.ask_problem_or_doctor','ta_tanglish','Endha doctor-a paakanum? Illena enna problem-ku appointment venum?','[]'),
 ('booking.ask_problem_or_doctor','english','Which doctor would you like to see, or what problem do you need help with?','[]'),
 ('booking.propose_slots','ta_tanglish','{doctor_name} {date_display} {slot_list} slots irukku. Edha choose panreenga?','["doctor_name","date_display","slot_list"]'),

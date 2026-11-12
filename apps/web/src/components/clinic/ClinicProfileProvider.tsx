@@ -11,7 +11,12 @@ import {
 } from 'react';
 
 import { useAuth } from '@/components/auth/AuthProvider';
-import { fetchClinicProfile, type ClinicProfile } from '@/lib/api/clinic-settings';
+import {
+  fetchClinicProfile,
+  patchClinicProfile,
+  type ClinicProfile,
+  type ClinicProfilePatch,
+} from '@/lib/api/clinic-settings';
 
 export type ClinicProfileStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -20,6 +25,7 @@ type ClinicProfileContextValue = {
   profile: ClinicProfile | null;
   status: ClinicProfileStatus;
   refresh: () => void;
+  updateProfile: (patch: ClinicProfilePatch) => Promise<void>;
 };
 
 type ClinicProfileState = {
@@ -46,33 +52,49 @@ export function ClinicProfileProvider({ children }: { children: ReactNode }) {
     setRefreshVersion((version) => version + 1);
   }, []);
 
+  const updateProfile = useCallback(
+    async (patch: ClinicProfilePatch) => {
+      if (!clinicId) {
+        throw new Error('No active clinic is selected.');
+      }
+
+      const targetClinicId = clinicId;
+      const updatedProfile = await patchClinicProfile(targetClinicId, patch);
+
+      // A clinic switch can happen while the request is in flight. Never let a
+      // response for the previous tenant replace the newly selected profile.
+      setState((current) =>
+        current.clinicId === targetClinicId
+          ? { clinicId: targetClinicId, profile: updatedProfile, status: 'ready' }
+          : current,
+      );
+    },
+    [clinicId],
+  );
+
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     if (!clinicId) {
       setState(INITIAL_STATE);
-      return () => {
-        cancelled = true;
-      };
+      return () => controller.abort();
     }
 
     setState({ clinicId, profile: null, status: 'loading' });
 
-    void fetchClinicProfile(clinicId)
+    void fetchClinicProfile(clinicId, controller.signal)
       .then((profile) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setState({ clinicId, profile, status: 'ready' });
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setState({ clinicId, profile: null, status: 'error' });
         }
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [clinicId, refreshVersion]);
 
   const value = useMemo<ClinicProfileContextValue>(() => {
@@ -82,6 +104,7 @@ export function ClinicProfileProvider({ children }: { children: ReactNode }) {
         profile: null,
         status: 'idle',
         refresh,
+        updateProfile,
       };
     }
 
@@ -93,6 +116,7 @@ export function ClinicProfileProvider({ children }: { children: ReactNode }) {
         profile: null,
         status: 'loading',
         refresh,
+        updateProfile,
       };
     }
 
@@ -101,8 +125,9 @@ export function ClinicProfileProvider({ children }: { children: ReactNode }) {
       profile: state.status === 'ready' ? state.profile : null,
       status: state.status,
       refresh,
+      updateProfile,
     };
-  }, [clinicId, refresh, state]);
+  }, [clinicId, refresh, state, updateProfile]);
 
   return <ClinicProfileContext.Provider value={value}>{children}</ClinicProfileContext.Provider>;
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import {
   ManualAppointmentModal,
@@ -18,12 +19,22 @@ import {
   fetchAppointments,
 } from '@/lib/api/appointments';
 import { fetchDoctorServices, fetchDoctors, fetchServices } from '@/lib/api/clinic-clinical';
-import { fetchClinicProfile, fetchClinicSettings } from '@/lib/api/clinic-settings';
-import { ApiRequestError } from '@/lib/api/client';
-import { getClinicDate, groupHomeAppointments } from '@/lib/home-dashboard';
+import { fetchClinicSettings } from '@/lib/api/clinic-settings';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
+import {
+  filterAppointmentsBookedOnClinicDate,
+  getClinicDate,
+  groupHomeAppointments,
+} from '@/lib/home-dashboard';
 import { buildManualAppointmentPayload, DEFAULT_BOOKING_RULES } from '@/lib/manual-appointment';
 
-const DEFAULT_CLINIC_TIMEZONE = 'Asia/Kolkata';
+type ManualReferenceStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+type ManualReferenceData = {
+  doctors: Array<{ id: string; name: string }>;
+  services: Array<{ id: string; name: string }>;
+  doctorServiceMappings: Array<{ doctorId: string; serviceId: string }>;
+};
 
 function formatTime(isoTime: string): string {
   const [hours, minutes] = isoTime.split(':');
@@ -42,6 +53,30 @@ function formatDate(isoDate: string): string {
     return isoDate;
   }
   return `${day}/${month}/${year}`;
+}
+
+function formatInstantTime(instant: string, timezone: string): string {
+  const date = new Date(instant);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: timezone,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date);
+}
+
+function appointmentStatusLabel(status: Appointment['status']): string {
+  if (status === 'pending_confirmation') {
+    return 'Pending';
+  }
+  if (status === 'visited') {
+    return 'Visited';
+  }
+  return 'Confirmed';
 }
 
 type AppointmentActionCardProps = {
@@ -125,9 +160,57 @@ function MissedAppointmentListItem({ appointment }: { appointment: Appointment }
   );
 }
 
+function TodayBookingListItem({
+  appointment,
+  timezone,
+}: {
+  appointment: Appointment;
+  timezone: string;
+}) {
+  const bookedTime = formatInstantTime(appointment.bookedAt, timezone);
+
+  return (
+    <li className="flex min-w-0 flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="break-words text-sm font-bold text-slate-900">{appointment.patientName}</p>
+          <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700">
+            {appointmentStatusLabel(appointment.status)}
+          </span>
+        </div>
+        {appointment.patientPhone ? (
+          <p className="mt-0.5 break-all text-xs text-slate-500">{appointment.patientPhone}</p>
+        ) : null}
+        <p className="mt-1 break-words text-xs text-slate-600">
+          {appointment.doctorName} · {appointment.serviceName}
+        </p>
+        <p className="mt-0.5 break-words text-xs text-slate-600">
+          Appointment: {formatDate(appointment.appointmentDate)} at{' '}
+          <span className="font-semibold">{formatTime(appointment.appointmentTime)}</span>
+        </p>
+        {appointment.reasonForVisit ? (
+          <p className="mt-0.5 break-words text-xs text-slate-500">
+            Reason: {appointment.reasonForVisit}
+          </p>
+        ) : null}
+      </div>
+      {bookedTime ? (
+        <span className="shrink-0 text-xs font-semibold text-slate-500">
+          Booked at {bookedTime}
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
 export function HomePageContent() {
   const { me, effectiveRole, clinicRole } = useAuth();
   const clinicId = useActiveClinicId();
+  const {
+    clinicId: profileClinicId,
+    profile: clinicProfile,
+    status: clinicProfileStatus,
+  } = useClinicProfile();
   const isAdmin = effectiveRole === 'admin';
   const currentDoctorId = clinicRole?.doctor_id ?? null;
 
@@ -140,8 +223,9 @@ export function HomePageContent() {
   const [doctorServiceMappings, setDoctorServiceMappings] = useState<
     Array<{ doctorId: string; serviceId: string }>
   >([]);
+  const [manualReferenceStatus, setManualReferenceStatus] = useState<ManualReferenceStatus>('idle');
+  const [manualReferenceError, setManualReferenceError] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState('unknown');
-  const [clinicTimezone, setClinicTimezone] = useState(DEFAULT_CLINIC_TIMEZONE);
   const [now, setNow] = useState(() => new Date());
   const [actionError, setActionError] = useState<string | null>(null);
   const [updatingAppointmentIds, setUpdatingAppointmentIds] = useState<Set<string>>(
@@ -149,6 +233,13 @@ export function HomePageContent() {
   );
   const updatingAppointmentIdsRef = useRef(new Set<string>());
   const dashboardLoadSequenceRef = useRef(0);
+  const dashboardAbortControllerRef = useRef<AbortController | null>(null);
+  const manualReferenceLoadSequenceRef = useRef(0);
+  const manualReferenceRequestRef = useRef<{
+    clinicId: string;
+    controller: AbortController;
+  } | null>(null);
+  const manualReferenceCacheRef = useRef(new Map<string, ManualReferenceData>());
   const activeClinicIdRef = useRef(clinicId);
 
   // Call inbox / emergency stats require backend endpoints not yet implemented (P04/P08).
@@ -157,13 +248,10 @@ export function HomePageContent() {
   const emergencyAlerts = 0;
 
   const loadDashboard = useCallback(
-    async (includeSettings = true) => {
+    async (includeSettings = true, signal?: AbortSignal) => {
       const loadSequence = ++dashboardLoadSequenceRef.current;
       if (!clinicId) {
         setActiveAppointments([]);
-        setDoctorOptions([]);
-        setServiceOptions([]);
-        setDoctorServiceMappings([]);
         setIsManualModalOpen(false);
         setLoading(false);
         return;
@@ -175,47 +263,24 @@ export function HomePageContent() {
       }
       setActionError(null);
       try {
-        const [appointments, settings, profile, doctors, services, doctorServices] =
-          await Promise.all([
-            fetchAppointments(clinicId, ['pending_confirmation', 'confirmed']),
-            includeSettings
-              ? fetchClinicSettings(clinicId).catch(() => null)
-              : Promise.resolve(null),
-            includeSettings ? fetchClinicProfile(clinicId) : Promise.resolve(null),
-            includeSettings && isAdmin
-              ? fetchDoctors(clinicId).catch(() => [])
-              : Promise.resolve(null),
-            includeSettings && isAdmin
-              ? fetchServices(clinicId).catch(() => [])
-              : Promise.resolve(null),
-            includeSettings && isAdmin
-              ? fetchDoctorServices(clinicId).catch(() => [])
-              : Promise.resolve(null),
-          ]);
+        const settingsRequest =
+          includeSettings && isAdmin
+            ? fetchClinicSettings(clinicId, signal).catch((error: unknown) => {
+                if (isAbortError(error)) {
+                  throw error;
+                }
+                return null;
+              })
+            : Promise.resolve(null);
+        const [appointments, settings] = await Promise.all([
+          fetchAppointments(clinicId, ['pending_confirmation', 'confirmed', 'visited'], signal),
+          settingsRequest,
+        ]);
 
         if (loadSequence !== dashboardLoadSequenceRef.current) {
           return;
         }
-        if (profile?.timezone) {
-          // Validate the IANA timezone before any appointment is classified by date.
-          getClinicDate(new Date(), profile.timezone);
-          setClinicTimezone(profile.timezone);
-        }
         setActiveAppointments(appointments.map(mapAppointmentRow));
-        if (doctors && services && doctorServices) {
-          setDoctorOptions(doctors.map((doctor) => ({ id: doctor.id, name: doctor.name })));
-          setServiceOptions(
-            services.map((service) => ({ id: service.id, name: service.service_name })),
-          );
-          setDoctorServiceMappings(
-            doctorServices
-              .filter((mapping) => mapping.active)
-              .map((mapping) => ({
-                doctorId: mapping.doctor_id,
-                serviceId: mapping.clinic_service_id,
-              })),
-          );
-        }
         if (settings) {
           setAgentStatus(settings.agent_enabled ? 'active' : 'inactive');
           setBookingRules({
@@ -224,7 +289,7 @@ export function HomePageContent() {
           });
         }
       } catch (err) {
-        if (loadSequence === dashboardLoadSequenceRef.current) {
+        if (!isAbortError(err) && loadSequence === dashboardLoadSequenceRef.current) {
           setActionError(
             err instanceof ApiRequestError
               ? err.apiError.message
@@ -240,21 +305,163 @@ export function HomePageContent() {
     [clinicId, isAdmin],
   );
 
+  const loadManualReferenceData = useCallback(
+    async (force = false) => {
+      if (!clinicId || !isAdmin) {
+        return;
+      }
+
+      const cached = force ? null : manualReferenceCacheRef.current.get(clinicId);
+      if (cached) {
+        setDoctorOptions(cached.doctors);
+        setServiceOptions(cached.services);
+        setDoctorServiceMappings(cached.doctorServiceMappings);
+        setManualReferenceStatus('ready');
+        setManualReferenceError(null);
+        return;
+      }
+
+      if (!force && manualReferenceRequestRef.current?.clinicId === clinicId) {
+        return;
+      }
+
+      manualReferenceRequestRef.current?.controller.abort();
+      const controller = new AbortController();
+      const loadSequence = ++manualReferenceLoadSequenceRef.current;
+      const targetClinicId = clinicId;
+      manualReferenceRequestRef.current = { clinicId: targetClinicId, controller };
+      setManualReferenceStatus('loading');
+      setManualReferenceError(null);
+
+      try {
+        const [doctorRows, serviceRows, mappingRows] = await Promise.all([
+          fetchDoctors(targetClinicId, controller.signal),
+          fetchServices(targetClinicId, controller.signal),
+          fetchDoctorServices(targetClinicId, controller.signal),
+        ]);
+        if (
+          controller.signal.aborted ||
+          loadSequence !== manualReferenceLoadSequenceRef.current ||
+          activeClinicIdRef.current !== targetClinicId
+        ) {
+          return;
+        }
+
+        const referenceData: ManualReferenceData = {
+          doctors: doctorRows.map((doctor) => ({ id: doctor.id, name: doctor.name })),
+          services: serviceRows.map((service) => ({
+            id: service.id,
+            name: service.service_name,
+          })),
+          doctorServiceMappings: mappingRows
+            .filter((mapping) => mapping.active)
+            .map((mapping) => ({
+              doctorId: mapping.doctor_id,
+              serviceId: mapping.clinic_service_id,
+            })),
+        };
+        manualReferenceCacheRef.current.set(targetClinicId, referenceData);
+        setDoctorOptions(referenceData.doctors);
+        setServiceOptions(referenceData.services);
+        setDoctorServiceMappings(referenceData.doctorServiceMappings);
+        setManualReferenceStatus('ready');
+      } catch (error) {
+        if (
+          isAbortError(error) ||
+          loadSequence !== manualReferenceLoadSequenceRef.current ||
+          activeClinicIdRef.current !== targetClinicId
+        ) {
+          return;
+        }
+        setManualReferenceStatus('error');
+        setManualReferenceError(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : 'Could not load doctors and services. Please try again.',
+        );
+      } finally {
+        if (manualReferenceRequestRef.current?.controller === controller) {
+          manualReferenceRequestRef.current = null;
+        }
+      }
+    },
+    [clinicId, isAdmin],
+  );
+
+  const openManualBooking = () => {
+    setIsManualModalOpen(true);
+    void loadManualReferenceData();
+  };
+
   useEffect(() => {
     activeClinicIdRef.current = clinicId;
     setIsManualModalOpen(false);
+    manualReferenceRequestRef.current?.controller.abort();
+    manualReferenceRequestRef.current = null;
+    manualReferenceLoadSequenceRef.current += 1;
+    setDoctorOptions([]);
+    setServiceOptions([]);
+    setDoctorServiceMappings([]);
+    setManualReferenceStatus('idle');
+    setManualReferenceError(null);
   }, [clinicId]);
 
   useEffect(() => {
-    void loadDashboard();
+    dashboardAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    dashboardAbortControllerRef.current = controller;
+    void loadDashboard(true, controller.signal);
+
+    return () => {
+      controller.abort();
+      dashboardLoadSequenceRef.current += 1;
+      if (dashboardAbortControllerRef.current === controller) {
+        dashboardAbortControllerRef.current = null;
+      }
+    };
   }, [loadDashboard]);
+
+  useEffect(
+    () => () => {
+      activeClinicIdRef.current = null;
+      manualReferenceRequestRef.current?.controller.abort();
+      manualReferenceRequestRef.current = null;
+      manualReferenceLoadSequenceRef.current += 1;
+    },
+    [],
+  );
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const clinicDate = useMemo(() => getClinicDate(now, clinicTimezone), [clinicTimezone, now]);
+  const clinicDate = useMemo(() => {
+    if (
+      !clinicId ||
+      profileClinicId !== clinicId ||
+      clinicProfileStatus !== 'ready' ||
+      !clinicProfile?.timezone
+    ) {
+      return null;
+    }
+    try {
+      return getClinicDate(now, clinicProfile.timezone);
+    } catch {
+      return null;
+    }
+  }, [clinicId, clinicProfile, clinicProfileStatus, now, profileClinicId]);
+
+  const clinicProfileError =
+    Boolean(clinicId) &&
+    (clinicProfileStatus === 'error' ||
+      (clinicProfileStatus === 'ready' && profileClinicId === clinicId && !clinicDate));
+  const dashboardLoading =
+    loading ||
+    (Boolean(clinicId) &&
+      (profileClinicId !== clinicId ||
+        clinicProfileStatus === 'idle' ||
+        clinicProfileStatus === 'loading'));
 
   const roleScopedAppointments = useMemo(
     () =>
@@ -280,13 +487,28 @@ export function HomePageContent() {
     return Array.from(serviceMap.entries()).map(([id, name]) => ({ id, name }));
   }, [activeAppointments, serviceOptions]);
   const groupedAppointments = useMemo(
-    () => groupHomeAppointments(roleScopedAppointments, clinicDate),
+    () =>
+      clinicDate
+        ? groupHomeAppointments(roleScopedAppointments, clinicDate)
+        : { todayPending: [], missedPending: [], todayAppointments: [] },
     [clinicDate, roleScopedAppointments],
   );
 
   const visibleTodayPending = groupedAppointments.todayPending;
   const visibleMissedPending = groupedAppointments.missedPending;
   const visibleTodayAppointments = groupedAppointments.todayAppointments;
+  const visibleTodayBookings = useMemo(
+    () =>
+      clinicDate && clinicProfile?.timezone
+        ? filterAppointmentsBookedOnClinicDate(
+            roleScopedAppointments,
+            clinicDate,
+            clinicProfile.timezone,
+          )
+        : [],
+    [clinicDate, clinicProfile?.timezone, roleScopedAppointments],
+  );
+  const actionableTodayPending = isAdmin ? visibleTodayPending : [];
 
   const runAppointmentAction = async (
     id: string,
@@ -304,13 +526,17 @@ export function HomePageContent() {
     try {
       await action(targetClinicId, id);
       if (activeClinicIdRef.current === targetClinicId) {
-        await loadDashboard(false);
+        await loadDashboard(false, dashboardAbortControllerRef.current?.signal);
       }
     } catch (err) {
-      setActionError(err instanceof ApiRequestError ? err.apiError.message : failureMessage);
+      if (activeClinicIdRef.current === targetClinicId) {
+        setActionError(err instanceof ApiRequestError ? err.apiError.message : failureMessage);
+      }
     } finally {
       updatingAppointmentIdsRef.current.delete(id);
-      setUpdatingAppointmentIds(new Set(updatingAppointmentIdsRef.current));
+      if (activeClinicIdRef.current === targetClinicId) {
+        setUpdatingAppointmentIds(new Set(updatingAppointmentIdsRef.current));
+      }
     }
   };
 
@@ -332,7 +558,7 @@ export function HomePageContent() {
         buildManualAppointmentPayload(data, bookingRules.slotDurationMinutes),
       );
       if (activeClinicIdRef.current === targetClinicId) {
-        await loadDashboard(false);
+        await loadDashboard(false, dashboardAbortControllerRef.current?.signal);
       }
     } catch (error) {
       throw new Error(
@@ -345,7 +571,7 @@ export function HomePageContent() {
     }
   };
 
-  const pendingConfirmations = visibleTodayPending.length;
+  const pendingConfirmations = actionableTodayPending.length;
   const missedActions = visibleMissedPending.length;
   const pendingStaffActions = pendingConfirmations + callbacks + emergencyAlerts;
 
@@ -359,7 +585,7 @@ export function HomePageContent() {
           isAdmin && (
             <button
               type="button"
-              onClick={() => setIsManualModalOpen(true)}
+              onClick={openManualBooking}
               className="rounded-[13px] border border-brand-600 bg-brand-600 px-4 py-2.5 text-sm font-extrabold text-white transition-colors hover:bg-brand-700"
             >
               Add manual booking
@@ -368,7 +594,7 @@ export function HomePageContent() {
         }
       />
 
-      {loading ? (
+      {dashboardLoading ? (
         <LoadingState
           title="Loading dashboard"
           description="Fetching appointments and clinic settings."
@@ -376,12 +602,12 @@ export function HomePageContent() {
       ) : (
         <>
           <div className="mb-6 rounded-[22px] bg-gradient-to-br from-brand-700 to-slate-900 p-6 text-white shadow-card">
-            <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr] lg:items-center">
+            <div className="portal-feature-grid gap-6">
               <div>
                 <h2 className="text-xl font-black">
                   {effectiveRole === 'doctor'
                     ? 'Your clinic day at a glance'
-                    : `Vaidya dashboard for ${me?.user.name ?? 'your clinic'}`}
+                    : `Vaidhyaa dashboard for ${me?.user.name ?? 'your clinic'}`}
                 </h2>
                 <p className="mt-2 text-sm text-teal-100">
                   {effectiveRole === 'doctor'
@@ -392,7 +618,7 @@ export function HomePageContent() {
                               missedActions === 1 ? 'request is' : 'requests are'
                             } listed below.`
                           : ''
-                      } Call stats will appear when the call inbox API is available.`}
+                      }`}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-extrabold">
@@ -407,16 +633,16 @@ export function HomePageContent() {
             </div>
           </div>
 
-          {actionError ? (
+          {actionError || clinicProfileError ? (
             <p
               role="alert"
               className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
             >
-              {actionError}
+              {actionError ?? 'Failed to load the clinic timezone for this dashboard.'}
             </p>
           ) : null}
 
-          <div className="grid gap-5 lg:grid-cols-3">
+          <div className="portal-dashboard-grid gap-5">
             <section
               aria-labelledby="needs-action-heading"
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
@@ -426,7 +652,7 @@ export function HomePageContent() {
               </h3>
               <p className="mb-4 text-xs text-slate-500">Pending requests for today</p>
               <div className="space-y-3">
-                {visibleTodayPending.map((appointment) => (
+                {actionableTodayPending.map((appointment) => (
                   <AppointmentActionCard
                     key={appointment.id}
                     appointment={appointment}
@@ -435,9 +661,11 @@ export function HomePageContent() {
                     onCancel={handleCancel}
                   />
                 ))}
-                {visibleTodayPending.length === 0 && callbacks === 0 && emergencyAlerts === 0 && (
-                  <p className="text-sm text-slate-500">No pending actions for today</p>
-                )}
+                {actionableTodayPending.length === 0 &&
+                  callbacks === 0 &&
+                  emergencyAlerts === 0 && (
+                    <p className="text-sm text-slate-500">No pending actions for today</p>
+                  )}
               </div>
             </section>
 
@@ -518,6 +746,31 @@ export function HomePageContent() {
               </ul>
             )}
           </section>
+
+          <section
+            aria-labelledby="today-actions-heading"
+            className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          >
+            <h3 id="today-actions-heading" className="mb-1 text-lg font-bold text-slate-900">
+              Today&apos;s action
+            </h3>
+            <p className="mb-4 text-xs text-slate-500">
+              Appointments booked today. Cancelled appointments are not included.
+            </p>
+            {visibleTodayBookings.length === 0 ? (
+              <p className="text-sm text-slate-500">No appointments were booked today</p>
+            ) : (
+              <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/50">
+                {visibleTodayBookings.map((appointment) => (
+                  <TodayBookingListItem
+                    key={appointment.id}
+                    appointment={appointment}
+                    timezone={clinicProfile?.timezone ?? 'Asia/Kolkata'}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
         </>
       )}
 
@@ -528,6 +781,9 @@ export function HomePageContent() {
         doctors={doctors}
         services={services}
         doctorServiceMappings={doctorServiceMappings}
+        referenceDataStatus={manualReferenceStatus}
+        referenceDataError={manualReferenceError}
+        onRetryReferenceData={() => void loadManualReferenceData(true)}
         onCreateAppointment={handleCreateAppointment}
       />
     </>

@@ -12,6 +12,7 @@ function buildRow(appointmentStart: string): AppointmentApiRow {
     doctor_name: 'Dr. Murugan',
     clinic_service_id: '33333333-3333-3333-3333-333333333333',
     service_name: 'General Consultation',
+    created_at: '2026-08-02T18:30:00.000Z',
     appointment_start: appointmentStart,
     appointment_end: '2026-08-03 00:30:00',
     reason_for_visit: 'Body pain',
@@ -29,6 +30,7 @@ describe('mapAppointmentRow', () => {
 
     expect(appointment.appointmentDate).toBe('2026-08-03');
     expect(appointment.appointmentTime).toBe('00:00');
+    expect(appointment.bookedAt).toBe('2026-08-02T18:30:00.000Z');
   });
 
   it('maps timestamp values when appointment_start uses a space separator', () => {

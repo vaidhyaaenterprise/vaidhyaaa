@@ -58,13 +58,16 @@ export {
 
 export {
   clinicUserResponseSchema,
+  clinicLoginNameSchema,
   createClinicUserLoginSchema,
   inviteClinicUserSchema,
   loginWithUsernamePasswordSchema,
+  updateClinicUserLoginSchema,
   type ClinicUserResponse,
   type CreateClinicUserLoginInput,
   type InviteClinicUserInput,
   type LoginWithUsernamePasswordInput,
+  type UpdateClinicUserLoginInput,
 } from './clinic-users';
 
 export {
@@ -78,6 +81,14 @@ export {
   type ClinicSettingsResponse,
   type ClinicSettingsSummary,
 } from './clinic-settings';
+
+export {
+  clinicProfilePatchSchema,
+  clinicProfileDetailsSchema,
+  clinicProfileResponseSchema,
+  type ClinicProfilePatchInput,
+  type ClinicProfileResponse,
+} from './clinic-profile';
 
 export {
   createDoctorSchema,
@@ -113,6 +124,8 @@ export {
 
 export {
   bookingRuleResponseSchema,
+  MIN_SLOT_DURATION_MINUTES,
+  BOOKING_HORIZON_DAYS,
   createBookingRuleSchema,
   updateBookingRuleSchema,
   type BookingRuleResponse,
@@ -145,12 +158,14 @@ export {
   markAppointmentVisitedSchema,
   patchAppointmentRequestSchema,
   rescheduleAppointmentSchema,
+  updateAppointmentPatientNameSchema,
   type AppointmentResponse,
   type CreateAppointmentRequestInput,
   type ManualAppointmentCreateInput,
   type MarkAppointmentVisitedInput,
   type PatchAppointmentRequestInput,
   type RescheduleAppointmentInput,
+  type UpdateAppointmentPatientNameInput,
 } from './appointment';
 
 export {
@@ -198,16 +213,22 @@ export {
 } from './conversation-message';
 
 export {
+  bulkApproveKnowledgeEntriesSchema,
+  createKnowledgeSectionSchema,
   createKnowledgeEntrySchema,
   knowledgeEntryResponseSchema,
   knowledgeFileResponseSchema,
   knowledgeTranslationResponseSchema,
   patchKnowledgeEntrySchema,
+  updateKnowledgeSectionSchema,
+  type BulkApproveKnowledgeEntriesInput,
+  type CreateKnowledgeSectionInput,
   type CreateKnowledgeEntryInput,
   type KnowledgeEntryResponse,
   type KnowledgeFileResponse,
   type KnowledgeTranslationResponse,
   type PatchKnowledgeEntryInput,
+  type UpdateKnowledgeSectionInput,
 } from './knowledge';
 
 export {

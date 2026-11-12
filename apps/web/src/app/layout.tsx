@@ -6,7 +6,7 @@ import { ClinicProfileProvider } from '@/components/clinic/ClinicProfileProvider
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Vaidya',
+  title: 'Vaidhyaa',
   description: 'AI receptionist platform for clinics',
 };
 

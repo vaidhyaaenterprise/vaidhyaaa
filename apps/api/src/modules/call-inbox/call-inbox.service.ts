@@ -1,7 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { createRepositories, type DatabaseConnection, type Repositories } from '@vaidya/db';
-import type { CallInboxOutcome, CallInboxSource } from '@vaidya/shared';
+import {
+  CALL_INBOX_VISIBLE_DAYS,
+  type CallInboxOutcome,
+  type CallInboxSource,
+} from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 
@@ -43,6 +47,7 @@ type CallInboxItem = {
   created_callback_request_id: string | null;
   created_emergency_incident_id: string | null;
   appointment_action_request_id: string | null;
+  appointment_start: string | null;
   source_status: string | null;
   created_at: string;
   updated_at: string;
@@ -68,11 +73,21 @@ const RAW_OUTCOME_ALIASES: Readonly<Record<string, CallInboxOutcome>> = {
   emergency_case: 'emergency',
 };
 
+// Some legacy Sarvam integrations recorded the business outcome on `calls`
+// without sending the conversation session or appointment id that was used by
+// the booking tool. Correlate only a nearby call with the same phone and
+// outcome so that the canonical appointment row and its raw call are rendered
+// as one inbox entry instead of two.
+const LEGACY_CALL_CORRELATION_WINDOW_MS = 12 * 60 * 60 * 1_000;
+
 function iso(value: Date | null | undefined): string | null {
   return value?.toISOString() ?? null;
 }
 
-function actionFor(outcome: CallInboxOutcome, sourceStatus?: string | null): CallInboxItem['action_needed'] {
+function actionFor(
+  outcome: CallInboxOutcome,
+  sourceStatus?: string | null,
+): CallInboxItem['action_needed'] {
   if (outcome === 'appointment_booked' && sourceStatus === 'pending_confirmation') {
     return 'confirmation_needed';
   }
@@ -94,6 +109,17 @@ function actionFor(outcome: CallInboxOutcome, sourceStatus?: string | null): Cal
 function normalizeRawOutcome(value: string | null): CallInboxOutcome | null {
   if (!value) return null;
   return RAW_OUTCOME_ALIASES[value.trim().toLowerCase()] ?? null;
+}
+
+function normalizePhoneForCorrelation(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return null;
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+function callOccurredAt(call: RepositoryCall): Date {
+  return call.startedAt ?? call.createdAt;
 }
 
 function callFields(call: RepositoryCall | undefined) {
@@ -128,10 +154,13 @@ export class CallInboxService {
     to?: Date;
     limit: number;
   }): Promise<{ items: CallInboxItem[]; next_cursor: null }> {
+    const now = new Date();
+    const earliest = new Date(now.getTime() - CALL_INBOX_VISIBLE_DAYS * 86_400_000);
     const range = {
-      ...(input.from ? { from: input.from } : {}),
-      ...(input.to ? { to: input.to } : {}),
+      from: input.from && input.from > earliest ? input.from : earliest,
+      to: input.to && input.to < now ? input.to : now,
     };
+    if (range.to < range.from) return { items: [], next_cursor: null };
     const [calls, bookings, actions, callbacks, emergencies, inquiryMessages] = await Promise.all([
       this.repos.callInbox.listCalls(input.clinicId, range),
       this.repos.callInbox.listVoiceAppointmentBookings(input.clinicId, range),
@@ -181,15 +210,48 @@ export class CallInboxService {
       const representedSessionId = sessionId ?? call?.sessionId;
       if (representedSessionId) representedSessions.add(representedSessionId);
     };
+    const claimLegacyBookingCall = (booking: (typeof bookings)[number]) => {
+      const bookingPhone = normalizePhoneForCorrelation(booking.patientPhone);
+      if (!bookingPhone) return undefined;
+
+      return calls.find((candidate) => {
+        if (representedRawCalls.has(candidate.id)) return false;
+        if (normalizeRawOutcome(candidate.outcome) !== 'appointment_booked') return false;
+        if (normalizePhoneForCorrelation(candidate.patientPhone) !== bookingPhone) return false;
+        if (
+          candidate.createdAppointmentRequestId &&
+          candidate.createdAppointmentRequestId !== booking.id
+        ) {
+          return false;
+        }
+        if (
+          candidate.sessionId &&
+          booking.sourceSessionId &&
+          candidate.sessionId !== booking.sourceSessionId
+        ) {
+          return false;
+        }
+
+        return (
+          Math.abs(callOccurredAt(candidate).getTime() - booking.createdAt.getTime()) <=
+          LEGACY_CALL_CORRELATION_WINDOW_MS
+        );
+      });
+    };
 
     for (const booking of bookings) {
-      const call = callFor(
+      const directlyLinkedCall = callFor(
         null,
         booking.sourceSessionId,
         callByAppointmentRequest.get(booking.id),
       );
+      const legacyCall = directlyLinkedCall ? undefined : claimLegacyBookingCall(booking);
+      const call = directlyLinkedCall ?? legacyCall;
       markRepresented(call, booking.sourceSessionId);
-      const occurredAt = call?.startedAt ?? booking.createdAt;
+      // A legacy correlation means the raw call timestamp was stored without
+      // a trustworthy source link (and may also carry a missing timezone).
+      // Keep the canonical booking creation time in that case.
+      const occurredAt = legacyCall ? booking.createdAt : (call?.startedAt ?? booking.createdAt);
       items.push({
         id: booking.id,
         clinic_id: booking.clinicId,
@@ -208,6 +270,7 @@ export class CallInboxService {
         created_callback_request_id: null,
         created_emergency_incident_id: null,
         appointment_action_request_id: null,
+        appointment_start: booking.appointmentStart ?? null,
         source_status: booking.status,
         created_at: booking.createdAt.toISOString(),
         updated_at: booking.updatedAt.toISOString(),
@@ -238,6 +301,7 @@ export class CallInboxService {
         created_callback_request_id: null,
         created_emergency_incident_id: null,
         appointment_action_request_id: action.id,
+        appointment_start: action.appointmentStart ?? null,
         source_status: action.status,
         created_at: action.createdAt.toISOString(),
         updated_at: action.updatedAt.toISOString(),
@@ -270,6 +334,7 @@ export class CallInboxService {
         created_callback_request_id: callback.id,
         created_emergency_incident_id: null,
         appointment_action_request_id: null,
+        appointment_start: null,
         source_status: callback.status,
         created_at: callback.createdAt.toISOString(),
         updated_at: callback.updatedAt.toISOString(),
@@ -298,6 +363,7 @@ export class CallInboxService {
         created_callback_request_id: null,
         created_emergency_incident_id: emergency.id,
         appointment_action_request_id: null,
+        appointment_start: null,
         source_status: emergency.status,
         created_at: emergency.createdAt.toISOString(),
         updated_at: emergency.updatedAt.toISOString(),
@@ -336,6 +402,7 @@ export class CallInboxService {
         created_callback_request_id: null,
         created_emergency_incident_id: null,
         appointment_action_request_id: null,
+        appointment_start: null,
         source_status: inquiry.intent,
         created_at: inquiry.createdAt.toISOString(),
         updated_at: inquiry.createdAt.toISOString(),
@@ -377,6 +444,7 @@ export class CallInboxService {
         created_callback_request_id: call.createdCallbackRequestId,
         created_emergency_incident_id: null,
         appointment_action_request_id: null,
+        appointment_start: call.linkedAppointmentStart ?? null,
         source_status: null,
         created_at: call.createdAt.toISOString(),
         updated_at: call.updatedAt.toISOString(),
@@ -384,7 +452,16 @@ export class CallInboxService {
     }
 
     const selected = input.outcomes?.length ? new Set(input.outcomes) : null;
-    const filtered = selected ? items.filter((item) => selected.has(item.outcome)) : items;
+    // A linked call's timestamp can differ from the canonical source's creation
+    // time. Enforce the window again on the actual displayed call timestamp.
+    const filtered = items.filter((item) => {
+      const occurredAt = Date.parse(item.occurred_at);
+      return (
+        occurredAt >= range.from.getTime() &&
+        occurredAt <= range.to.getTime() &&
+        (!selected || selected.has(item.outcome))
+      );
+    });
     filtered.sort(
       (left, right) =>
         Date.parse(right.occurred_at) - Date.parse(left.occurred_at) ||

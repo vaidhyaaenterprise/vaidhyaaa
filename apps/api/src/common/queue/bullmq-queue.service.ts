@@ -108,6 +108,61 @@ export class BullMQQueueService implements QueueService, OnModuleDestroy {
     return jobId;
   }
 
+  async enqueueBulk(jobs: EnqueueJobInput[]): Promise<string[]> {
+    if (jobs.length === 0) {
+      return [];
+    }
+
+    const preparedJobs = jobs.map((job, index) => {
+      validateJobPayload(job.jobType, job.payload);
+      return {
+        index,
+        job,
+        jobId: job.jobId ?? randomUUID(),
+      };
+    });
+
+    const jobsByQueue = new Map<string, typeof preparedJobs>();
+    for (const prepared of preparedJobs) {
+      const queueJobs = jobsByQueue.get(prepared.job.queue) ?? [];
+      queueJobs.push(prepared);
+      jobsByQueue.set(prepared.job.queue, queueJobs);
+    }
+
+    await Promise.all(
+      [...jobsByQueue.entries()].map(async ([queueName, queueJobs]) => {
+        const queue = this.getQueue(queueName);
+        await queue.addBulk(
+          queueJobs.map(({ job, jobId }) => ({
+            name: job.jobType,
+            data: {
+              payload: job.payload,
+              correlationId: job.correlationId,
+              clinicId: job.clinicId,
+            },
+            opts: {
+              jobId,
+              ...DEFAULT_JOB_OPTIONS,
+            },
+          })),
+        );
+      }),
+    );
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'jobs_enqueued_bulk_bullmq',
+        job_count: preparedJobs.length,
+        queues: [...jobsByQueue.keys()],
+      }),
+      'BullMQQueueService',
+    );
+
+    return preparedJobs
+      .sort((a, b) => a.index - b.index)
+      .map((prepared) => prepared.jobId);
+  }
+
   registerWorker(queueName: string): Worker {
     const existing = this.workers.get(queueName);
     if (existing) {

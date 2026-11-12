@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, gt, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, inArray, or, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -19,6 +19,18 @@ function clinicLocalNow(clinicId: string) {
     FROM clinics c
     WHERE c.id = ${clinicId}
   )`;
+}
+
+function clinicActivityRetentionStartDate(clinicId: string) {
+  return sql`((${clinicLocalNow(clinicId)})::date - 3)`;
+}
+
+function clinicDateOfInstant(value: typeof appointmentEvents.createdAt, clinicId: string) {
+  return sql`(${value} AT TIME ZONE (
+    SELECT c.timezone
+    FROM clinics c
+    WHERE c.id = ${clinicId}
+  ))::date`;
 }
 
 const appointmentWithConflictDetails = {
@@ -55,11 +67,7 @@ export class AppointmentLifecycleRepository {
       .limit(1);
   }
 
-  findAppointmentByIdForUpdate(
-    clinicId: string,
-    appointmentId: string,
-    db: Database = this.db,
-  ) {
+  findAppointmentByIdForUpdate(clinicId: string, appointmentId: string, db: Database = this.db) {
     return db
       .select()
       .from(appointmentRequests)
@@ -84,6 +92,30 @@ export class AppointmentLifecycleRepository {
           inArray(appointmentRequests.id, appointmentIds),
         ),
       );
+  }
+
+  updatePatientNameForAppointments(
+    clinicId: string,
+    appointmentId: string,
+    patientId: string | null,
+    patientName: string,
+    db: Database = this.db,
+  ) {
+    return db
+      .update(appointmentRequests)
+      .set({ patientName, updatedAt: new Date() })
+      .where(
+        patientId
+          ? and(
+              eq(appointmentRequests.clinicId, clinicId),
+              eq(appointmentRequests.patientId, patientId),
+            )
+          : and(
+              eq(appointmentRequests.clinicId, clinicId),
+              eq(appointmentRequests.id, appointmentId),
+            ),
+      )
+      .returning();
   }
 
   findPendingActionRequest(input: {
@@ -111,8 +143,12 @@ export class AppointmentLifecycleRepository {
     return this.db.insert(appointmentActionRequests).values(values).returning();
   }
 
-  rejectPendingActionRequestsForAppointment(clinicId: string, appointmentId: string) {
-    return this.db
+  rejectPendingActionRequestsForAppointment(
+    clinicId: string,
+    appointmentId: string,
+    db: Database = this.db,
+  ) {
+    return db
       .update(appointmentActionRequests)
       .set({
         status: 'rejected',
@@ -176,6 +212,96 @@ export class AppointmentLifecycleRepository {
       .from(appointmentRequests)
       .where(and(...filters))
       .orderBy(desc(appointmentRequests.appointmentStart));
+  }
+
+  listClinicAdminAppointmentActivities(clinicId: string) {
+    const retentionStartDate = clinicActivityRetentionStartDate(clinicId);
+    // Select the final change before retention and pagination. Otherwise an old
+    // reschedule can resurface when the appointment's newer cancellation expires,
+    // and repeated edits can crowd other appointments out of the feed.
+    const latestChanges = this.db
+      .selectDistinctOn([appointmentEvents.appointmentRequestId], { id: appointmentEvents.id })
+      .from(appointmentEvents)
+      .where(
+        and(
+          eq(appointmentEvents.clinicId, clinicId),
+          eq(appointmentEvents.actorType, 'clinic_admin'),
+          inArray(appointmentEvents.eventType, [
+            'appointment.rescheduled',
+            'appointment.cancelled',
+          ]),
+        ),
+      )
+      .orderBy(
+        appointmentEvents.appointmentRequestId,
+        desc(appointmentEvents.createdAt),
+        desc(appointmentEvents.id),
+      )
+      .as('latest_appointment_changes');
+
+    return this.db
+      .select({
+        id: appointmentEvents.id,
+        appointmentId: appointmentRequests.id,
+        patientName: appointmentRequests.patientName,
+        patientPhone: appointmentRequests.patientPhone,
+        doctorId: appointmentRequests.doctorId,
+        doctorName: doctors.name,
+        clinicServiceId: appointmentRequests.clinicServiceId,
+        serviceName: clinicServices.serviceName,
+        reasonForVisit: appointmentRequests.reasonForVisit,
+        eventType: appointmentEvents.eventType,
+        occurredAt: appointmentEvents.createdAt,
+        oldValuesJson: appointmentEvents.oldValuesJson,
+        newValuesJson: appointmentEvents.newValuesJson,
+        appointmentStart: appointmentRequests.appointmentStart,
+        appointmentEnd: appointmentRequests.appointmentEnd,
+      })
+      .from(appointmentEvents)
+      .innerJoin(latestChanges, eq(appointmentEvents.id, latestChanges.id))
+      .innerJoin(
+        appointmentRequests,
+        and(
+          eq(appointmentRequests.clinicId, appointmentEvents.clinicId),
+          eq(appointmentRequests.id, appointmentEvents.appointmentRequestId),
+        ),
+      )
+      .innerJoin(
+        doctors,
+        and(
+          eq(doctors.clinicId, appointmentEvents.clinicId),
+          eq(doctors.id, appointmentRequests.doctorId),
+        ),
+      )
+      .innerJoin(
+        clinicServices,
+        and(
+          eq(clinicServices.clinicId, appointmentEvents.clinicId),
+          eq(clinicServices.id, appointmentRequests.clinicServiceId),
+        ),
+      )
+      .where(
+        and(
+          eq(appointmentEvents.clinicId, clinicId),
+          eq(appointmentEvents.actorType, 'clinic_admin'),
+          inArray(appointmentEvents.eventType, [
+            'appointment.rescheduled',
+            'appointment.cancelled',
+          ]),
+          or(
+            and(
+              eq(appointmentEvents.eventType, 'appointment.cancelled'),
+              sql`${clinicDateOfInstant(appointmentEvents.createdAt, clinicId)} >= ${retentionStartDate}`,
+            ),
+            and(
+              eq(appointmentEvents.eventType, 'appointment.rescheduled'),
+              sql`${appointmentRequests.appointmentStart}::date >= ${retentionStartDate}`,
+            ),
+          ),
+        ),
+      )
+      .orderBy(desc(appointmentEvents.createdAt), desc(appointmentEvents.id))
+      .limit(100);
   }
 
   listPendingActionRequests(clinicId: string) {
@@ -283,10 +409,7 @@ export class AppointmentLifecycleRepository {
       .where(and(...filters));
   }
 
-  insertAppointmentEvent(
-    values: typeof appointmentEvents.$inferInsert,
-    db: Database = this.db,
-  ) {
+  insertAppointmentEvent(values: typeof appointmentEvents.$inferInsert, db: Database = this.db) {
     return db.insert(appointmentEvents).values(values).returning();
   }
 

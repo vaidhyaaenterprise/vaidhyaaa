@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test('doctor login, dashboard, and logout flow', async ({ page }) => {
   await page.goto('/login');
 
-  await expect(page.getByText('Vaidya portal')).toBeVisible();
+  await expect(page.getByText('Vaidhyaa portal')).toBeVisible();
 
   await page.getByRole('button', { name: 'Doctor', exact: true }).click();
   await page.getByRole('button', { name: /Sign in as Doctor/i }).click();
@@ -18,5 +18,5 @@ test('doctor login, dashboard, and logout flow', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Logout' }).click();
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByText('Vaidya portal')).toBeVisible();
+  await expect(page.getByText('Vaidhyaa portal')).toBeVisible();
 });

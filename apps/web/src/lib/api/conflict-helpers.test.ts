@@ -23,17 +23,14 @@ function appointmentConflict(reason: string): ScheduleConflictItem {
 
 describe('formatScheduleConflicts', () => {
   it.each([
-    ['outside_clinic_hours', 'falls outside the new clinic hours'],
-    ['outside_doctor_hours', "falls outside the doctor's new working hours"],
-    ['active_appointment_on_holiday', 'conflicts with the proposed holiday'],
+    ['outside_clinic_hours', 'These clinic hours would exclude the appointment.'],
+    ['outside_doctor_hours', 'These doctor working hours would exclude the appointment.'],
+    ['active_appointment_on_holiday', 'The selected holiday conflicts with this appointment.'],
   ])('shows appointment details rather than IDs for %s', (reason, expectedEnding) => {
     const [message] = formatScheduleConflicts([appointmentConflict(reason)]);
 
     expect(message).toContain('Asha Patient');
-    expect(message).toContain('21 Sep 2026 09:30 - 10:00');
-    expect(message).toContain('Doctor: Dr. Test');
-    expect(message).toContain('Service: General consultation');
-    expect(message).toContain('Status: Confirmed');
+    expect(message).toContain('Asha Patient has booked an appointment on 21 Sep 2026 at 9:30 AM with Dr. Test.');
     expect(message).toContain(expectedEnding);
     expect(message).not.toContain('00000000-0000-0000-0000-000000000123');
   });
@@ -46,7 +43,7 @@ describe('formatScheduleConflicts', () => {
       },
     ]);
 
-    expect(message).toBe('An existing appointment — falls outside the new clinic hours');
+    expect(message).toBe('A patient has an existing appointment. These clinic hours would exclude the appointment.');
     expect(message).not.toContain('00000000-0000-0000-0000-000000000123');
   });
 
@@ -60,7 +57,7 @@ describe('formatScheduleConflicts', () => {
       },
     ]);
 
-    expect(message).toContain('21 Sep 2026 11:00 - 11:30');
+    expect(message).toContain('21 Sep 2026 at 11:00 AM - 11:30 AM');
     expect(message).not.toContain('00000000-0000-0000-0000-000000000456');
   });
 
@@ -75,5 +72,15 @@ describe('formatScheduleConflicts', () => {
 
     expect(message).toBe('This schedule change conflicts with existing bookings');
     expect(message).not.toContain('00000000-0000-0000-0000-000000000123');
+  });
+
+  it('explains doctor availability conflicts and the date-specific holiday option', () => {
+    const [message] = formatScheduleConflicts([{
+      reason: 'doctor_schedule_outside_clinic_hours',
+      doctor_schedule: {doctor_name: 'Dr. Merp', day_of_week: 2, start_time: '09:00:00', end_time: '13:00:00'},
+    }]);
+    expect(message).toContain('Dr. Merp is available on Tuesday from 9:00 AM to 1:00 PM');
+    expect(message).toContain('Adjust the doctor');
+    expect(message).toContain('Holiday setup');
   });
 });

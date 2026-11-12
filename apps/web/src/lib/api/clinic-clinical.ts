@@ -34,8 +34,6 @@ export type BookingRuleApiRow = {
   slot_duration_minutes: number;
   capacity_per_slot: number;
   booking_horizon_days: number;
-  manual_edit_cutoff_before_start_minutes: number;
-  manual_edit_max_shift_minutes: number;
   effective_from?: string;
   version?: number;
   active: boolean;
@@ -44,9 +42,6 @@ export type BookingRuleApiRow = {
 export type BookingRulePatchPayload = Partial<{
   slot_duration_minutes: number;
   capacity_per_slot: number;
-  booking_horizon_days: number;
-  manual_edit_cutoff_before_start_minutes: number;
-  manual_edit_max_shift_minutes: number;
   implement_from: string;
 }>;
 
@@ -127,6 +122,7 @@ export type CallInboxApiRow = {
   created_callback_request_id: string | null;
   created_emergency_incident_id: string | null;
   appointment_action_request_id: string | null;
+  appointment_start: string | null;
   source_status: string | null;
 };
 
@@ -156,8 +152,8 @@ export type PatientHistoryApiRow = {
   history: PatientHistoryItemApiRow[];
 };
 
-export async function fetchDoctors(clinicId: string) {
-  const data = await apiGet<{ doctors: DoctorApiRow[] }>(clinicPath(clinicId, '/doctors'));
+export async function fetchDoctors(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ doctors: DoctorApiRow[] }>(clinicPath(clinicId, '/doctors'), signal);
   return data.doctors;
 }
 
@@ -169,8 +165,23 @@ export async function createDoctor(
   return data.doctor;
 }
 
-export async function fetchServices(clinicId: string) {
-  const data = await apiGet<{ services: ServiceApiRow[] }>(clinicPath(clinicId, '/services'));
+export async function patchDoctor(
+  clinicId: string,
+  doctorId: string,
+  patch: Partial<{ name: string; qualification: string; active: boolean }>,
+) {
+  const data = await apiPatch<{ doctor: DoctorApiRow }>(
+    clinicPath(clinicId, `/doctors/${doctorId}`),
+    patch,
+  );
+  return data.doctor;
+}
+
+export async function fetchServices(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ services: ServiceApiRow[] }>(
+    clinicPath(clinicId, '/services'),
+    signal,
+  );
   return data.services;
 }
 
@@ -185,9 +196,10 @@ export async function createService(
   return data.service;
 }
 
-export async function fetchDoctorServices(clinicId: string) {
+export async function fetchDoctorServices(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ doctor_services: DoctorServiceApiRow[] }>(
     clinicPath(clinicId, '/doctor-services'),
+    signal,
   );
   return data.doctor_services;
 }
@@ -246,9 +258,10 @@ export async function deleteDoctorService(clinicId: string, mappingId: string) {
   await apiDelete(clinicPath(clinicId, `/doctor-services/${mappingId}`));
 }
 
-export async function fetchBookingRules(clinicId: string) {
+export async function fetchBookingRules(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ booking_rules: BookingRuleApiRow[] }>(
     clinicPath(clinicId, '/booking-rules'),
+    signal,
   );
   return data.booking_rules;
 }
@@ -265,8 +278,8 @@ export async function patchBookingRule(
   return data.booking_rule;
 }
 
-export async function fetchClinicHours(clinicId: string) {
-  const data = await apiGet<{ hours: ClinicHoursApiRow[] }>(clinicPath(clinicId, '/hours'));
+export async function fetchClinicHours(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ hours: ClinicHoursApiRow[] }>(clinicPath(clinicId, '/hours'), signal);
   return data.hours.filter((row) => row.active);
 }
 
@@ -280,8 +293,11 @@ export async function replaceClinicHours(
   return data.hours;
 }
 
-export async function fetchHolidays(clinicId: string) {
-  const data = await apiGet<{ holidays: HolidayApiRow[] }>(clinicPath(clinicId, '/holidays'));
+export async function fetchHolidays(clinicId: string, signal?: AbortSignal) {
+  const data = await apiGet<{ holidays: HolidayApiRow[] }>(
+    clinicPath(clinicId, '/holidays'),
+    signal,
+  );
   return data.holidays;
 }
 
@@ -308,16 +324,22 @@ export async function patchHoliday(
   return data.holiday;
 }
 
-export async function fetchDoctorSchedules(clinicId: string, doctorId: string) {
+export async function fetchDoctorSchedules(
+  clinicId: string,
+  doctorId: string,
+  signal?: AbortSignal,
+) {
   const data = await apiGet<{ schedules: DoctorScheduleApiRow[] }>(
     clinicPath(clinicId, `/doctors/${doctorId}/schedules`),
+    signal,
   );
   return data.schedules.filter((row) => row.active);
 }
 
-export async function fetchAllDoctorSchedules(clinicId: string) {
+export async function fetchAllDoctorSchedules(clinicId: string, signal?: AbortSignal) {
   const data = await apiGet<{ schedules: DoctorScheduleApiRow[] }>(
     clinicPath(clinicId, '/doctor-schedules'),
+    signal,
   );
   return data.schedules.filter((row) => row.active);
 }
@@ -334,18 +356,34 @@ export async function replaceDoctorSchedules(
   return data.schedules;
 }
 
+export async function replaceAllDoctorSchedules(
+  clinicId: string,
+  windows: Array<{ day_of_week: number; start_time: string; end_time: string; active: boolean }>,
+) {
+  const data = await apiPut<{ schedules: DoctorScheduleApiRow[] }>(
+    clinicPath(clinicId, '/doctor-schedules'),
+    { windows },
+  );
+  return data.schedules;
+}
+
 export async function fetchCalls(clinicId: string) {
   const data = await apiGet<{ calls: CallApiRow[] }>(clinicPath(clinicId, '/calls'));
   return data.calls;
 }
 
-export async function fetchCallInbox(clinicId: string, outcomes: CallInboxApiRow['outcome'][] = []) {
+export async function fetchCallInbox(
+  clinicId: string,
+  outcomes: CallInboxApiRow['outcome'][] = [],
+  signal?: AbortSignal,
+) {
   const params = new URLSearchParams({ limit: '200' });
   if (outcomes.length > 0) {
     params.set('outcomes', outcomes.join(','));
   }
   const data = await apiGet<{ items: CallInboxApiRow[]; next_cursor: string | null }>(
     clinicPath(clinicId, `/call-inbox?${params.toString()}`),
+    signal,
   );
   return data.items;
 }
@@ -375,6 +413,7 @@ export async function searchPatientHistory(
     name?: string;
     age?: number;
   },
+  signal?: AbortSignal,
 ) {
   const params = new URLSearchParams();
   if (query.phone) {
@@ -392,18 +431,21 @@ export async function searchPatientHistory(
     ? clinicPath(clinicId, `/patients/history?${suffix}`)
     : clinicPath(clinicId, '/patients/history');
 
-  const data = await apiGet<{ patients: PatientHistoryApiRow[] }>(path);
+  const data = await apiGet<{ patients: PatientHistoryApiRow[] }>(path, signal);
   return data.patients;
 }
 
-export async function fetchPlatformNotifications() {
-  const data = await apiGet<{ notifications: unknown[] }>('/internal/platform/notifications');
+export async function fetchPlatformNotifications(signal?: AbortSignal) {
+  const data = await apiGet<{ notifications: unknown[] }>(
+    '/internal/platform/notifications',
+    signal,
+  );
   return data.notifications;
 }
 
-export async function fetchPlatformJobHealth() {
+export async function fetchPlatformJobHealth(signal?: AbortSignal) {
   return apiGet<{
     health: Array<{ status: string; count: number }>;
     recent_runs: Array<Record<string, unknown>>;
-  }>('/internal/platform/jobs/health');
+  }>('/internal/platform/jobs/health', signal);
 }

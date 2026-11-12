@@ -4,6 +4,7 @@ import type { FastifyRequest } from 'fastify';
 import { type ApiEnv } from '@vaidya/config';
 import {
   createRepositories,
+  addDays,
   dayOfWeekMon1,
   formatDateInTimezone,
   ACTIVE_APPOINTMENT_STATUSES,
@@ -12,6 +13,7 @@ import {
 } from '@vaidya/db';
 import {
   ADAPTER_TOKENS,
+  BOOKING_HORIZON_DAYS,
   extractActivePreferredDate,
   type ServiceRouterAdapter,
   type TimePreference,
@@ -20,10 +22,6 @@ import type { DatabaseConnection } from '@vaidya/db';
 import { API_ENV } from '../../config/api-config.module';
 import { DATABASE_CONNECTION } from '../database/database.module';
 import { BookingAppointmentService } from '../booking/booking-appointment.service';
-import {
-  filterSlotsByDateAndPreference,
-  slotDisplayTime,
-} from '../booking/booking-field-extractor';
 import { KnowledgeSearchService } from '../knowledge/knowledge-search.service';
 import { AppointmentLookupService } from '../patient-action/appointment-lookup.service';
 import { StaffNotificationService } from '../patient-action/staff-notification.service';
@@ -37,8 +35,16 @@ import { SlotHoldService } from '../slots/slot-hold.service';
 import { SlotService } from '../slots/slot.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipApiEnvelope } from '../../common/decorators/skip-api-envelope.decorator';
+import { publicService, resolveSarvamRouting, type RoutingService } from './sarvam-routing';
+import {
+  availabilityOverview,
+  availabilityWindow,
+  chooseAvailability,
+  type DoctorAvailability,
+} from './sarvam-availability';
 
 const CLINIC_INFO_TOPICS = [
+  'services',
   'fee',
   'timing',
   'location',
@@ -95,11 +101,12 @@ function parseTimePreference(value: unknown): TimePreference | null {
 function normalizeTimeTo24h(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim().replace(/^0+(?=\d)/, '');
-  const match = /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(trimmed);
+  const match = /^(\d{1,2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i.exec(trimmed);
   if (!match) return null;
   let hour = Number(match[1]);
-  const minute = Number(match[2]);
+  const minute = Number(match[2] ?? '0');
   const period = (match[3] ?? '').toUpperCase();
+  if (period && (hour < 1 || hour > 12)) return null;
   if (period === 'PM' && hour < 12) hour += 12;
   if (period === 'AM' && hour === 12) hour = 0;
   if (hour > 23 || minute > 59) return null;
@@ -172,7 +179,8 @@ function formatTimeText(startTime: string): string {
   if (!parsed) return startTime.slice(11, 16);
   const hour12 = parsed.hour % 12 === 0 ? 12 : parsed.hour % 12;
   const minute = String(parsed.minute).padStart(2, '0');
-  const period = parsed.hour < 12 ? 'in the morning' : 'in the evening';
+  const period =
+    parsed.hour < 12 ? 'in the morning' : parsed.hour < 17 ? 'in the afternoon' : 'in the evening';
   return `${hour12}:${minute} ${period}`;
 }
 
@@ -184,26 +192,21 @@ function findSlotByDateAndTime(
   timeInput: string | null,
 ): SlotLike | undefined {
   if (!timeInput) return undefined;
-  const input = timeInput.trim().replace(/^0+(?=\d)/, '');
+  const input = normalizeTimeTo24h(timeInput);
+  if (!input) return undefined;
   return slots.find((slot) => {
     const parsed = parseClinicStartTime(slot.start_time);
     if (!parsed) return false;
     if (requestedDate && parsed.date !== requestedDate) return false;
-    const hour12 = parsed.hour % 12 === 0 ? 12 : parsed.hour % 12;
     const minute = String(parsed.minute).padStart(2, '0');
-    const display12 = `${hour12}:${String(minute).padStart(2, '0')}`;
     const display24 = `${String(parsed.hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-    return (
-      input === display12.replace(/^0+(?=\d)/, '') || input === display24.replace(/^0+(?=\d)/, '')
-    );
+    return input === display24;
   });
 }
 
 function joinTimesText(times: string[], timePreference: TimePreference | null): string {
   if (times.length === 0) return timePreference ? `no ${timePreference} slots` : 'no slots';
-  const suffix = timePreference ? ` in the ${timePreference}` : '';
-  if (times.length === 1) return `${times[0]}${suffix}`;
-  return `${times.slice(0, -1).join(', ')}, or ${times[times.length - 1]}${suffix}`;
+  return times.join(', ');
 }
 
 function isScheduleEffective(
@@ -276,9 +279,12 @@ export class SarvamToolsController {
 
     return {
       found: true,
+      error: '',
       sessionId,
       clinicId: clinic.id,
       clinicName: clinic.name,
+      currentDate: formatDateInTimezone(new Date(), timezone),
+      timezone,
       location: {
         address: addressParts.join(', ') || null,
         city: clinic.city ?? null,
@@ -302,6 +308,7 @@ export class SarvamToolsController {
     if (!topic || !CLINIC_INFO_TOPICS.includes(topic)) {
       return { error: 'invalid_topic', allowed: CLINIC_INFO_TOPICS };
     }
+    if (topic === 'services') return { topic, error: '', ...(await this.listServices(query, req)) };
 
     const doctorId = readParam(b, req, 'doctor_id');
     const day = readParam(b, req, 'day');
@@ -318,6 +325,7 @@ export class SarvamToolsController {
       return {
         topic,
         found: addressParts.length > 0,
+        error: '',
         address: addressParts.join(', ') || null,
         city: clinic?.city ?? null,
         state: clinic?.state ?? null,
@@ -330,6 +338,7 @@ export class SarvamToolsController {
         return {
           topic,
           found: hours.length > 0,
+          error: '',
           hoursSummary: formatClinicHoursText(hours),
           timezone,
         };
@@ -349,6 +358,7 @@ export class SarvamToolsController {
       return {
         topic,
         found: dayHours.length > 0,
+        error: '',
         day: dayNames[dayOfWeek - 1] ?? day,
         hours: dayHours.length > 0 ? formatDayHoursText(dayHours) : 'closed',
         timezone,
@@ -359,10 +369,11 @@ export class SarvamToolsController {
       if (!doctorId) return { topic, found: false, error: 'doctor_id_required' };
       const [feeInfo] = await this.repos.clinical.getDoctorFeeInfo(clinicId, doctorId);
       const [doctor] = await this.repos.doctors.findDoctorById(clinicId, doctorId);
-      if (!feeInfo || !doctor) return { topic, found: false, doctorId };
+      if (!feeInfo || !doctor) return { topic, found: false, error: '', doctorId };
       return {
         topic,
         found: true,
+        error: '',
         doctorId: doctor.id,
         doctorName: doctor.name,
         consultationFee: formatFeeAmount(feeInfo.consultationFeeAmount),
@@ -374,7 +385,16 @@ export class SarvamToolsController {
     if (topic === 'doctor_availability') {
       if (!doctorId) return { topic, found: false, error: 'doctor_id_required' };
       const [doctor] = await this.repos.doctors.findDoctorById(clinicId, doctorId);
-      if (!doctor) return { topic, found: false, doctorId };
+      if (!doctor)
+        return {
+          topic,
+          found: false,
+          error: '',
+          doctorId,
+          available: false,
+          timings: [],
+          timingsText: '',
+        };
       const referenceDate = formatDateInTimezone(new Date(), timezone);
       const targetDate =
         (day ? extractActivePreferredDate(day, referenceDate) : null) ?? referenceDate;
@@ -394,23 +414,27 @@ export class SarvamToolsController {
         return {
           topic,
           found: false,
+          error: '',
           doctorId: doctor.id,
           doctorName: doctor.name,
           date: targetDate,
           availabilityDay: dayNames[dayOfWeek - 1] ?? null,
           available: false,
           timings: [],
+          timingsText: '',
         };
       }
       return {
         topic,
         found: true,
+        error: '',
         doctorId: doctor.id,
         doctorName: doctor.name,
         date: targetDate,
         availabilityDay: dayNames[dayOfWeek - 1] ?? null,
         available: true,
         timings: timings.map((range) => normaliseScheduleTiming(range)),
+        timingsText: timings.map((range) => normaliseScheduleTiming(range)).join(', '),
       };
     }
 
@@ -430,6 +454,7 @@ export class SarvamToolsController {
     return {
       topic,
       found: Boolean(knowledge?.meetsThreshold),
+      error: '',
       answer: knowledge?.answer ?? null,
       score: knowledge?.score ?? null,
       category: knowledge?.category ?? null,
@@ -445,8 +470,14 @@ export class SarvamToolsController {
     const queryText = readParam(b, req, 'query');
     if (!queryText) return { found: false, error: 'query_required' };
     const result = await this.knowledgeSearchService.searchApprovedKnowledge(clinicId, queryText);
-    if (!result?.meetsThreshold) return { found: false, score: result?.score ?? null };
-    return { found: true, answer: result.answer, score: result.score, category: result.category };
+    if (!result?.meetsThreshold) return { found: false, error: '', score: result?.score ?? null };
+    return {
+      found: true,
+      error: '',
+      answer: result.answer,
+      score: result.score,
+      category: result.category,
+    };
   }
 
   @Public()
@@ -456,27 +487,19 @@ export class SarvamToolsController {
     const clinicId = readParam(b, req, 'clinic_id');
     if (!clinicId) return { error: 'clinic_id_required' };
 
-    const services = await this.repos.clinical.listServices(clinicId);
-    const active = services.filter((service) => service.active);
-
-    const servicesWithDoctors = [];
-    for (const service of active) {
-      const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
-        clinicId,
-        service.id,
-      );
-      servicesWithDoctors.push({
-        clinicServiceId: service.id,
-        name: service.serviceName,
-        serviceKey: service.serviceKey,
-        doctors: mappings.map((mapping) => ({
-          doctorId: mapping.doctorId,
-          doctorName: mapping.doctorName,
-        })),
-      });
-    }
-
-    return { found: servicesWithDoctors.length > 0, services: servicesWithDoctors };
+    const catalog = await this.serviceCatalog(clinicId);
+    return {
+      found: catalog.length > 0,
+      services: catalog.map(publicService),
+      serviceNames: catalog.map((service) => service.name),
+      servicesText: catalog.map((service) => service.name).join(', '),
+      serviceRoutingText: catalog
+        .map(
+          (service) =>
+            `${service.name}: service_key=${service.serviceKey}; handles=${JSON.stringify(service.handlesJson ?? [])}; does_not_handle=${JSON.stringify(service.doesNotHandleJson ?? [])}; examples=${JSON.stringify(service.routingExamplesJson ?? [])}`,
+        )
+        .join('\n'),
+    };
   }
 
   @Public()
@@ -485,62 +508,15 @@ export class SarvamToolsController {
     const b = parseBody(query);
     const clinicId = readParam(b, req, 'clinic_id');
     if (!clinicId) return { error: 'clinic_id_required' };
-    const reasonForVisit = readParam(b, req, 'reason_for_visit');
-    const serviceKeyInput = readParam(b, req, 'service_key');
-    if (!reasonForVisit && !serviceKeyInput) {
-      return { matched: false, error: 'reason_or_service_key_required' };
-    }
-
-    const services = await this.repos.clinical.listServices(clinicId);
-    const activeClinicServices = services
-      .filter((s) => s.active)
-      .map((s) => ({
-        id: s.id,
-        serviceKey: s.serviceKey,
-        serviceName: s.serviceName,
-        handlesJson: s.handlesJson,
-        doesNotHandleJson: s.doesNotHandleJson,
-        redFlagsJson: s.redFlagsJson,
-        routingExamplesJson: s.routingExamplesJson,
-      }));
-
-    let resolvedServiceId: string | null = null;
-
-    if (serviceKeyInput) {
-      const byKey = activeClinicServices.find((s) => s.serviceKey === serviceKeyInput);
-      if (byKey) resolvedServiceId = byKey.id;
-    } else {
-      if (!reasonForVisit) return { matched: false, error: 'reason_for_visit_required' };
-      const routed = await this.serviceRouter.route({
-        clinicId,
-        reasonForVisit,
-        activeClinicServices,
-      });
-      if (routed.matched && routed.clinicServiceId) resolvedServiceId = routed.clinicServiceId;
-    }
-
-    if (!resolvedServiceId) {
-      return { matched: false, availableServices: activeClinicServices.map((s) => s.serviceName) };
-    }
-
-    const targetService = activeClinicServices.find((s) => s.id === resolvedServiceId);
-    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
+    const target = await this.resolveDoctorAndService(
       clinicId,
-      resolvedServiceId,
+      readParam(b, req, 'doctor_id'),
+      readParam(b, req, 'clinic_service_id'),
+      readParam(b, req, 'reason_for_visit'),
+      readParam(b, req, 'doctor_name'),
+      readParam(b, req, 'service_key'),
     );
-
-    return {
-      matched: true,
-      clinicServiceId: resolvedServiceId,
-      serviceName: targetService?.serviceName ?? null,
-      serviceKey: targetService?.serviceKey ?? null,
-      doctors: mappings.map((m) => ({
-        doctorId: m.doctorId,
-        doctorName: m.doctorName,
-      })),
-      doctorId: mappings[0]?.doctorId ?? null,
-      doctorName: mappings[0]?.doctorName ?? null,
-    };
+    return { error: '', matched: !('error' in target), ...target };
   }
 
   @Public()
@@ -553,58 +529,160 @@ export class SarvamToolsController {
     const [clinic] = await this.repos.clinics.getClinicLocation(clinicId);
     const timezone = clinic?.timezone ?? 'Asia/Kolkata';
     const referenceDate = formatDateInTimezone(new Date(), timezone);
+    const horizonEnd = addDays(referenceDate, BOOKING_HORIZON_DAYS, timezone);
+    const mode = readParam(b, req, 'mode') ?? 'search';
+    if (mode !== 'search' && mode !== 'overview') return { success: false, error: 'invalid_mode' };
 
     const doctorId = readParam(b, req, 'doctor_id');
     const clinicServiceId = readParam(b, req, 'clinic_service_id');
     const reasonForVisit = readParam(b, req, 'reason_for_visit');
     const dateInput = readParam(b, req, 'date');
-    const timePreference = parseTimePreference(
-      b.time_preference ?? req.headers.time_preference ?? req.headers['time-preference'],
-    );
+    const timePreferenceRaw =
+      b.time_preference ?? req.headers.time_preference ?? req.headers['time-preference'];
+    const timePreference = parseTimePreference(timePreferenceRaw);
+    if (timePreferenceRaw != null && timePreferenceRaw !== '' && !timePreference) {
+      return { success: false, error: 'invalid_time_preference' };
+    }
     const afterTimeRaw = readParam(b, req, 'after_time');
     const afterTime = afterTimeRaw ? normalizeTimeTo24h(afterTimeRaw) : null;
-
-    const preferredDate = dateInput
-      ? (extractActivePreferredDate(dateInput, referenceDate) ??
-        (/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? dateInput : null))
-      : null;
-
-    if (!preferredDate) return { success: false, error: 'date_required' };
+    const beforeTimeRaw = readParam(b, req, 'before_time');
+    const beforeTime = beforeTimeRaw ? normalizeTimeTo24h(beforeTimeRaw) : null;
+    const exactTimeRaw = readParam(b, req, 'time');
+    const exactTime = exactTimeRaw ? normalizeTimeTo24h(exactTimeRaw) : null;
+    if (afterTimeRaw && !afterTime) return { success: false, error: 'invalid_after_time' };
+    if (beforeTimeRaw && !beforeTime) return { success: false, error: 'invalid_before_time' };
+    if (exactTimeRaw && !exactTime) return { success: false, error: 'invalid_time' };
+    const window = availabilityWindow(timePreference, afterTime, beforeTime, exactTime);
+    const beforeMidnightOnly =
+      beforeTime === '00:00' && !afterTime && !exactTime && !timePreference;
+    if (window.lower >= window.upper && !beforeMidnightOnly) {
+      return { success: false, error: 'invalid_time_range' };
+    }
+    if (mode === 'overview' && (timePreference || afterTime || beforeTime || exactTime)) {
+      return { success: false, error: 'overview_requires_no_time_filters' };
+    }
+    const resolveDate = (value: string | null) => {
+      if (!value) return null;
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? value
+        : extractActivePreferredDate(value, referenceDate);
+      if (!date) return null;
+      const parsed = new Date(`${date}T00:00:00Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date
+        ? date
+        : null;
+    };
+    const preferredDate = resolveDate(dateInput);
+    if (mode === 'search' && !dateInput) return { success: false, error: 'date_required' };
+    if (dateInput && !preferredDate) return { success: false, error: 'invalid_date' };
+    const fromRaw = readParam(b, req, 'from_date');
+    const toRaw = readParam(b, req, 'to_date');
+    if ((mode === 'search' && (fromRaw || toRaw)) || (dateInput && (fromRaw || toRaw))) {
+      return { success: false, error: 'invalid_date_range' };
+    }
+    const from = preferredDate ?? (fromRaw ? resolveDate(fromRaw) : referenceDate);
+    const to = preferredDate ?? (toRaw ? resolveDate(toRaw) : horizonEnd);
+    if (!from || !to || from > to) return { success: false, error: 'invalid_date_range' };
+    if (from < referenceDate) return { success: false, error: 'past_date' };
+    if (to > horizonEnd) return { success: false, error: 'outside_booking_horizon' };
 
     const target = await this.resolveDoctorAndService(
       clinicId,
       doctorId,
       clinicServiceId,
       reasonForVisit,
+      readParam(b, req, 'doctor_name'),
+      readParam(b, req, 'service_key'),
     );
     if ('error' in target) return { success: false, ...target };
-
-    const slots = await this.slotService.findAvailableSlots(
-      clinicId,
-      target.doctorId,
-      target.clinicServiceId,
-      preferredDate,
+    const excluded = new Set(
+      (readParam(b, req, 'exclude_doctor_ids') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
     );
-    const afterTimeNormalized = afterTime ? `${afterTime}:00` : undefined;
-    const filtered = filterSlotsByDateAndPreference(
-      slots,
-      preferredDate,
-      timePreference ?? undefined,
-      afterTimeNormalized ? preferredDate : undefined,
-      afterTimeNormalized,
+    if (excluded.size > 100) return { success: false, error: 'too_many_excluded_doctors' };
+    if (target.doctorId && excluded.has(target.doctorId)) {
+      return { success: false, error: 'doctor_excluded', needsClarification: true };
+    }
+    const doctors = target.doctors.filter(
+      (doctor) =>
+        (!target.doctorId || doctor.doctorId === target.doctorId) && !excluded.has(doctor.doctorId),
     );
-
-    const times = filtered.slice(0, 4).map((slot) => slotDisplayTime(slot.start_time));
+    // Bound concurrent DB work; overview reads once per doctor, never once per day.
+    const availability: DoctorAvailability[] = [];
+    for (let index = 0; index < doctors.length; index += 4) {
+      availability.push(
+        ...(await Promise.all(
+          doctors.slice(index, index + 4).map(async (doctor) => ({
+            doctor,
+            rows: await this.slotService.findAvailableSlots(
+              clinicId,
+              doctor.doctorId,
+              target.clinicServiceId,
+              preferredDate ?? undefined,
+            ),
+          })),
+        )),
+      );
+    }
+    if (mode === 'overview') {
+      const doctorAvailability = availabilityOverview(availability, from, to);
+      const availableDates = [
+        ...new Set(
+          doctorAvailability.flatMap((doctor) =>
+            doctor.availableDatesText.split(', ').filter(Boolean),
+          ),
+        ),
+      ].sort();
+      return {
+        success: true,
+        availabilityStatus: 'overview',
+        excludedDoctorIdsText: [...excluded].join(','),
+        hasAvailability: availableDates.length > 0,
+        doctorId: target.doctorId,
+        doctorName: target.doctorName,
+        clinicServiceId: target.clinicServiceId,
+        fromDate: from,
+        toDate: to,
+        availableSlotsText: '',
+        availableDatesText: availableDates.join(', '),
+        availabilityText: doctorAvailability
+          .map((doctor) => `${doctor.doctorName}: ${doctor.availabilityText || 'no slots'}`)
+          .join('\n'),
+        availabilityChoicesText: doctorAvailability
+          .map(
+            (doctor) =>
+              `${doctor.doctorName}${doctor.qualification ? ` (${doctor.qualification})` : ''} | doctor_id=${doctor.doctorId} | ${doctor.availabilityText || 'no slots'}`,
+          )
+          .join('\n'),
+        doctorAvailability,
+        error: '',
+      };
+    }
+    const selected = chooseAvailability(
+      availability,
+      preferredDate!,
+      window,
+      Boolean(beforeTime && !afterTime && !exactTime),
+      afterTime || beforeTime || timePreference || exactTime ? 3 : 4,
+    );
 
     return {
       success: true,
-      doctorName: target.doctorName,
-      doctorId: target.doctorId,
+      availabilityStatus: selected.status,
+      excludedDoctorIdsText: [...excluded].join(','),
+      hasAvailability: selected.times.length > 0,
+      matchesPreference: selected.status === 'matched',
+      suggestAnotherDate: selected.status === 'no_slots',
+      doctorSelection: target.doctorId ? 'requested' : selected.doctor ? 'random' : 'none',
+      doctorName: selected.doctor?.doctorName ?? target.doctorName,
+      doctorId: selected.doctor?.doctorId ?? target.doctorId,
       clinicServiceId: target.clinicServiceId,
       date: preferredDate,
-      dateDisplay: formatDateDisplay(preferredDate),
+      dateDisplay: formatDateDisplay(preferredDate!),
       timePreference,
-      availableSlotsText: joinTimesText(times, timePreference),
+      availableSlotsText: joinTimesText(selected.times, timePreference),
       error: '',
     };
   }
@@ -631,15 +709,19 @@ export class SarvamToolsController {
     if (!reasonForVisit) missing.push('reason_for_visit');
     if (!date) missing.push('date');
     if (!slotId && !timeInput) missing.push('slot_id_or_time');
-    if (missing.length > 0) return { error: 'missing_fields', missing };
+    if (missing.length > 0)
+      return { error: 'missing_fields', missing, missingFieldsText: missing.join(', ') };
 
     const target = await this.resolveDoctorAndService(
       clinicId,
       doctorId,
       clinicServiceId,
       reasonForVisit,
+      readParam(b, req, 'doctor_name'),
+      readParam(b, req, 'service_key'),
     );
-    if ('error' in target) return { error: target.error };
+    if ('error' in target) return target;
+    if (!target.doctorId) return { error: 'doctor_required', needsClarification: true };
 
     let resolvedSlotId = slotId;
 
@@ -678,9 +760,12 @@ export class SarvamToolsController {
           routingSource: 'service_router',
           patientId: patient?.id ?? null,
           expectedDoctorId: target.doctorId,
+          expectedClinicServiceId: target.clinicServiceId,
         });
       return {
         status: appointment.status === 'confirmed' ? 'confirmed' : 'pending',
+        error: '',
+        missingFieldsText: '',
         appointmentId: appointment.id,
         patientId: patient?.id ?? null,
         holdId: hold.id,
@@ -724,8 +809,18 @@ export class SarvamToolsController {
     if (!reasonForVisit) missing.push('reason_for_visit');
     if (!date) missing.push('date');
     if (!slotId && !timeInput) missing.push('slot_id_or_time');
-    if (missing.length > 0) return { error: 'missing_fields', missing };
+    if (missing.length > 0)
+      return { error: 'missing_fields', missing, missingFieldsText: missing.join(', ') };
 
+    const target = await this.resolveDoctorAndService(
+      clinicId,
+      doctorId,
+      clinicServiceId,
+      null,
+      doctorName,
+    );
+    if ('error' in target) return target;
+    if (!target.doctorId) return { error: 'doctor_required', needsClarification: true };
     let resolvedSlotId = slotId;
 
     if (!resolvedSlotId && timeInput) {
@@ -733,8 +828,8 @@ export class SarvamToolsController {
       if (!normalizedTime) return { error: 'invalid_slot_time', time: timeInput, date };
       const [timeSlot] = await this.repos.slots.findSlotByExactTime(
         clinicId,
-        doctorId!,
-        clinicServiceId!,
+        target.doctorId,
+        target.clinicServiceId,
         date!,
         normalizedTime,
       );
@@ -764,15 +859,18 @@ export class SarvamToolsController {
           reasonForVisit: reasonForVisit!,
           routingSource: 'service_router',
           patientId: patient?.id ?? null,
-          expectedDoctorId: doctorId!,
+          expectedDoctorId: target.doctorId,
+          expectedClinicServiceId: target.clinicServiceId,
         });
       return {
         status: appointment.status === 'confirmed' ? 'confirmed' : 'pending',
+        error: '',
+        missingFieldsText: '',
         appointmentId: appointment.id,
         patientId: patient?.id ?? null,
         holdId: hold.id,
-        doctorId,
-        doctorName: doctorName ?? 'Doctor',
+        doctorId: target.doctorId,
+        doctorName: target.doctorName,
         date,
         slotId: resolvedSlotId,
       };
@@ -810,11 +908,7 @@ export class SarvamToolsController {
       };
     }
 
-    const sessionId = await this.resolveSessionId(
-      clinicId,
-      readParam(b, req, 'session_id'),
-      phone,
-    );
+    const sessionId = await this.resolveSessionId(clinicId, readParam(b, req, 'session_id'), phone);
 
     await this.slotHoldService.cancelAppointment(clinicId, appointment.id);
     await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
@@ -843,7 +937,7 @@ export class SarvamToolsController {
       },
     });
 
-    return { cancelled: true, appointmentId: appointment.id };
+    return { cancelled: true, error: '', appointmentId: appointment.id };
   }
 
   @Public()
@@ -917,6 +1011,7 @@ export class SarvamToolsController {
 
     return {
       submitted: true,
+      error: '',
       appointmentId: appointment.id,
       actionRequestId: actionRequest?.id ?? null,
       newTime,
@@ -963,7 +1058,11 @@ export class SarvamToolsController {
       });
     }
 
-    return { submitted: true, callbackRequestId: callback?.id ?? null };
+    return {
+      submitted: Boolean(callback),
+      error: callback ? '' : 'callback_create_failed',
+      callbackRequestId: callback?.id ?? null,
+    };
   }
 
   @Public()
@@ -1015,7 +1114,7 @@ export class SarvamToolsController {
     if (existing) {
       const [updated] = await this.repos.voice.updateCall(clinicId, existing.id, patch);
       if (!updated) return { error: 'call_update_failed' };
-      return { success: true, action: 'updated', callId: updated.id };
+      return { success: true, error: '', action: 'updated', callId: updated.id };
     }
 
     const insert = {
@@ -1035,7 +1134,7 @@ export class SarvamToolsController {
     };
     const [created] = await this.repos.voice.createCall(insert);
     if (!created) return { error: 'call_create_failed' };
-    return { success: true, action: 'created', callId: created.id };
+    return { success: true, error: '', action: 'created', callId: created.id };
   }
 
   @Public()
@@ -1048,25 +1147,27 @@ export class SarvamToolsController {
     if (!phone) return { error: 'phone_required' };
 
     const candidates = await this.appointmentLookup.listAppointmentCandidates(clinicId, phone);
-    if (candidates.length === 0) return { found: false };
+    if (candidates.length === 0) return { found: false, error: '' };
 
     const [appointment] = await this.repos.appointmentLifecycle.findAppointmentById(
       clinicId,
       candidates[0]!.appointment_id,
     );
-    if (!appointment) return { found: false };
+    if (!appointment) return { found: false, error: '' };
 
     const [doctor] = await this.repos.doctors.findDoctorById(clinicId, appointment.doctorId);
     const parsedTime = parseClinicStartTime(appointment.appointmentStart);
 
     return {
       found: true,
+      error: '',
       appointmentId: appointment.id,
       status: appointment.status,
       statusDisplay:
         appointment.status === 'confirmed' ? 'confirmed' : 'pending confirmation from the clinic',
       doctorId: appointment.doctorId,
       doctorName: doctor?.name ?? 'Doctor',
+      clinicServiceId: appointment.clinicServiceId,
       patientName: appointment.patientName,
       patientPhone: appointment.patientPhone,
       reasonForVisit: appointment.reasonForVisit,
@@ -1103,66 +1204,80 @@ export class SarvamToolsController {
     return this.createSarvamSession(clinicId, patientPhone);
   }
 
+  private async serviceCatalog(clinicId: string): Promise<RoutingService[]> {
+    const [services, mappings] = await Promise.all([
+      this.repos.clinical.listServices(clinicId),
+      this.repos.clinical.listActiveDoctorServices(clinicId),
+    ]);
+    return services
+      .filter((service) => service.active)
+      .map((service) => ({
+        clinicServiceId: service.id,
+        name: service.serviceName,
+        serviceKey: service.serviceKey,
+        handlesJson: service.handlesJson,
+        doesNotHandleJson: service.doesNotHandleJson,
+        redFlagsJson: service.redFlagsJson,
+        routingExamplesJson: service.routingExamplesJson,
+        doctors: [
+          ...new Map(
+            mappings
+              .filter((mapping) => mapping.clinicServiceId === service.id)
+              .map((mapping) => [
+                mapping.doctorId,
+                {
+                  doctorId: mapping.doctorId,
+                  doctorName: mapping.doctorName,
+                  qualification: mapping.qualification,
+                },
+              ]),
+          ).values(),
+        ].sort(
+          (a, b) =>
+            a.doctorName.localeCompare(b.doctorName) || a.doctorId.localeCompare(b.doctorId),
+        ),
+      }))
+      .sort(
+        (a, b) =>
+          a.name.localeCompare(b.name) || a.clinicServiceId.localeCompare(b.clinicServiceId),
+      );
+  }
+
   private async resolveDoctorAndService(
     clinicId: string,
     doctorId: string | null,
     clinicServiceId: string | null,
     reasonForVisit: string | null,
-  ): Promise<
-    { doctorId: string; doctorName: string; clinicServiceId: string } | { error: string }
-  > {
-    let resolvedDoctorName = 'Doctor';
-
-    if (doctorId) {
-      const doctorMappings = await this.repos.clinical.listActiveDoctorServicesForDoctor(
-        clinicId,
+    doctorName?: string | null,
+    serviceKey?: string | null,
+  ) {
+    const catalog = await this.serviceCatalog(clinicId);
+    return resolveSarvamRouting(
+      catalog,
+      {
         doctorId,
-      );
-
-      if (doctorMappings.length === 0) return { error: 'no_service_for_doctor' };
-      resolvedDoctorName = doctorMappings[0]!.doctorName;
-
-      if (!clinicServiceId) {
-        clinicServiceId = doctorMappings[0]!.clinicServiceId;
-      } else if (!doctorMappings.some((m) => m.clinicServiceId === clinicServiceId)) {
-        clinicServiceId = doctorMappings[0]!.clinicServiceId;
-      }
-
-      return { doctorId, doctorName: resolvedDoctorName, clinicServiceId };
-    }
-
-    if (!clinicServiceId && reasonForVisit) {
-      const services = await this.repos.clinical.listServices(clinicId);
-      const activeClinicServices = services
-        .filter((s) => s.active)
-        .map((s) => ({
-          id: s.id,
-          serviceKey: s.serviceKey,
-          serviceName: s.serviceName,
-          handlesJson: s.handlesJson,
-          doesNotHandleJson: s.doesNotHandleJson,
-          redFlagsJson: s.redFlagsJson,
-          routingExamplesJson: s.routingExamplesJson,
-        }));
-      const routed = await this.serviceRouter.route({
-        clinicId,
+        doctorName: doctorName ?? null,
+        clinicServiceId,
         reasonForVisit,
-        activeClinicServices,
-      });
-      if (routed.matched && routed.clinicServiceId) clinicServiceId = routed.clinicServiceId;
-    }
-
-    if (!clinicServiceId) return { error: 'doctor_required' };
-
-    const mappings = await this.repos.clinical.listActiveDoctorServicesForClinicService(
-      clinicId,
-      clinicServiceId,
+        serviceKey: serviceKey ?? null,
+      },
+      async (reason) => {
+        const routed = await this.serviceRouter.route({
+          clinicId,
+          reasonForVisit: reason,
+          activeClinicServices: catalog.map((service) => ({
+            id: service.clinicServiceId,
+            serviceName: service.name,
+            serviceKey: service.serviceKey,
+            handlesJson: service.handlesJson,
+            doesNotHandleJson: service.doesNotHandleJson,
+            redFlagsJson: service.redFlagsJson,
+            routingExamplesJson: service.routingExamplesJson,
+          })),
+        });
+        return routed.matched ? (routed.clinicServiceId ?? null) : null;
+      },
     );
-    if (mappings.length === 0) return { error: 'no_service_for_doctor' };
-    doctorId = mappings[0]!.doctorId;
-    resolvedDoctorName = mappings[0]!.doctorName;
-
-    return { doctorId, doctorName: resolvedDoctorName, clinicServiceId };
   }
 
   private async resolveAppointmentRef(

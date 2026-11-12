@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import type { AgentSettings, AnsweringMode, BookingMode } from './types';
+import type { AgentLanguage, AgentSettings, BookingMode } from './types';
+
+function languageLabel(language: AgentLanguage): string {
+  return language === 'english' ? 'English' : 'Tanglish';
+}
 
 interface AgentSettingsProps {
   settings: AgentSettings;
@@ -31,11 +35,6 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
   };
 
   const handleSave = async () => {
-    if (!tempSettings.fallbackPhone) {
-      alert('Fallback phone is required before enabling voice agent');
-      return;
-    }
-
     setSaving(true);
     setSaveError(null);
     try {
@@ -45,21 +44,6 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
       setSaveError(error instanceof Error ? error.message : 'Failed to save agent settings.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const getAnsweringModeLabel = (mode: AnsweringMode) => {
-    switch (mode) {
-      case 'off':
-        return 'Off';
-      case 'always_on':
-        return 'Always on';
-      case 'after_hours_only':
-        return 'After hours only';
-      case 'overflow_after_n_rings':
-        return `After ${tempSettings.overflowAfterRings} rings`;
-      case 'holiday_only':
-        return 'Holidays only';
     }
   };
 
@@ -77,9 +61,9 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-            <span className="text-sm font-semibold text-slate-600">Answering mode</span>
+            <span className="text-sm font-semibold text-slate-600">Agent language</span>
             <span className="text-sm font-bold text-slate-900">
-              {getAnsweringModeLabel(settings.answeringMode)}
+              {languageLabel(settings.language)}
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
@@ -89,10 +73,6 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
                 ? 'Pending confirmation'
                 : 'Auto confirmation'}
             </span>
-          </div>
-          <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-            <span className="text-sm font-semibold text-slate-600">Fallback phone</span>
-            <span className="text-sm font-bold text-slate-900">{settings.fallbackPhone}</span>
           </div>
         </div>
       </div>
@@ -124,12 +104,6 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-            <span className="text-sm font-semibold text-slate-600">Answering mode</span>
-            <span className="text-sm font-bold text-slate-900">
-              {getAnsweringModeLabel(settings.answeringMode)}
-            </span>
-          </div>
-          <div className="flex justify-between rounded-lg bg-slate-50 p-3">
             <span className="text-sm font-semibold text-slate-600">Booking mode</span>
             <span className="text-sm font-bold text-slate-900">
               {settings.bookingMode === 'pending_confirmation'
@@ -138,8 +112,10 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             </span>
           </div>
           <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-            <span className="text-sm font-semibold text-slate-600">Fallback phone</span>
-            <span className="text-sm font-bold text-slate-900">{settings.fallbackPhone}</span>
+            <span className="text-sm font-semibold text-slate-600">Agent language</span>
+            <span className="text-sm font-bold text-slate-900">
+              {languageLabel(settings.language)}
+            </span>
           </div>
           {!settings.onboardingComplete && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -172,47 +148,14 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-              Answering mode
-            </label>
-            <select
-              value={tempSettings.answeringMode}
-              onChange={(e) =>
-                setTempSettings({ ...tempSettings, answeringMode: e.target.value as AnsweringMode })
-              }
-              className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+            <label
+              htmlFor="agent-booking-mode"
+              className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
             >
-              <option value="off">Off</option>
-              <option value="always_on">Always on</option>
-              <option value="after_hours_only">After hours only</option>
-              <option value="overflow_after_n_rings">After N rings</option>
-              <option value="holiday_only">Holidays only</option>
-            </select>
-          </div>
-
-          {tempSettings.answeringMode === 'overflow_after_n_rings' && (
-            <div>
-              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Rings before overflow
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={tempSettings.overflowAfterRings}
-                onChange={(e) =>
-                  setTempSettings({ ...tempSettings, overflowAfterRings: parseInt(e.target.value) })
-                }
-                className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
               Booking mode
             </label>
             <select
+              id="agent-booking-mode"
               value={tempSettings.bookingMode}
               onChange={(e) =>
                 setTempSettings({ ...tempSettings, bookingMode: e.target.value as BookingMode })
@@ -225,22 +168,26 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-              Fallback phone *
+            <label
+              htmlFor="agent-language"
+              className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+            >
+              Agent language
             </label>
-            <input
-              type="tel"
-              value={tempSettings.fallbackPhone}
-              onChange={(e) => setTempSettings({ ...tempSettings, fallbackPhone: e.target.value })}
-              placeholder="+91 98765 43210"
+            <select
+              id="agent-language"
+              value={tempSettings.language}
+              onChange={(event) =>
+                setTempSettings({
+                  ...tempSettings,
+                  language: event.target.value as AgentLanguage,
+                })
+              }
               className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-              required
-            />
-            {!tempSettings.fallbackPhone && (
-              <p className="mt-1 text-xs text-red-600">
-                Fallback phone is required to enable voice agent
-              </p>
-            )}
+            >
+              <option value="ta_tanglish">Tanglish</option>
+              <option value="english">English</option>
+            </select>
           </div>
 
           <div className="flex gap-2">
@@ -249,7 +196,7 @@ export function AgentSettings({ settings, onUpdateSettings }: AgentSettingsProps
             )}
             <button
               onClick={() => void handleSave()}
-              disabled={!tempSettings.fallbackPhone || saving}
+              disabled={saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving…' : 'Save'}

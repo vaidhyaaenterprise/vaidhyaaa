@@ -5,10 +5,13 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchCallInbox, type CallInboxApiRow } from '@/lib/api/clinic-clinical';
 
-import type { Call, CallAction, CallFilters, CallOutcome } from './types';
+import type { Call, CallFilters, CallOutcome } from './types';
+import { CallDetailsPanel } from './CallDetailsPanel';
+
+const OUTCOME_FILTER_DEBOUNCE_MS = 250;
 
 const OUTCOME_OPTIONS: ReadonlyArray<{ value: CallOutcome; label: string }> = [
   { value: 'appointment_booked', label: 'Appointment booked' },
@@ -35,34 +38,12 @@ function mapOutcome(value: string | null): CallOutcome | null {
 }
 
 function matchesFilters(call: Call, filters: CallFilters): boolean {
-  if (filters.emergencyOnly && call.outcome !== 'emergency') return false;
-  if (filters.callbackOnly && call.outcome !== 'callback_requested') return false;
-  if (
-    filters.appointmentRequestOnly &&
-    ![
-      'appointment_booked',
-      'appointment_cancelled',
-      'appointment_rescheduled',
-    ].includes(call.outcome)
-  ) {
-    return false;
-  }
-  if (filters.actionNeeded && call.actionNeeded === 'none') return false;
   if (filters.outcomes.length > 0 && !filters.outcomes.includes(call.outcome)) return false;
   return true;
 }
 
-function mapAction(outcome: CallOutcome): CallAction {
-  switch (outcome) {
-    case 'appointment_booked':
-      return 'confirmation_needed';
-    case 'callback_requested':
-      return 'callback_needed';
-    case 'emergency':
-      return 'emergency_response';
-    default:
-      return 'none';
-  }
+function outcomesMatch(left: readonly CallOutcome[], right: readonly CallOutcome[]): boolean {
+  return left.length === right.length && left.every((outcome, index) => outcome === right[index]);
 }
 
 export function CallInboxPageContent() {
@@ -74,16 +55,16 @@ export function CallInboxPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [calls, setCalls] = useState<Call[]>([]);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
-  const [filters, setFilters] = useState<CallFilters>({
-    outcomes: [],
-    emergencyOnly: false,
-    callbackOnly: false,
-  });
+  const [filters, setFilters] = useState<CallFilters>({ outcomes: [] });
+  const [requestedOutcomes, setRequestedOutcomes] = useState<CallOutcome[]>([]);
   const [outcomeMenuOpen, setOutcomeMenuOpen] = useState(false);
   const outcomeMenuRef = useRef<HTMLDivElement>(null);
   const outcomeTriggerRef = useRef<HTMLButtonElement>(null);
   const requestSequence = useRef(0);
+  const activeLoadControllerRef = useRef<AbortController | null>(null);
   const loadedClinicRef = useRef<string | null>(null);
+  const selectedCallTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const closeCallDetails = useCallback(() => setSelectedCall(null), []);
 
   const mapCallRows = (rows: unknown): Call[] => {
     if (!Array.isArray(rows)) {
@@ -91,7 +72,9 @@ export function CallInboxPageContent() {
     }
 
     return rows
-      .filter((row): row is CallInboxApiRow => Boolean(row && typeof row === 'object' && 'id' in row))
+      .filter((row): row is CallInboxApiRow =>
+        Boolean(row && typeof row === 'object' && 'id' in row),
+      )
       .flatMap((row) => {
         const outcome = mapOutcome(row.outcome);
         if (!outcome) return [];
@@ -102,7 +85,6 @@ export function CallInboxPageContent() {
           duration: row.duration_seconds ?? 0,
           summary: row.summary ?? '',
           outcome,
-          actionNeeded: row.action_needed ?? mapAction(outcome),
           source: 'voice_bot',
         };
         if (row.source_status) {
@@ -123,6 +105,9 @@ export function CallInboxPageContent() {
         if (row.created_appointment_request_id) {
           call.linkedAppointmentId = row.created_appointment_request_id;
         }
+        if (row.appointment_start) {
+          call.linkedAppointmentStart = row.appointment_start;
+        }
         if (row.created_callback_request_id) {
           call.linkedCallbackId = row.created_callback_request_id;
         }
@@ -135,6 +120,8 @@ export function CallInboxPageContent() {
 
   const loadCalls = useCallback(async () => {
     const requestId = ++requestSequence.current;
+    activeLoadControllerRef.current?.abort();
+    activeLoadControllerRef.current = null;
     if (!isAdmin || !clinicId) {
       setCalls([]);
       setSelectedCall(null);
@@ -144,6 +131,8 @@ export function CallInboxPageContent() {
       setLoading(false);
       return;
     }
+    const controller = new AbortController();
+    activeLoadControllerRef.current = controller;
     if (loadedClinicRef.current !== clinicId) {
       setCalls([]);
       setSelectedCall(null);
@@ -151,8 +140,8 @@ export function CallInboxPageContent() {
     }
     setError(null);
     try {
-      const rows = await fetchCallInbox(clinicId, filters.outcomes);
-      if (requestId !== requestSequence.current) return;
+      const rows = await fetchCallInbox(clinicId, requestedOutcomes, controller.signal);
+      if (controller.signal.aborted || requestId !== requestSequence.current) return;
       const mapped = mapCallRows(rows);
       loadedClinicRef.current = clinicId;
       setCalls(mapped);
@@ -160,6 +149,7 @@ export function CallInboxPageContent() {
         current ? (mapped.find((call) => call.id === current.id) ?? null) : null,
       );
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
       if (requestId !== requestSequence.current) return;
       setError(
         err instanceof ApiRequestError
@@ -172,11 +162,31 @@ export function CallInboxPageContent() {
       if (requestId === requestSequence.current) {
         setLoading(false);
       }
+      if (activeLoadControllerRef.current === controller) {
+        activeLoadControllerRef.current = null;
+      }
     }
-  }, [isAdmin, clinicId, filters.outcomes]);
+  }, [isAdmin, clinicId, requestedOutcomes]);
+
+  useEffect(() => {
+    if (outcomesMatch(filters.outcomes, requestedOutcomes)) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRequestedOutcomes(filters.outcomes);
+    }, OUTCOME_FILTER_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [filters.outcomes, requestedOutcomes]);
 
   useEffect(() => {
     void loadCalls();
+    return () => {
+      requestSequence.current += 1;
+      activeLoadControllerRef.current?.abort();
+      activeLoadControllerRef.current = null;
+    };
   }, [loadCalls]);
 
   useEffect(() => {
@@ -211,7 +221,7 @@ export function CallInboxPageContent() {
       <>
         <PageHeader
           title="Call inbox"
-          description="Review call recordings and transcripts."
+          description="Review call outcomes and appointment details."
         />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Call inbox is admin-only.</p>
@@ -225,7 +235,7 @@ export function CallInboxPageContent() {
       <>
         <PageHeader
           title="Call inbox"
-          description="Review call recordings and transcripts."
+          description="Review call outcomes and appointment details."
         />
         <LoadingState title="Loading calls" description="Fetching call inbox from the API." />
       </>
@@ -237,7 +247,7 @@ export function CallInboxPageContent() {
       <>
         <PageHeader
           title="Call inbox"
-          description="Review call recordings and transcripts."
+          description="Review call outcomes and appointment details."
         />
         <ErrorState title="Could not load calls" description={error}>
           <button
@@ -255,35 +265,47 @@ export function CallInboxPageContent() {
   const getOutcomeBadge = (outcome: string, sourceStatus?: string) => {
     switch (outcome) {
       case 'appointment_booked':
-        return <span className="rounded-full border-2 border-green-300 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">Booked</span>;
+        return (
+          <span className="rounded-full border-2 border-green-300 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+            Booked
+          </span>
+        );
       case 'appointment_cancelled':
-        return <span className="rounded-full border-2 border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">{sourceStatus === 'pending' ? 'Cancellation requested' : 'Cancelled'}</span>;
+        return (
+          <span className="rounded-full border-2 border-rose-300 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
+            {sourceStatus === 'pending' ? 'Cancellation requested' : 'Cancelled'}
+          </span>
+        );
       case 'appointment_rescheduled':
-        return <span className="rounded-full border-2 border-violet-300 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">{sourceStatus === 'pending' ? 'Reschedule requested' : 'Rescheduled'}</span>;
+        return (
+          <span className="rounded-full border-2 border-violet-300 bg-violet-50 px-3 py-1 text-xs font-bold text-violet-700">
+            {sourceStatus === 'pending' ? 'Reschedule requested' : 'Rescheduled'}
+          </span>
+        );
       case 'callback_requested':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Callback</span>;
+        return (
+          <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+            Callback
+          </span>
+        );
       case 'emergency':
-        return <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">Emergency</span>;
+        return (
+          <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+            Emergency
+          </span>
+        );
       case 'general_inquiry':
-        return <span className="rounded-full border-2 border-blue-300 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">Inquiry</span>;
+        return (
+          <span className="rounded-full border-2 border-blue-300 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+            Inquiry
+          </span>
+        );
       default:
-        return <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">{outcome}</span>;
-    }
-  };
-
-  const getActionBadge = (action: string) => {
-    if (action === 'none') return null;
-    switch (action) {
-      case 'confirmation_needed':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Confirm</span>;
-      case 'appointment_action_needed':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Review</span>;
-      case 'callback_needed':
-        return <span className="rounded-full border-2 border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Callback</span>;
-      case 'emergency_response':
-        return <span className="rounded-full border-2 border-red-300 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">Emergency</span>;
-      default:
-        return <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">{action}</span>;
+        return (
+          <span className="rounded-full border-2 border-slate-300 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">
+            {outcome}
+          </span>
+        );
     }
   };
 
@@ -297,26 +319,19 @@ export function CallInboxPageContent() {
     return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  const formatDuration = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
+  const formatAppointmentDateTime = (value: string) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(value);
+    if (!match) return value;
 
-  const isRecordingExpired = (expiresAt?: string) => {
-    if (!expiresAt) return true;
-    return new Date(expiresAt) < new Date();
-  };
-
-  const isTranscriptExpired = (expiresAt?: string) => {
-    if (!expiresAt) return true;
-    return new Date(expiresAt) < new Date();
-  };
-
-  const handlePlayRecording = (call: Call) => {
-    if (call.recordingUrl) {
-      window.open(call.recordingUrl, '_blank', 'noopener,noreferrer');
-    }
+    const [, year, month, day, hour, minute] = match;
+    const monthLabel = new Intl.DateTimeFormat('en-IN', {
+      month: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+    const numericHour = Number(hour);
+    const suffix = numericHour >= 12 ? 'PM' : 'AM';
+    const displayHour = numericHour % 12 || 12;
+    return `${day} ${monthLabel} ${year} at ${displayHour}:${minute} ${suffix}`;
   };
 
   const filteredCalls = calls.filter((call) => matchesFilters(call, filters));
@@ -324,8 +339,8 @@ export function CallInboxPageContent() {
     filters.outcomes.length === 0
       ? 'All outcomes'
       : filters.outcomes.length === 1
-        ? OUTCOME_OPTIONS.find((option) => option.value === filters.outcomes[0])?.label ??
-          '1 outcome selected'
+        ? (OUTCOME_OPTIONS.find((option) => option.value === filters.outcomes[0])?.label ??
+          '1 outcome selected')
         : `${filters.outcomes.length} outcomes selected`;
 
   const toggleOutcome = (outcome: CallOutcome) => {
@@ -339,13 +354,10 @@ export function CallInboxPageContent() {
 
   return (
     <>
-      <PageHeader
-        title="Call inbox"
-        description="Review call recordings and transcripts."
-      />
+      <PageHeader title="Call inbox" description="Review call outcomes and appointment details." />
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3">
           <div ref={outcomeMenuRef} className="relative">
             <button
               ref={outcomeTriggerRef}
@@ -354,10 +366,25 @@ export function CallInboxPageContent() {
               aria-controls="call-inbox-outcome-menu"
               aria-expanded={outcomeMenuOpen}
               onClick={() => setOutcomeMenuOpen((open) => !open)}
-              className="flex min-w-48 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
+              className="flex min-h-12 min-w-48 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white py-2 pl-4 pr-3 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
             >
-              <span>{outcomeTriggerLabel}</span>
-              <span aria-hidden="true" className="text-slate-500">⌄</span>
+              <span className="truncate text-left">{outcomeTriggerLabel}</span>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                fill="none"
+                className={`h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200 ${
+                  outcomeMenuOpen ? 'rotate-180' : ''
+                }`}
+              >
+                <path
+                  d="m6 8 4 4 4-4"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
 
             {outcomeMenuOpen && (
@@ -394,182 +421,136 @@ export function CallInboxPageContent() {
               </div>
             )}
           </div>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.emergencyOnly}
-              onChange={(e) => setFilters({ ...filters, emergencyOnly: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Emergency only</span>
-          </label>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.callbackOnly}
-              onChange={(e) => setFilters({ ...filters, callbackOnly: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Callback only</span>
-          </label>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.appointmentRequestOnly}
-              onChange={(e) => setFilters({ ...filters, appointmentRequestOnly: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Appointment requests only</span>
-          </label>
-
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={filters.actionNeeded}
-              onChange={(e) => setFilters({ ...filters, actionNeeded: e.target.checked })}
-              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-            />
-            <span className="text-sm font-semibold text-slate-900">Action needed</span>
-          </label>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-lg font-bold text-slate-900">Call list</h3>
-          
-          {filteredCalls.length === 0 ? (
-            <p className="text-sm text-slate-500">No calls match the current filters</p>
-          ) : (
-            <div className="space-y-2">
-              {filteredCalls.map((call) => (
-                <div
-                  key={call.id}
-                  onClick={() => setSelectedCall(call)}
-                  className={`cursor-pointer rounded-xl border p-4 transition-colors ${
-                    selectedCall?.id === call.id
-                      ? 'border-teal-500 bg-teal-50'
-                      : 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <div className="mb-1 flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold text-slate-900">{formatTime(call.callTime)}</span>
-                        <span className="text-xs text-slate-500">{formatDate(call.callTime)}</span>
-                        <span className="text-xs text-slate-500">{formatDuration(call.duration)}</span>
-                      </div>
-                      <p className="text-sm text-slate-600">{call.callerPhone}</p>
-                      {call.patientName && (
-                        <p className="text-sm font-semibold text-slate-900">{call.patientName}</p>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      {getOutcomeBadge(call.outcome, call.sourceStatus)}
-                      {getActionBadge(call.actionNeeded)}
-                    </div>
-                  </div>
-                  <p className="text-xs text-slate-500">{call.summary}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-1 text-lg font-bold text-slate-900">Call list</h3>
+        <p className="mb-4 text-sm text-slate-500">Calls from the last 30 days.</p>
 
-        {selectedCall && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold text-slate-900">Call details</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Patient information</h4>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-sm font-semibold text-slate-900">{selectedCall.patientName || 'Unknown'}</p>
-                  <p className="text-sm text-slate-600">{selectedCall.callerPhone}</p>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Summary</h4>
-                <p className="text-sm text-slate-700">{selectedCall.summary}</p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Outcome</h4>
-                  {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
-                </div>
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Action needed</h4>
-                  {getActionBadge(selectedCall.actionNeeded) || <span className="text-sm text-slate-500">None</span>}
-                </div>
-              </div>
-
-              {selectedCall.linkedAppointmentId && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Linked appointment</h4>
-                  <p className="text-sm text-slate-700">{selectedCall.linkedAppointmentId}</p>
-                </div>
-              )}
-
-              {selectedCall.linkedCallbackId && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Linked callback</h4>
-                  <p className="text-sm text-slate-700">{selectedCall.linkedCallbackId}</p>
-                </div>
-              )}
-
-              {selectedCall.linkedEmergencyId && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Linked emergency</h4>
-                  <p className="text-sm text-slate-700">{selectedCall.linkedEmergencyId}</p>
-                </div>
-              )}
-
-              {selectedCall.intent && (
-                <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Intent/Source</h4>
-                  <p className="text-sm text-slate-700">{selectedCall.intent} · {selectedCall.source}</p>
-                </div>
-              )}
-
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Recording</h4>
-                {selectedCall.recordingUrl && !isRecordingExpired(selectedCall.recordingExpiresAt) ? (
-                  <div>
-                    <p className="mb-2 text-xs text-slate-500">Audio retained for 10 days</p>
-                    <button
-                      onClick={() => handlePlayRecording(selectedCall)}
-                      className="rounded-xl border-2 border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-700 hover:bg-teal-100"
-                    >
-                      ▶ Play recording
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Recording unavailable (expired or not available)</p>
-                )}
-              </div>
-
-              <div>
-                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">Transcript</h4>
-                {selectedCall.transcript && !isTranscriptExpired(selectedCall.transcriptExpiresAt) ? (
-                  <div>
-                    <p className="mb-2 text-xs text-slate-500">Transcript retained for 30 days</p>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedCall.transcript}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Transcript unavailable (expired or not available)</p>
-                )}
-              </div>
-            </div>
+        {filteredCalls.length === 0 ? (
+          <p className="text-sm text-slate-500">No calls in the last 30 days match the current filters.</p>
+        ) : (
+          <div className="space-y-2">
+            {filteredCalls.map((call) => (
+              <button
+                key={call.id}
+                type="button"
+                aria-haspopup="dialog"
+                aria-label={`View call details for ${call.patientName || call.callerPhone}, ${formatDate(call.callTime)} at ${formatTime(call.callTime)}`}
+                onClick={(event) => {
+                  selectedCallTriggerRef.current = event.currentTarget;
+                  setOutcomeMenuOpen(false);
+                  setSelectedCall(call);
+                }}
+                className={`block w-full rounded-xl border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2 ${
+                  selectedCall?.id === call.id
+                    ? 'border-teal-500 bg-teal-50'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                }`}
+              >
+                <span className="mb-2 flex items-start justify-between gap-3">
+                  <span className="min-w-0 flex-1">
+                    <span className="mb-1 flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">
+                        {formatTime(call.callTime)}
+                      </span>
+                      <span className="text-xs text-slate-500">{formatDate(call.callTime)}</span>
+                    </span>
+                    <span className="block text-sm text-slate-600">{call.callerPhone}</span>
+                    {call.patientName && (
+                      <span className="block text-sm font-semibold text-slate-900">
+                        {call.patientName}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex shrink-0 flex-col gap-1">
+                    {getOutcomeBadge(call.outcome, call.sourceStatus)}
+                  </span>
+                </span>
+                <span className="block break-words text-xs text-slate-500">{call.summary}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>
+
+      {selectedCall && (
+        <CallDetailsPanel
+          key={selectedCall.id}
+          callTimeLabel={`${formatDate(selectedCall.callTime)} at ${formatTime(selectedCall.callTime)}`}
+          returnFocusTo={selectedCallTriggerRef.current}
+          onClose={closeCallDetails}
+        >
+          <div className="space-y-4">
+            <div>
+              <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                Patient information
+              </h4>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  {selectedCall.patientName || 'Unknown'}
+                </p>
+                <p className="text-sm text-slate-600">{selectedCall.callerPhone}</p>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                Summary
+              </h4>
+              <p className="text-sm text-slate-700">{selectedCall.summary}</p>
+            </div>
+
+            <div>
+              <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                Outcome
+              </h4>
+              {getOutcomeBadge(selectedCall.outcome, selectedCall.sourceStatus)}
+            </div>
+
+            {selectedCall.linkedAppointmentStart && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Appointment date and time
+                </h4>
+                <p className="text-sm font-semibold text-slate-700">
+                  {formatAppointmentDateTime(selectedCall.linkedAppointmentStart)}
+                </p>
+              </div>
+            )}
+
+            {selectedCall.linkedCallbackId && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Linked callback
+                </h4>
+                <p className="text-sm text-slate-700">{selectedCall.linkedCallbackId}</p>
+              </div>
+            )}
+
+            {selectedCall.linkedEmergencyId && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Linked emergency
+                </h4>
+                <p className="text-sm text-slate-700">{selectedCall.linkedEmergencyId}</p>
+              </div>
+            )}
+
+            {selectedCall.intent && (
+              <div>
+                <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  Intent/Source
+                </h4>
+                <p className="text-sm text-slate-700">
+                  {selectedCall.intent} · {selectedCall.source}
+                </p>
+              </div>
+            )}
+          </div>
+        </CallDetailsPanel>
+      )}
     </>
   );
 }

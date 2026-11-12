@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { AppError } from '@vaidya/shared';
 
 import {
   appointmentRequests,
@@ -28,6 +29,7 @@ export type AppointmentListItem = {
   routing_source: string | null;
   source: 'agent' | 'manual';
   status: string;
+  created_at: string;
   has_history: boolean;
   visit_reason?: string | null;
   examination_notes?: string | null;
@@ -59,6 +61,33 @@ export type AppointmentAvailableSlotItem = {
   appointment_end: string;
   available_count: number;
 };
+
+export type AppointmentActivityItem = {
+  id: string;
+  appointment_id: string;
+  patient_name: string;
+  patient_phone: string | null;
+  doctor_id: string;
+  doctor_name: string;
+  clinic_service_id: string;
+  service_name: string;
+  reason_for_visit: string;
+  action_type: 'reschedule' | 'cancel';
+  occurred_at: string;
+  previous_appointment_start: string | null;
+  previous_appointment_end: string | null;
+  appointment_start: string;
+  appointment_end: string;
+};
+
+function readJsonString(value: unknown, key: string): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === 'string' ? candidate : null;
+}
 
 function slotDatePart(value: string): string {
   const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
@@ -139,6 +168,7 @@ export class AppointmentsService {
         routing_source: row.routingSource,
         source: row.createdByUserId ? ('manual' as const) : ('agent' as const),
         status: row.status,
+        created_at: row.createdAt.toISOString(),
         has_history: false,
         ...(visit ? { visit_reason: visit.reasonForVisit } : {}),
         ...(visit?.examinationNotes !== undefined
@@ -189,6 +219,29 @@ export class AppointmentsService {
     return results;
   }
 
+  async listAppointmentActivities(clinicId: string): Promise<AppointmentActivityItem[]> {
+    const rows =
+      await this.repos.appointmentLifecycle.listClinicAdminAppointmentActivities(clinicId);
+
+    return rows.map((row) => ({
+      id: row.id,
+      appointment_id: row.appointmentId,
+      patient_name: row.patientName,
+      patient_phone: row.patientPhone,
+      doctor_id: row.doctorId,
+      doctor_name: row.doctorName,
+      clinic_service_id: row.clinicServiceId,
+      service_name: row.serviceName,
+      reason_for_visit: row.reasonForVisit,
+      action_type: row.eventType === 'appointment.rescheduled' ? 'reschedule' : 'cancel',
+      occurred_at: row.occurredAt.toISOString(),
+      previous_appointment_start: readJsonString(row.oldValuesJson, 'appointment_start'),
+      previous_appointment_end: readJsonString(row.oldValuesJson, 'appointment_end'),
+      appointment_start: row.appointmentStart,
+      appointment_end: row.appointmentEnd,
+    }));
+  }
+
   async listAvailableSlots(input: {
     clinicId: string;
     doctorId: string;
@@ -216,8 +269,13 @@ export class AppointmentsService {
     );
 
     let rows = mapSlotsForDate(slots);
-
-    if (rows.length === 0) {
+    const hasStaleSlots = await this.repos.slots.hasStaleOpenSlotsForDate(
+      input.clinicId,
+      input.doctorId,
+      input.clinicServiceId,
+      input.date,
+    );
+    if (rows.length === 0 || hasStaleSlots) {
       const [timezoneRow] = await this.repos.slots.findClinicTimezone(input.clinicId);
       const clinicToday = formatDateInTimezone(new Date(), timezoneRow?.timezone ?? 'Asia/Kolkata');
 
@@ -229,9 +287,9 @@ export class AppointmentsService {
           input.date,
         );
 
-        // A full day has slot rows but no remaining capacity. Regeneration cannot
-        // create capacity and is intentionally limited to genuinely missing dates.
-        if (existingSlotsForDate.length === 0) {
+        // A fully booked valid day must not be regenerated to create capacity.
+        // Repair missing dates and unoccupied rows left by an older configuration.
+        if (existingSlotsForDate.length === 0 || hasStaleSlots) {
           try {
             await this.slotGenerationService.generateSlots({
               clinicId: input.clinicId,
@@ -246,8 +304,12 @@ export class AppointmentsService {
               input.date,
             );
             rows = mapSlotsForDate(slots);
-          } catch {
-            rows = mapSlotsForDate(slots);
+          } catch (error) {
+            if (error instanceof AppError) throw error;
+            throw new AppError(
+              'SLOT_UPDATE_FAILED',
+              'Appointment slots could not be refreshed. Retry the slot update in Clinic setup → Booking rules.',
+            );
           }
         }
       }

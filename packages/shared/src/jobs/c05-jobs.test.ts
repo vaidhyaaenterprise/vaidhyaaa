@@ -44,6 +44,21 @@ describe('C05 job foundation contracts', () => {
     expect(payload.clinic_id).toBe(CLINIC_ID);
   });
 
+  it('validates call cleanup without accepting a configurable retention period', () => {
+    expect(validateJobPayload(JOB_TYPES.CLEANUP_EXPIRED_CALLS, {})).toEqual({});
+    expect(
+      validateJobPayload(JOB_TYPES.CLEANUP_EXPIRED_CALLS, {
+        clinic_id: CLINIC_ID,
+        retention_days: 1,
+      }),
+    ).toEqual({ clinic_id: CLINIC_ID });
+    expect(() =>
+      validateJobPayload(JOB_TYPES.CLEANUP_EXPIRED_CALLS, {
+        clinic_id: 'invalid-clinic',
+      }),
+    ).toThrow(AppError);
+  });
+
   it('rejects invalid job payload safely', () => {
     expect(() =>
       validateJobPayload(JOB_TYPES.SEND_NOTIFICATION, {

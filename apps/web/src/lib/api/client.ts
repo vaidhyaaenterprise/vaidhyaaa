@@ -37,7 +37,15 @@ const MAX_RETRY_DELAY_MS = 1_000;
 const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const SERVICE_UNAVAILABLE_MESSAGE =
   'The service is temporarily unavailable. Please try again shortly.';
-const pendingGetRequests = new Map<string, Promise<unknown>>();
+type PendingGetRequest<T> = {
+  key: string;
+  request: Promise<T>;
+  controller: AbortController;
+  activeConsumers: number;
+  settled: boolean;
+};
+
+const pendingGetRequests = new Map<string, PendingGetRequest<unknown>>();
 
 export type ApiRequestPolicy = {
   /**
@@ -47,8 +55,23 @@ export type ApiRequestPolicy = {
   retryTransient?: boolean;
 };
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(createAbortError());
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', handleAbort);
+      resolve();
+    }, milliseconds);
+    const handleAbort = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', handleAbort);
+      reject(createAbortError());
+    };
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  });
 }
 
 function retryDelay(response: Response | null, attempt: number): number {
@@ -59,7 +82,7 @@ function retryDelay(response: Response | null, attempt: number): number {
   return Math.min(GET_RETRY_DELAY_MS * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
 }
 
-function isAbortError(error: unknown): boolean {
+export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
@@ -107,11 +130,85 @@ function getRequestKey(path: string): string {
     authHeaders.Authorization ?? '',
     authHeaders['x-dev-user-id'] ?? '',
     authHeaders['x-dev-clinic-id'] ?? '',
+    authHeaders['x-dev-user-role'] ?? '',
+    authHeaders['x-dev-doctor-id'] ?? '',
   ].join('|');
 }
 
 function clearPendingGetRequests(): void {
   pendingGetRequests.clear();
+}
+
+function createAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('The operation was aborted.', 'AbortError');
+  }
+
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function settlePendingGetRequest<T>(entry: PendingGetRequest<T>): void {
+  entry.settled = true;
+  if (pendingGetRequests.get(entry.key) === entry) {
+    pendingGetRequests.delete(entry.key);
+  }
+}
+
+function attachGetConsumer<T>(entry: PendingGetRequest<T>, signal?: AbortSignal): Promise<T> {
+  entry.activeConsumers += 1;
+
+  return new Promise<T>((resolve, reject) => {
+    let completed = false;
+
+    const complete = () => {
+      if (completed) {
+        return false;
+      }
+      completed = true;
+      entry.activeConsumers -= 1;
+      signal?.removeEventListener('abort', handleAbort);
+      return true;
+    };
+
+    const handleAbort = () => {
+      if (!complete()) {
+        return;
+      }
+
+      reject(createAbortError());
+
+      if (!entry.settled && entry.activeConsumers === 0) {
+        // A caller arriving after every existing consumer has cancelled must get
+        // a fresh request instead of attaching to an underlying fetch that is
+        // already being aborted. The identity check protects a newer request
+        // created after a mutation invalidated the deduplication map.
+        if (pendingGetRequests.get(entry.key) === entry) {
+          pendingGetRequests.delete(entry.key);
+        }
+        entry.controller.abort();
+      }
+    };
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+    if (signal?.aborted) {
+      handleAbort();
+    }
+
+    void entry.request.then(
+      (value) => {
+        if (complete()) {
+          resolve(value);
+        }
+      },
+      (error: unknown) => {
+        if (complete()) {
+          reject(error);
+        }
+      },
+    );
+  });
 }
 
 export class ApiRequestError extends Error {
@@ -229,7 +326,7 @@ export async function apiRequest<T>(
       }
       if (error instanceof ApiRequestTimeoutError) {
         if (attempt < maximumAttempts) {
-          await delay(retryDelay(null, attempt));
+          await delay(retryDelay(null, attempt), options.signal ?? undefined);
           continue;
         }
         throw new ApiRequestError({
@@ -241,7 +338,7 @@ export async function apiRequest<T>(
         throw error;
       }
       if (attempt < maximumAttempts) {
-        await delay(retryDelay(null, attempt));
+        await delay(retryDelay(null, attempt), options.signal ?? undefined);
         continue;
       }
       throw new ApiRequestError({
@@ -256,7 +353,7 @@ export async function apiRequest<T>(
       } catch {
         // Releasing a retryable response body is best-effort only.
       }
-      await delay(retryDelay(response, attempt));
+      await delay(retryDelay(response, attempt), options.signal ?? undefined);
       continue;
     }
     break;
@@ -272,25 +369,32 @@ export async function apiRequest<T>(
   return parseResponse<T>(response);
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const key = getRequestKey(path);
-  const existing = pendingGetRequests.get(key) as Promise<T> | undefined;
-  if (existing) {
-    return existing;
+export function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) {
+    return Promise.reject(createAbortError());
   }
 
-  const request = apiRequest<T>(path, { method: 'GET' });
-  const removeWhenCurrent = () => {
-    // A mutation clears the map so a fresh post-mutation read can start. Do
-    // not let the older read remove that newer in-flight request when it later
-    // settles, otherwise subsequent callers create duplicate API traffic.
-    if (pendingGetRequests.get(key) === request) {
-      pendingGetRequests.delete(key);
-    }
+  const key = getRequestKey(path);
+  const existing = pendingGetRequests.get(key) as PendingGetRequest<T> | undefined;
+  if (existing) {
+    return attachGetConsumer(existing, signal);
+  }
+
+  const controller = new AbortController();
+  const request = apiRequest<T>(path, { method: 'GET', signal: controller.signal });
+  const entry: PendingGetRequest<T> = {
+    key,
+    request,
+    controller,
+    activeConsumers: 0,
+    settled: false,
   };
-  pendingGetRequests.set(key, request);
-  void request.then(removeWhenCurrent, removeWhenCurrent);
-  return request;
+  pendingGetRequests.set(key, entry);
+  void request.then(
+    () => settlePendingGetRequest(entry),
+    () => settlePendingGetRequest(entry),
+  );
+  return attachGetConsumer(entry, signal);
 }
 
 export async function apiPost<T>(

@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MIN_SLOT_DURATION_MINUTES } from '@vaidya/shared';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { DigitsInput } from '@/components/ui/DigitsInput';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
 import {
@@ -16,6 +18,9 @@ import {
 import { previewBookingRuleChange } from '@/lib/api/clinic-subscription';
 import { conflictsFromApiError, formatScheduleConflicts } from '@/lib/api/conflict-helpers';
 import { fetchClinicSettings, patchClinicSettings } from '@/lib/api/clinic-settings';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { ScheduleConflictPanel } from './ScheduleConflictPanel';
+import { SlotUpdateStatus } from './SlotUpdateStatus';
 
 type DoctorScopedBookingRules = {
   ruleIds: string[];
@@ -23,9 +28,6 @@ type DoctorScopedBookingRules = {
   doctorName: string;
   slotDurationMinutes: number;
   capacityPerSlot: number;
-  bookingHorizonDays: number;
-  manualEditCutoffBeforeStartMinutes: number;
-  manualEditMaxShiftMinutes: number;
   effectiveFrom: string | null;
   allowDoctorServiceEdit: boolean;
 };
@@ -34,6 +36,16 @@ type ConflictModalState = {
   implementFrom: string;
   conflicts: string[];
   patch: BookingRulePatchPayload;
+};
+
+const NUMERIC_RULE_FIELDS = [
+  ['slotDurationMinutes', 'Slot duration', MIN_SLOT_DURATION_MINUTES, 120],
+  ['capacityPerSlot', 'Capacity per slot', 1, 10],
+] as const;
+
+type NumericRuleField = (typeof NUMERIC_RULE_FIELDS)[number][0];
+type EditableBookingRules = Omit<DoctorScopedBookingRules, NumericRuleField> & {
+  [Field in NumericRuleField]: number | string;
 };
 
 function toScopedRules(
@@ -48,9 +60,6 @@ function toScopedRules(
     doctorName,
     slotDurationMinutes: row.slot_duration_minutes,
     capacityPerSlot: row.capacity_per_slot,
-    bookingHorizonDays: row.booking_horizon_days,
-    manualEditCutoffBeforeStartMinutes: row.manual_edit_cutoff_before_start_minutes,
-    manualEditMaxShiftMinutes: row.manual_edit_max_shift_minutes,
     effectiveFrom: row.effective_from ?? null,
     allowDoctorServiceEdit,
   };
@@ -93,15 +102,6 @@ function buildRulePatch(
   if (next.capacityPerSlot !== current.capacityPerSlot) {
     patch.capacity_per_slot = next.capacityPerSlot;
   }
-  if (next.bookingHorizonDays !== current.bookingHorizonDays) {
-    patch.booking_horizon_days = next.bookingHorizonDays;
-  }
-  if (next.manualEditCutoffBeforeStartMinutes !== current.manualEditCutoffBeforeStartMinutes) {
-    patch.manual_edit_cutoff_before_start_minutes = next.manualEditCutoffBeforeStartMinutes;
-  }
-  if (next.manualEditMaxShiftMinutes !== current.manualEditMaxShiftMinutes) {
-    patch.manual_edit_max_shift_minutes = next.manualEditMaxShiftMinutes;
-  }
 
   return patch;
 }
@@ -124,23 +124,25 @@ export function BookingRules() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [doctorRows, setDoctorRows] = useState<DoctorApiRow[]>([]);
   const [ruleRows, setRuleRows] = useState<BookingRuleApiRow[]>([]);
   const [allowDoctorServiceEdit, setAllowDoctorServiceEdit] = useState(false);
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [rules, setRules] = useState<DoctorScopedBookingRules | null>(null);
-  const [tempRules, setTempRules] = useState<DoctorScopedBookingRules | null>(null);
+  const [tempRules, setTempRules] = useState<EditableBookingRules | null>(null);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [conflictModal, setConflictModal] = useState<ConflictModalState | null>(null);
   const [applyingImplementFrom, setApplyingImplementFrom] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [slotStatusRefresh, setSlotStatusRefresh] = useState(0);
 
   const myDoctorId = useMemo(
     () =>
-      me?.clinics.find((clinic) => clinic.role === 'doctor')?.doctor_id ??
-      me?.clinics[0]?.doctor_id ??
-      null,
-    [me],
+      me?.clinics.find(
+        (clinic) => clinic.clinic_id === clinicId && clinic.role === 'doctor' && clinic.active,
+      )?.doctor_id ?? null,
+    [clinicId, me],
   );
 
   const doctorNameById = useMemo(() => {
@@ -166,7 +168,17 @@ export function BookingRules() {
 
     for (const [doctorId, rows] of map.entries()) {
       rows.sort((a, b) => (b.version ?? 1) - (a.version ?? 1));
-      map.set(doctorId, rows);
+      // Earlier effective versions remain active for their date ranges, but
+      // only the latest configuration of each service is editable here.
+      const seenServices = new Set<string>();
+      map.set(
+        doctorId,
+        rows.filter((row) => {
+          if (seenServices.has(row.clinic_service_id)) return false;
+          seenServices.add(row.clinic_service_id);
+          return true;
+        }),
+      );
     }
 
     return map;
@@ -176,13 +188,24 @@ export function BookingRules() {
     () =>
       doctorRows
         .filter((doctor) => doctor.active)
+        .filter((doctor) => isAdmin || doctor.id === myDoctorId)
         .filter((doctor) => (rulesByDoctor.get(doctor.id)?.length ?? 0) > 0),
-    [doctorRows, rulesByDoctor],
+    [doctorRows, isAdmin, myDoctorId, rulesByDoctor],
   );
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
 
   const loadRules = useCallback(async () => {
+    const request = beginLoad();
+    if (!request) {
+      return;
+    }
     if (!clinicId) {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setRuleRows([]);
+        setDoctorRows([]);
+        setAllowDoctorServiceEdit(false);
+        setLoading(false);
+      }
       return;
     }
 
@@ -190,27 +213,45 @@ export function BookingRules() {
     setError(null);
 
     try {
+      const settingsRequest = isAdmin
+        ? fetchClinicSettings(clinicId, request.signal)
+        : Promise.resolve(null);
       const [bookingRules, settings, doctors] = await Promise.all([
-        fetchBookingRules(clinicId),
-        fetchClinicSettings(clinicId),
-        fetchDoctors(clinicId),
+        fetchBookingRules(clinicId, request.signal),
+        settingsRequest,
+        fetchDoctors(clinicId, request.signal),
       ]);
+      if (!request.isCurrent()) {
+        return;
+      }
 
       setRuleRows(bookingRules);
-      setAllowDoctorServiceEdit(settings.allow_doctor_service_edit);
+      setAllowDoctorServiceEdit(settings?.allow_doctor_service_edit ?? false);
       setDoctorRows(doctors);
     } catch (err) {
+      if (!request.isCurrent() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load booking rules.',
       );
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [clinicId]);
+  }, [beginLoad, clinicId, isAdmin]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setConflicts([]);
+    setConflictModal(null);
+    setError(null);
+    setSaving(false);
+    setApplyingImplementFrom(false);
     void loadRules();
-  }, [loadRules]);
+    return cancelLoad;
+  }, [cancelLoad, loadRules]);
 
   useEffect(() => {
     if (availableDoctors.length === 0) {
@@ -227,7 +268,7 @@ export function BookingRules() {
         : (availableDoctors[0]?.id ?? '')
       : myDoctorId && availableDoctorIds.has(myDoctorId)
         ? myDoctorId
-        : (availableDoctors[0]?.id ?? '');
+        : '';
 
     if (preferredDoctorId !== selectedDoctorId) {
       setSelectedDoctorId(preferredDoctorId);
@@ -271,6 +312,7 @@ export function BookingRules() {
   ]);
 
   const handleEdit = () => {
+    setNotice(null);
     if (!rules) {
       return;
     }
@@ -282,26 +324,32 @@ export function BookingRules() {
 
   const handleCancel = () => {
     setIsEditing(false);
+    setError(null);
     setConflicts([]);
     setConflictModal(null);
     setTempRules(rules);
   };
 
   const applyChanges = async (patch: BookingRulePatchPayload, implementFrom?: string) => {
-    if (!clinicId || !rules || !tempRules) {
+    if (!clinicId || !rules || !tempRules || !isActive()) {
       return;
     }
 
-    let updatedRules: BookingRuleApiRow[] = [];
+    const updatedRules: BookingRuleApiRow[] = [];
     if (Object.keys(patch).length > 0) {
-      updatedRules = await Promise.all(
-        rules.ruleIds.map((ruleId) =>
-          patchBookingRule(clinicId, ruleId, {
-            ...patch,
-            ...(implementFrom ? { implement_from: implementFrom } : {}),
-          }),
-        ),
-      );
+      for (const ruleId of rules.ruleIds) {
+        if (!isActive()) {
+          return;
+        }
+        const updatedRule = await patchBookingRule(clinicId, ruleId, {
+          ...patch,
+          ...(implementFrom ? { implement_from: implementFrom } : {}),
+        });
+        if (!isActive()) {
+          return;
+        }
+        updatedRules.push(updatedRule);
+      }
       const updatedById = new Map(updatedRules.map((row) => [row.id, row]));
       setRuleRows((current) =>
         current.map((row) => {
@@ -312,23 +360,46 @@ export function BookingRules() {
     }
 
     if (tempRules.allowDoctorServiceEdit !== rules.allowDoctorServiceEdit) {
+      if (!isActive()) {
+        return;
+      }
       await patchClinicSettings(clinicId, {
         allow_doctor_service_edit: tempRules.allowDoctorServiceEdit,
       });
+      if (!isActive()) {
+        return;
+      }
       setAllowDoctorServiceEdit(tempRules.allowDoctorServiceEdit);
     }
 
+    if (!isActive()) {
+      return;
+    }
     setIsEditing(false);
     setConflicts([]);
     setConflictModal(null);
+    setNotice('Booking rules saved.');
+    setSlotStatusRefresh((value) => value + 1);
   };
 
   const handleSave = async () => {
-    if (!clinicId || !rules || !tempRules) {
+    if (!clinicId || !rules || !tempRules || !isActive()) {
       return;
     }
 
-    const patch = buildRulePatch(rules, tempRules);
+    for (const [field, label, minimum, maximum] of NUMERIC_RULE_FIELDS) {
+      const value = tempRules[field];
+      const parsed = Number(value);
+      if (value === '' || !Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+        setError(`${label} must be a number between ${minimum} and ${maximum}.`);
+        return;
+      }
+    }
+    const patch = buildRulePatch(rules, {
+      ...tempRules,
+      slotDurationMinutes: Number(tempRules.slotDurationMinutes),
+      capacityPerSlot: Number(tempRules.capacityPerSlot),
+    });
     const capacityOrDurationChanged =
       patch.capacity_per_slot !== undefined || patch.slot_duration_minutes !== undefined;
 
@@ -336,18 +407,24 @@ export function BookingRules() {
     setError(null);
     try {
       if (capacityOrDurationChanged) {
-        const previews = await Promise.all(
-          rules.ruleIds.map((ruleId) =>
-            previewBookingRuleChange(clinicId, ruleId, {
-              ...(patch.capacity_per_slot !== undefined
-                ? { capacity_per_slot: patch.capacity_per_slot }
-                : {}),
-              ...(patch.slot_duration_minutes !== undefined
-                ? { slot_duration_minutes: patch.slot_duration_minutes }
-                : {}),
-            }),
-          ),
-        );
+        const previews: Awaited<ReturnType<typeof previewBookingRuleChange>>[] = [];
+        for (const ruleId of rules.ruleIds) {
+          if (!isActive()) {
+            return;
+          }
+          const preview = await previewBookingRuleChange(clinicId, ruleId, {
+            ...(patch.capacity_per_slot !== undefined
+              ? { capacity_per_slot: patch.capacity_per_slot }
+              : {}),
+            ...(patch.slot_duration_minutes !== undefined
+              ? { slot_duration_minutes: patch.slot_duration_minutes }
+              : {}),
+          });
+          if (!isActive()) {
+            return;
+          }
+          previews.push(preview);
+        }
 
         const hasBlocked = previews.some((preview) => preview.blocked);
         if (hasBlocked) {
@@ -375,6 +452,9 @@ export function BookingRules() {
 
       await applyChanges(patch);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -383,12 +463,14 @@ export function BookingRules() {
 
       setError(err instanceof Error ? err.message : 'Failed to save booking rules.');
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
   };
 
   const handleImplementFrom = async () => {
-    if (!conflictModal || !tempRules) {
+    if (!conflictModal || !tempRules || !isActive()) {
       return;
     }
 
@@ -396,6 +478,9 @@ export function BookingRules() {
     try {
       await applyChanges(conflictModal.patch, conflictModal.implementFrom);
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -404,7 +489,9 @@ export function BookingRules() {
       }
       setConflictModal(null);
     } finally {
-      setApplyingImplementFrom(false);
+      if (isActive()) {
+        setApplyingImplementFrom(false);
+      }
     }
   };
 
@@ -417,15 +504,15 @@ export function BookingRules() {
 
   if (loading) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading booking rules" description="Fetching from the API." />
       </div>
     );
   }
 
-  if (error) {
+  if (error && !isEditing) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load booking rules" description={error}>
           <button
             type="button"
@@ -441,7 +528,7 @@ export function BookingRules() {
 
   if (!rules || !tempRules) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-3 text-lg font-bold text-slate-900">Booking rules</h3>
         <p className="text-sm text-slate-500">No active doctor-specific booking rule found.</p>
       </div>
@@ -450,8 +537,8 @@ export function BookingRules() {
 
   return (
     <>
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Booking rules</h3>
           {isAdmin && !isEditing && (
             <button
@@ -487,169 +574,104 @@ export function BookingRules() {
           </div>
         )}
 
+        {notice && (
+          <p role="status" className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800">
+            {notice}
+          </p>
+        )}
+        {clinicId && selectedDoctorId && (
+          <SlotUpdateStatus
+            key={`${clinicId}:${selectedDoctorId}`}
+            clinicId={clinicId}
+            doctorId={selectedDoctorId}
+            canRetry={isAdmin}
+            refreshKey={slotStatusRefresh}
+          />
+        )}
         {!isEditing ? (
           <div className="space-y-3">
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Doctor</span>
-              <span className="text-sm font-bold text-slate-900">{rules.doctorName}</span>
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
+                {rules.doctorName}
+              </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Slot duration</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.slotDurationMinutes} minutes
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Capacity per slot</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.capacityPerSlot} patient(s)
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-              <span className="text-sm font-semibold text-slate-600">Booking horizon</span>
-              <span className="text-sm font-bold text-slate-900">
-                {rules.bookingHorizonDays} days
-              </span>
-            </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-              <span className="text-sm font-semibold text-slate-600">Edit cutoff</span>
-              <span className="text-sm font-bold text-slate-900">
-                {rules.manualEditCutoffBeforeStartMinutes} minutes before start
-              </span>
-            </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-              <span className="text-sm font-semibold text-slate-600">Max edit shift</span>
-              <span className="text-sm font-bold text-slate-900">
-                {rules.manualEditMaxShiftMinutes} minutes
-              </span>
-            </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
+            <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
               <span className="text-sm font-semibold text-slate-600">Effective from</span>
-              <span className="text-sm font-bold text-slate-900">
+              <span className="min-w-0 break-words text-sm font-bold text-slate-900 sm:text-right">
                 {rules.effectiveFrom ?? 'Today'}
               </span>
             </div>
-            <div className="flex justify-between rounded-lg bg-slate-50 p-3">
-              <span className="text-sm font-semibold text-slate-600">Doctor service edit</span>
-              <span
-                className={`text-sm font-bold ${rules.allowDoctorServiceEdit ? 'text-green-600' : 'text-slate-500'}`}
-              >
-                {rules.allowDoctorServiceEdit ? 'Enabled' : 'Disabled'}
-              </span>
-            </div>
+            {isAdmin && (
+              <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                <span className="text-sm font-semibold text-slate-600">Doctor service edit</span>
+                <span
+                  className={`min-w-0 break-words text-sm font-bold sm:text-right ${rules.allowDoctorServiceEdit ? 'text-green-600' : 'text-slate-500'}`}
+                >
+                  {rules.allowDoctorServiceEdit ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
-            {conflicts.length > 0 && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                <h4 className="mb-2 text-sm font-bold text-red-800">Conflicts detected</h4>
-                <ul className="space-y-1 text-sm text-red-700">
-                  {conflicts.map((conflict, idx) => (
-                    <li key={idx}>- {conflict}</li>
-                  ))}
-                </ul>
-              </div>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700"
+              >
+                {error}
+              </p>
             )}
+            <ScheduleConflictPanel conflicts={conflicts} />
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-slot-duration"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Slot duration (minutes)
                 </label>
-                <input
-                  type="number"
-                  min="5"
+                <DigitsInput
+                  id="rule-slot-duration"
+                  min={MIN_SLOT_DURATION_MINUTES}
                   max="120"
                   step="5"
                   value={tempRules.slotDurationMinutes}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({ ...tempRules, slotDurationMinutes: value });
                   }}
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />
+                <p className="mt-1 text-xs text-slate-500">Minimum 15 minutes.</p>
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                <label
+                  htmlFor="rule-capacity"
+                  className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500"
+                >
                   Capacity per slot
                 </label>
-                <input
-                  type="number"
+                <DigitsInput
+                  id="rule-capacity"
                   min="1"
                   max="10"
                   value={tempRules.capacityPerSlot}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
+                  onValueChange={(value) => {
                     setTempRules({ ...tempRules, capacityPerSlot: value });
-                  }}
-                  className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Booking horizon (days)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="365"
-                  value={tempRules.bookingHorizonDays}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
-                    setTempRules({ ...tempRules, bookingHorizonDays: value });
-                  }}
-                  className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Edit cutoff (minutes before start)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1440"
-                  value={tempRules.manualEditCutoffBeforeStartMinutes}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
-                    setTempRules({
-                      ...tempRules,
-                      manualEditCutoffBeforeStartMinutes: value,
-                    });
-                  }}
-                  className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Max edit shift (minutes)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1440"
-                  value={tempRules.manualEditMaxShiftMinutes}
-                  onChange={(event) => {
-                    const value = Number.parseInt(event.target.value, 10);
-                    if (Number.isNaN(value)) {
-                      return;
-                    }
-                    setTempRules({
-                      ...tempRules,
-                      manualEditMaxShiftMinutes: value,
-                    });
                   }}
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />

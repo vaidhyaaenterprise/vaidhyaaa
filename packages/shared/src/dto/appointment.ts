@@ -54,7 +54,7 @@ export const createAppointmentRequestSchema = z.object({
 });
 
 export const manualAppointmentCreateSchema = createAppointmentRequestSchema.extend({
-  patient_phone: z.string().min(8),
+  patient_phone: z.string().regex(/^[0-9]{10}$/, 'Enter a 10-digit patient phone number without a country code.'),
   patient_age: z.number().int().min(0).max(130),
   patient_date_of_birth: dateSchema.optional(),
   override_reason: z.string().min(1).optional(),
@@ -72,6 +72,10 @@ export const rescheduleAppointmentSchema = z.object({
   new_slot_id: uuidSchema,
 });
 
+export const updateAppointmentPatientNameSchema = z.object({
+  patient_name: z.string().trim().min(2).max(120),
+});
+
 export const patchAppointmentRequestSchema = z.object({
   status: appointmentStatusSchema.optional(),
   reason_for_visit: z.string().min(1).optional(),
@@ -84,4 +88,7 @@ export type CreateAppointmentRequestInput = z.infer<typeof createAppointmentRequ
 export type ManualAppointmentCreateInput = z.infer<typeof manualAppointmentCreateSchema>;
 export type MarkAppointmentVisitedInput = z.infer<typeof markAppointmentVisitedSchema>;
 export type RescheduleAppointmentInput = z.infer<typeof rescheduleAppointmentSchema>;
+export type UpdateAppointmentPatientNameInput = z.infer<
+  typeof updateAppointmentPatientNameSchema
+>;
 export type PatchAppointmentRequestInput = z.infer<typeof patchAppointmentRequestSchema>;

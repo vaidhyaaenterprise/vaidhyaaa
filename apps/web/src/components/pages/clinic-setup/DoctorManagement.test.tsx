@@ -10,6 +10,7 @@ import {
   fetchDoctorServices,
   fetchDoctors,
   fetchServices,
+  patchDoctor,
   patchDoctorService,
   patchService,
 } from '@/lib/api/clinic-clinical';
@@ -36,6 +37,7 @@ vi.mock('@/lib/api/clinic-clinical', () => ({
   fetchDoctorServices: vi.fn(),
   fetchDoctors: vi.fn(),
   fetchServices: vi.fn(),
+  patchDoctor: vi.fn(),
   patchDoctorService: vi.fn(),
   patchService: vi.fn(),
 }));
@@ -47,6 +49,7 @@ const mockedDeleteDoctor = vi.mocked(deleteDoctor);
 const mockedFetchDoctorServices = vi.mocked(fetchDoctorServices);
 const mockedFetchDoctors = vi.mocked(fetchDoctors);
 const mockedFetchServices = vi.mocked(fetchServices);
+const mockedPatchDoctor = vi.mocked(patchDoctor);
 const mockedPatchDoctorService = vi.mocked(patchDoctorService);
 const mockedPatchService = vi.mocked(patchService);
 
@@ -112,6 +115,13 @@ beforeEach(() => {
     active: true,
   });
   mockedDeleteDoctor.mockReset().mockResolvedValue(undefined);
+  mockedPatchDoctor.mockReset().mockResolvedValue({
+    id: DOCTOR_ID,
+    name: 'Dr. Merp',
+    qualification: 'MD',
+    user_id: null,
+    active: true,
+  });
   mockedPatchDoctorService.mockReset().mockResolvedValue({
     id: MAPPING_ID,
     doctor_id: DOCTOR_ID,
@@ -132,6 +142,34 @@ afterEach(() => {
 });
 
 describe('DoctorManagement predefined services', () => {
+  it('keeps a cleared fee blank, validates it, and saves a fresh numeric fee', async () => {
+    render(<DoctorManagement />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    const fee = screen.getByRole('textbox', { name: 'Fee for Dr. Merp' });
+    fireEvent.change(fee, { target: { value: '' } });
+    expect(fee).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Enter a valid consultation fee for Dr. Merp.')).toBeInTheDocument();
+    expect(mockedPatchDoctorService).not.toHaveBeenCalled();
+    expect(mockedPatchService).not.toHaveBeenCalled();
+    fireEvent.change(fee, { target: { value: '750' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockedPatchDoctorService).toHaveBeenCalledWith(
+      CLINIC_ID, MAPPING_ID, expect.objectContaining({ consultation_fee_amount: 750 }),
+    ));
+  });
+
+  it('uses the full setup-grid width while the doctor editor is open', async () => {
+    render(<DoctorManagement />);
+
+    const card = await screen.findByTestId('doctor-management-card');
+    expect(card).not.toHaveClass('col-span-full');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(card).toHaveClass('col-span-full');
+    expect(card).not.toHaveClass('xl:col-span-2');
+  });
+
   it('shows the service with each doctor and removes the separate Services section', async () => {
     render(<DoctorManagement />);
 
@@ -156,6 +194,23 @@ describe('DoctorManagement predefined services', () => {
     expect(screen.queryByPlaceholderText('Service name')).not.toBeInTheDocument();
   });
 
+  it('persists an updated doctor qualification', async () => {
+    render(<DoctorManagement />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+    fireEvent.change(screen.getByLabelText('Qualification for Dr. Merp'), {
+      target: { value: 'DM' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedPatchDoctor).toHaveBeenCalledWith(CLINIC_ID, DOCTOR_ID, {
+        name: 'Dr. Merp',
+        qualification: 'DM',
+      });
+    });
+  });
+
   it('creates a selected missing service with its exact key and name before mapping a doctor', async () => {
     mockedFetchDoctors.mockReset().mockResolvedValue([]);
     mockedFetchServices.mockReset().mockResolvedValue([]);
@@ -169,7 +224,7 @@ describe('DoctorManagement predefined services', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Service for Dr. New' }), {
       target: { value: 'dermatology_consultation' },
     });
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Fee for Dr. New' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Fee for Dr. New' }), {
       target: { value: '750' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -275,5 +330,37 @@ describe('DoctorManagement predefined services', () => {
     expect(mockedPatchService).toHaveBeenCalledWith(CLINIC_ID, GENERAL_SERVICE_ID, {
       active: false,
     });
+  });
+
+  it('saves a replacement doctor before archiving the removed doctor', async () => {
+    render(<DoctorManagement />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Dr. Merp' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ Add doctor' }));
+
+    fireEvent.change(screen.getByLabelText('Doctor name'), {
+      target: { value: 'Dr. Replacement' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Service for Dr. Replacement' }), {
+      target: { value: 'general_consultation' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Fee for Dr. Replacement' }), {
+      target: { value: '900' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockedCreateDoctorService).toHaveBeenCalledWith(CLINIC_ID, {
+        doctor_id: '00000000-0000-0000-0000-000000000202',
+        clinic_service_id: GENERAL_SERVICE_ID,
+        consultation_fee_amount: 900,
+        active: true,
+      });
+      expect(mockedDeleteDoctor).toHaveBeenCalledWith(CLINIC_ID, DOCTOR_ID);
+    });
+
+    expect(mockedCreateDoctorService.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedDeleteDoctor.mock.invocationCallOrder[0]!,
+    );
   });
 });

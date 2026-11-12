@@ -72,8 +72,10 @@ export class TemplateRenderer {
   }
 
   private interpolate(templateText: string, variables: Record<string, string>): string {
-    return templateText.replace(/\{([a-z_]+)\}/gi, (_match, key: string) => {
-      return variables[key] ?? `{${key}}`;
-    });
+    return templateText
+      .replace(/\bVaidya\b/g, 'Vaidhyaa')
+      .replace(/\{([a-z_]+)\}/gi, (_match, key: string) => {
+        return variables[key] ?? `{${key}}`;
+      });
   }
 }

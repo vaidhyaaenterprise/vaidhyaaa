@@ -7,7 +7,7 @@ import {
   markAppointmentVisited,
   type AppointmentApiRow,
 } from '@/lib/api/appointments';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { INITIAL_PATIENTS, type Patient, type PatientVisitHistory } from './doctor-data';
 import { useDoctorNav } from './DoctorLayout';
 
@@ -186,66 +186,126 @@ export function TodayQueue() {
   const [visitedDetailsModal, setVisitedDetailsModal] = useState<QueuePatient | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const activeClinicIdRef = useRef(clinicId);
+  const appointmentRowsCacheRef = useRef<{
+    clinicId: string;
+    rows: AppointmentApiRow[];
+  } | null>(null);
+  const queueLoadSequenceRef = useRef(0);
   const todayDate = localDateString(new Date());
   const isViewingToday = selectedDate === todayDate;
   const selectedDateLabel = formatQueueDate(selectedDate);
   const selectedDateLabelShort = formatQueueDateShort(selectedDate);
 
-  const loadQueue = useCallback(async () => {
-    if (!clinicId) {
-      setPatients([]);
-      setLoadingQueue(false);
-      setQueueError('Clinic context missing. Please re-login.');
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (toastTimer.current) {
+        clearTimeout(toastTimer.current);
+        toastTimer.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    activeClinicIdRef.current = clinicId;
+  }, [clinicId]);
+
+  const loadQueue = useCallback(
+    async (signal?: AbortSignal) => {
+      const loadSequence = ++queueLoadSequenceRef.current;
+      if (!clinicId) {
+        setPatients([]);
+        setLoadingQueue(false);
+        setQueueError('Clinic context missing. Please re-login.');
+        return;
+      }
+
+      setLoadingQueue(true);
+      setQueueError(null);
+
+      try {
+        const cached = appointmentRowsCacheRef.current;
+        const rows =
+          cached?.clinicId === clinicId
+            ? cached.rows
+            : await fetchAppointments(clinicId, ['confirmed', 'visited'], signal);
+        if (loadSequence !== queueLoadSequenceRef.current || signal?.aborted) {
+          return;
+        }
+        if (cached?.clinicId !== clinicId) {
+          appointmentRowsCacheRef.current = { clinicId, rows };
+        }
+        const dateRows = rows
+          .filter((row) => appointmentDatePart(row.appointment_start) === selectedDate)
+          .sort((left, right) => left.appointment_start.localeCompare(right.appointment_start));
+        const mapped = dateRows.map(mapAppointmentToQueuePatient);
+
+        setPatients((previous) => {
+          const previousStatus = new Map(previous.map((patient) => [patient.id, patient.status]));
+          return mapped.map((patient) => {
+            const lastStatus = previousStatus.get(patient.id);
+            if (
+              patient.status === 'waiting' &&
+              (lastStatus === 'in-progress' || lastStatus === 'skipped')
+            ) {
+              return { ...patient, status: lastStatus };
+            }
+            return patient;
+          });
+        });
+
+        setSelectedId((current) => {
+          if (!current) {
+            return null;
+          }
+          return mapped.some((patient) => patient.id === current && patient.status !== 'visited')
+            ? current
+            : null;
+        });
+      } catch (error) {
+        if (isAbortError(error) || loadSequence !== queueLoadSequenceRef.current) {
+          return;
+        }
+        setQueueError(
+          error instanceof ApiRequestError
+            ? error.apiError.message
+            : error instanceof Error
+              ? error.message
+              : 'Failed to load today queue.',
+        );
+      } finally {
+        if (loadSequence === queueLoadSequenceRef.current && !signal?.aborted) {
+          setLoadingQueue(false);
+        }
+      }
+    },
+    [clinicId, selectedDate],
+  );
+
+  useEffect(() => {
+    if (appointmentRowsCacheRef.current?.clinicId === clinicId) {
       return;
     }
 
-    setLoadingQueue(true);
+    appointmentRowsCacheRef.current = null;
+    setPatients([]);
+    setSelectedId(null);
+    setHistoryModal(null);
+    setVisitedDetailsModal(null);
+    setMarkingVisitedId(null);
     setQueueError(null);
-
-    try {
-      const rows = await fetchAppointments(clinicId, ['confirmed', 'visited']);
-      const dateRows = rows
-        .filter((row) => appointmentDatePart(row.appointment_start) === selectedDate)
-        .sort((left, right) => left.appointment_start.localeCompare(right.appointment_start));
-      const mapped = dateRows.map(mapAppointmentToQueuePatient);
-
-      setPatients((previous) => {
-        const previousStatus = new Map(previous.map((patient) => [patient.id, patient.status]));
-        return mapped.map((patient) => {
-          const lastStatus = previousStatus.get(patient.id);
-          if (
-            patient.status === 'waiting' &&
-            (lastStatus === 'in-progress' || lastStatus === 'skipped')
-          ) {
-            return { ...patient, status: lastStatus };
-          }
-          return patient;
-        });
-      });
-
-      setSelectedId((current) => {
-        if (!current) {
-          return null;
-        }
-        return mapped.some((patient) => patient.id === current && patient.status !== 'visited')
-          ? current
-          : null;
-      });
-    } catch (error) {
-      setQueueError(
-        error instanceof ApiRequestError
-          ? error.apiError.message
-          : error instanceof Error
-            ? error.message
-            : 'Failed to load today queue.',
-      );
-    } finally {
-      setLoadingQueue(false);
-    }
-  }, [clinicId, selectedDate]);
+  }, [clinicId]);
 
   useEffect(() => {
-    void loadQueue();
+    const controller = new AbortController();
+    void loadQueue(controller.signal);
+    return () => {
+      queueLoadSequenceRef.current += 1;
+      controller.abort();
+    };
   }, [loadQueue]);
 
   useEffect(() => {
@@ -331,6 +391,8 @@ export function TodayQueue() {
         return;
       }
 
+      const targetClinicId = clinicId;
+
       const current = patients.find((patient) => patient.id === id);
       if (!current) {
         return;
@@ -349,12 +411,32 @@ export function TodayQueue() {
 
       setMarkingVisitedId(id);
       try {
-        await markAppointmentVisited(clinicId, id, {
+        await markAppointmentVisited(targetClinicId, id, {
           visit_reason: visitReason,
           ...(examinationNotes ? { examination_notes: examinationNotes } : {}),
           ...(diagnosis ? { diagnosis } : {}),
           ...(advice ? { advice } : {}),
         });
+        if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+          return;
+        }
+        if (appointmentRowsCacheRef.current?.clinicId === targetClinicId) {
+          appointmentRowsCacheRef.current = {
+            clinicId: targetClinicId,
+            rows: appointmentRowsCacheRef.current.rows.map((row) =>
+              row.id === id
+                ? {
+                    ...row,
+                    status: 'visited',
+                    visit_reason: visitReason,
+                    examination_notes: examinationNotes ?? null,
+                    diagnosis: diagnosis ?? null,
+                    advice: advice ?? null,
+                  }
+                : row,
+            ),
+          };
+        }
         setPatients((currentRows) =>
           currentRows.map((patient) =>
             patient.id === id
@@ -375,6 +457,9 @@ export function TodayQueue() {
         setSelectedId(null);
         showToast('Marked as visited.');
       } catch (error) {
+        if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+          return;
+        }
         showToast(
           error instanceof ApiRequestError
             ? error.apiError.message
@@ -383,7 +468,9 @@ export function TodayQueue() {
               : 'Failed to mark as visited.',
         );
       } finally {
-        setMarkingVisitedId(null);
+        if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+          setMarkingVisitedId(null);
+        }
       }
     },
     [clinicId, patients, showToast],
@@ -453,7 +540,7 @@ export function TodayQueue() {
 
       {/* Hero */}
       <div className="mb-5 rounded-[22px] bg-gradient-to-br from-teal-700 to-slate-900 p-5">
-        <div className="grid items-center gap-[18px] lg:grid-cols-[1.5fr_1fr]">
+        <div className="portal-feature-grid gap-[18px]">
           <div>
             <h2 className="mb-1.5 text-xl font-black text-white">
               {patients.length} appointments{' '}
@@ -497,7 +584,7 @@ export function TodayQueue() {
 
       {/* Split: Queue + Consultation Panel */}
       <div
-        className={`grid gap-[18px] ${currentConsult ? 'lg:grid-cols-[1fr_1.3fr]' : 'grid-cols-1'}`}
+        className={`portal-workspace-grid gap-[18px] ${currentConsult ? 'has-secondary-panel' : ''}`}
       >
         {/* Queue Column */}
         <div>
@@ -882,7 +969,7 @@ function ConsultationPanel({
       </div>
 
       {/* Body */}
-      <div className="grid gap-[18px] p-5 lg:grid-cols-2">
+      <div className="portal-panel-grid gap-[18px] p-5">
         {/* Visit History */}
         <div>
           <div className="mb-[10px] flex items-center gap-2 text-sm font-extrabold text-slate-900">

@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { RemoveIconButton } from '@/components/ui/RemoveIconButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import { ApiRequestError } from '@/lib/api/client';
@@ -13,6 +15,9 @@ import {
   type HolidayApiRow,
 } from '@/lib/api/clinic-clinical';
 import { conflictsFromApiError } from '@/lib/api/conflict-helpers';
+import { getClinicDate } from '@/lib/home-dashboard';
+import { isAbortError, useAbortableLoad } from './useAbortableLoad';
+import { ScheduleConflictPanel } from './ScheduleConflictPanel';
 
 type Holiday = {
   id: string;
@@ -76,16 +81,45 @@ function sameHoliday(left: Holiday, right: Holiday): boolean {
 export function HolidaySetup() {
   const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
+  const { profile, status: profileStatus, refresh: refreshProfile } = useClinicProfile();
   const isAdmin = effectiveRole === 'admin';
+  const [now, setNow] = useState(() => new Date());
+  const clinicDate = useMemo(() => {
+    if (profileStatus !== 'ready' || !profile?.timezone) return null;
+    try {
+      return getClinicDate(now, profile.timezone);
+    } catch {
+      return null;
+    }
+  }, [now, profile?.timezone, profileStatus]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [tempHolidays, setTempHolidays] = useState<Holiday[]>([]);
+  const [editingHolidayIds, setEditingHolidayIds] = useState<string[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
+  const visibleHolidays = clinicDate
+    ? holidays.filter((holiday) => holiday.active && holiday.date >= clinicDate)
+    : [];
+
+  useEffect(() => {
+    const refreshDate = () => setNow(new Date());
+    refreshDate();
+    const interval = window.setInterval(refreshDate, 60_000);
+    window.addEventListener('focus', refreshDate);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshDate);
+      document.removeEventListener('visibilitychange', refreshDate);
+    };
+  }, [clinicId]);
 
   const doctorNameById = useMemo(
     () => new Map(doctors.map((doctor) => [doctor.id, doctor.name])),
@@ -93,8 +127,17 @@ export function HolidaySetup() {
   );
 
   const loadHolidays = useCallback(async () => {
+    const request = beginLoad();
+    if (!request) {
+      return;
+    }
     if (!isAdmin || !clinicId) {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setDoctors([]);
+        setHolidays([]);
+        setTempHolidays([]);
+        setLoading(false);
+      }
       return;
     }
 
@@ -102,9 +145,12 @@ export function HolidaySetup() {
     setError(null);
     try {
       const [holidayRows, doctorRows] = await Promise.all([
-        fetchHolidays(clinicId),
-        fetchDoctors(clinicId),
+        fetchHolidays(clinicId, request.signal),
+        fetchDoctors(clinicId, request.signal),
       ]);
+      if (!request.isCurrent()) {
+        return;
+      }
 
       const mappedDoctors = doctorRows
         .filter((doctor) => doctor.active)
@@ -119,18 +165,31 @@ export function HolidaySetup() {
       setHolidays(mappedHolidays);
       setTempHolidays(mappedHolidays);
     } catch (err) {
+      if (!request.isCurrent() || isAbortError(err)) {
+        return;
+      }
       setError(err instanceof ApiRequestError ? err.apiError.message : 'Failed to load holidays.');
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [isAdmin, clinicId]);
+  }, [beginLoad, clinicId, isAdmin]);
 
   useEffect(() => {
+    setIsEditing(false);
+    setNotice(null);
+    setConflicts([]);
+    setError(null);
+    setSaving(false);
     void loadHolidays();
-  }, [loadHolidays]);
+    return cancelLoad;
+  }, [cancelLoad, loadHolidays]);
 
   const handleEdit = () => {
-    setTempHolidays(holidays);
+    setNotice(null);
+    setTempHolidays(visibleHolidays);
+    setEditingHolidayIds(visibleHolidays.map((holiday) => holiday.id));
     setConflicts([]);
     setError(null);
     setIsEditing(true);
@@ -152,7 +211,7 @@ export function HolidaySetup() {
   };
 
   const handleSave = async () => {
-    if (!clinicId) {
+    if (!clinicId || !isActive()) {
       return;
     }
 
@@ -172,26 +231,49 @@ export function HolidaySetup() {
       const existingById = new Map(holidays.map((holiday) => [holiday.id, holiday]));
       const tempIds = new Set(tempHolidays.map((holiday) => holiday.id));
 
-      await Promise.all(
-        holidays
-          .filter((holiday) => !tempIds.has(holiday.id))
-          .map((holiday) => patchHoliday(clinicId, holiday.id, { active: false })),
-      );
+      for (const holiday of holidays.filter(
+        (item) => editingHolidayIds.includes(item.id) && !tempIds.has(item.id),
+      )) {
+        if (!isActive()) {
+          return;
+        }
+        await patchHoliday(clinicId, holiday.id, { active: false });
+        if (!isActive()) {
+          return;
+        }
+      }
 
-      const savedHolidays: Holiday[] = [];
+      // Hidden historical holidays were not removed by the administrator.
+      const savedHolidays: Holiday[] = holidays.filter(
+        (item) => !editingHolidayIds.includes(item.id),
+      );
       for (const holiday of tempHolidays) {
+        if (!isActive()) {
+          return;
+        }
         const original = existingById.get(holiday.id);
         const payload = holidayPayload(holiday);
 
         if (!original) {
-          savedHolidays.push(mapHolidayRow(await createHoliday(clinicId, payload)));
+          const created = await createHoliday(clinicId, payload);
+          if (!isActive()) {
+            return;
+          }
+          savedHolidays.push(mapHolidayRow(created));
         } else if (sameHoliday(original, holiday)) {
           savedHolidays.push(original);
         } else {
-          savedHolidays.push(mapHolidayRow(await patchHoliday(clinicId, holiday.id, payload)));
+          const updated = await patchHoliday(clinicId, holiday.id, payload);
+          if (!isActive()) {
+            return;
+          }
+          savedHolidays.push(mapHolidayRow(updated));
         }
       }
 
+      if (!isActive()) {
+        return;
+      }
       const saved = savedHolidays
         .filter((holiday) => holiday.active)
         .sort((left, right) => left.date.localeCompare(right.date));
@@ -200,7 +282,11 @@ export function HolidaySetup() {
 
       setIsEditing(false);
       setConflicts([]);
+      setNotice('Holidays saved. Appointment slots are updating in the background.');
     } catch (err) {
+      if (!isActive()) {
+        return;
+      }
       const apiConflicts = conflictsFromApiError(err);
       if (apiConflicts) {
         setConflicts(apiConflicts);
@@ -209,11 +295,15 @@ export function HolidaySetup() {
 
       setError(err instanceof ApiRequestError ? err.apiError.message : 'Failed to save holidays.');
     } finally {
-      setSaving(false);
+      if (isActive()) {
+        setSaving(false);
+      }
     }
   };
 
   const addHoliday = () => {
+    setConflicts([]);
+    setError(null);
     const newHoliday: Holiday = {
       id: `new-${Date.now()}`,
       date: '',
@@ -226,10 +316,14 @@ export function HolidaySetup() {
   };
 
   const removeHoliday = (id: string) => {
+    setConflicts([]);
+    setError(null);
     setTempHolidays(tempHolidays.filter((holiday) => holiday.id !== id));
   };
 
   const updateHoliday = (id: string, patch: Partial<Holiday>) => {
+    setConflicts([]);
+    setError(null);
     setTempHolidays((prev) =>
       prev.map((holiday) => (holiday.id === id ? { ...holiday, ...patch } : holiday)),
     );
@@ -249,8 +343,8 @@ export function HolidaySetup() {
     updateHoliday(holidayId, { doctorIds: Array.from(selected) });
   };
 
-  const toggleHolidayActive = async (id: string) => {
-    if (!clinicId) {
+  const removeSavedHoliday = async (id: string) => {
+    if (!clinicId || !isActive()) {
       return;
     }
     const holiday = holidays.find((item) => item.id === id);
@@ -258,8 +352,24 @@ export function HolidaySetup() {
       return;
     }
 
-    await patchHoliday(clinicId, id, { active: !holiday.active });
-    await loadHolidays();
+    setSaving(true);
+    setError(null);
+    try {
+      await patchHoliday(clinicId, id, { active: false });
+      if (!isActive()) {
+        return;
+      }
+      setHolidays((rows) => rows.filter((row) => row.id !== id));
+      setNotice('Holiday removed. Appointment slots are updating in the background.');
+    } catch (err) {
+      if (isActive()) {
+        setError(
+          err instanceof ApiRequestError ? err.apiError.message : 'Failed to remove holiday.',
+        );
+      }
+    } finally {
+      if (isActive()) setSaving(false);
+    }
   };
 
   const scopeLabel = (holiday: Holiday): string => {
@@ -274,8 +384,8 @@ export function HolidaySetup() {
 
   if (!isAdmin) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Holiday setup</h3>
         </div>
         <p className="text-sm text-slate-500">Only admins can manage holidays.</p>
@@ -283,17 +393,34 @@ export function HolidaySetup() {
     );
   }
 
-  if (loading) {
+  if (loading || profileStatus === 'idle' || profileStatus === 'loading') {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <LoadingState title="Loading holidays" description="Fetching from the API." />
       </div>
     );
   }
 
+  if (!clinicDate) {
+    return (
+      <ErrorState
+        title="Could not load holidays"
+        description="Unable to determine the clinic's current date."
+      >
+        <button
+          type="button"
+          onClick={refreshProfile}
+          className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white"
+        >
+          Retry
+        </button>
+      </ErrorState>
+    );
+  }
+
   if (error && !isEditing) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <ErrorState title="Could not load holidays" description={error}>
           <button
             type="button"
@@ -308,8 +435,8 @@ export function HolidaySetup() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-900">Holiday setup</h3>
         {!isEditing && (
           <button
@@ -321,40 +448,46 @@ export function HolidaySetup() {
         )}
       </div>
 
+      {notice && (
+        <p role="status" className="mb-4 rounded-lg bg-teal-50 p-3 text-sm text-teal-800">
+          {notice}
+        </p>
+      )}
       {!isEditing ? (
         <div className="space-y-2">
-          {holidays.length === 0 ? (
-            <p className="text-sm text-slate-500">No holidays configured</p>
+          {visibleHolidays.length === 0 ? (
+            <p className="text-sm text-slate-500">No current or upcoming holidays configured.</p>
           ) : (
-            holidays
-              .filter((holiday) => holiday.active)
-              .sort((left, right) => left.date.localeCompare(right.date))
-              .map((holiday) => (
-                <div
-                  key={holiday.id}
-                  className="flex justify-between rounded-lg border border-slate-200 bg-slate-50 p-3"
-                >
-                  <div>
-                    <p className="font-bold text-slate-900">
-                      {new Date(holiday.date).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </p>
-                    <p className="text-sm text-slate-500">{holiday.reason || 'No reason set'}</p>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      {scopeLabel(holiday)}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => void toggleHolidayActive(holiday.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100"
-                  >
-                    Disable
-                  </button>
+            visibleHolidays.map((holiday) => (
+              <div
+                key={holiday.id}
+                className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="break-words font-bold text-slate-900">
+                    {new Date(holiday.date).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                      timeZone: 'UTC',
+                    })}
+                  </p>
+                  <p className="break-words text-sm text-slate-500">
+                    {holiday.reason || 'No reason set'}
+                  </p>
+                  <p className="break-words text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {scopeLabel(holiday)}
+                  </p>
                 </div>
-              ))
+                <button
+                  onClick={() => void removeSavedHoliday(holiday.id)}
+                  disabled={saving}
+                  className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
+                >
+                  Remove
+                </button>
+              </div>
+            ))
           )}
         </div>
       ) : (
@@ -365,41 +498,34 @@ export function HolidaySetup() {
             </p>
           )}
 
-          {conflicts.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-              <h4 className="mb-2 text-sm font-bold text-red-800">Conflicts detected</h4>
-              <ul className="space-y-1 text-sm text-red-700">
-                {conflicts.map((conflict, idx) => (
-                  <li key={idx}>- {conflict}</li>
-                ))}
-              </ul>
-              <p className="mt-2 text-xs text-red-600">Please resolve conflicts before saving.</p>
-            </div>
-          )}
+          <ScheduleConflictPanel
+            conflicts={conflicts}
+            guidance="Reschedule the affected appointments before adding this holiday."
+          />
 
           <div className="space-y-3">
             {tempHolidays.map((holiday) => (
               <div key={holiday.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-3 flex flex-wrap gap-2">
+                <div className="mb-3 grid min-w-0 gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-end">
                   <input
                     type="date"
                     value={holiday.date}
                     onChange={(event) => updateHoliday(holiday.id, { date: event.target.value })}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                    aria-label="Holiday date"
+                    className="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                   />
                   <input
                     type="text"
                     value={holiday.reason}
                     onChange={(event) => updateHoliday(holiday.id, { reason: event.target.value })}
                     placeholder="Reason"
-                    className="min-w-[220px] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
+                    aria-label="Holiday reason"
+                    className="w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                   />
-                  <button
+                  <RemoveIconButton
                     onClick={() => removeHoliday(holiday.id)}
-                    className="rounded-lg border border-red-200 bg-red-50 px-2 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
-                  >
-                    Remove
-                  </button>
+                    label={`Remove holiday ${holiday.reason || holiday.date}`}
+                  />
                 </div>
 
                 <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -456,10 +582,10 @@ export function HolidaySetup() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleSave()}
-              disabled={conflicts.length > 0 || saving}
+              disabled={saving}
               className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-bold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : conflicts.length > 0 ? 'Recheck and save' : 'Save'}
             </button>
             <button
               onClick={handleCancel}

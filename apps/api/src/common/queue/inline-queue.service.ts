@@ -60,4 +60,54 @@ export class InlineQueueService implements QueueService {
 
     return jobId;
   }
+
+  async enqueueBulk(jobs: EnqueueJobInput[]): Promise<string[]> {
+    if (jobs.length === 0) {
+      return [];
+    }
+
+    const preparedJobs = jobs.map((job) => {
+      validateJobPayload(job.jobType, job.payload);
+      return {
+        job,
+        jobId: job.jobId ?? randomUUID(),
+      };
+    });
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'jobs_enqueued_bulk_inline',
+        job_count: preparedJobs.length,
+        queues: [...new Set(preparedJobs.map(({ job }) => job.queue))],
+      }),
+      'InlineQueueService',
+    );
+
+    setImmediate(() => {
+      for (const { job, jobId } of preparedJobs) {
+        void this.executor
+          .runValidatedJob(job.jobType, job.queue, job.payload, {
+            jobId,
+            ...(job.correlationId ? { correlationId: job.correlationId } : {}),
+            ...(job.clinicId ? { clinicId: job.clinicId } : {}),
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.error(
+              JSON.stringify({
+                event: 'inline_job_terminal_failure',
+                job_id: jobId,
+                job_type: job.jobType,
+                queue: job.queue,
+                error: message,
+              }),
+              undefined,
+              'InlineQueueService',
+            );
+          });
+      }
+    });
+
+    return preparedJobs.map(({ jobId }) => jobId);
+  }
 }

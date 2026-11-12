@@ -59,6 +59,7 @@ export const jobPayloadSchemas: Record<JobType, z.ZodTypeAny> = {
   [JOB_TYPES.EXPIRE_SLOT_HOLDS]: expireSlotHoldsJobPayloadSchema,
   [JOB_TYPES.GENERATE_SLOTS]: generateSlotsJobPayloadSchema,
   [JOB_TYPES.CLEANUP_EXPIRED_RECORDINGS]: cleanupExpiredRecordingsJobPayloadSchema,
+  [JOB_TYPES.CLEANUP_EXPIRED_CALLS]: z.object({ clinic_id: z.string().uuid().optional() }),
   [JOB_TYPES.CLEANUP_EXPIRED_TRANSCRIPTS]: cleanupExpiredTranscriptsJobPayloadSchema,
   [JOB_TYPES.PARSE_KNOWLEDGE_DOCX]: parseKnowledgeDocxJobPayloadSchema,
   [JOB_TYPES.GENERATE_KNOWLEDGE_EMBEDDING]: generateKnowledgeEmbeddingJobPayloadSchema,

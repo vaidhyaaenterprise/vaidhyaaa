@@ -1,4 +1,5 @@
 import type { Appointment } from '@/components/pages/appointments/types';
+import { filterMissedPendingAppointments } from '@/lib/appointment-filters';
 
 export type HomeDashboardGroups<T extends Appointment = Appointment> = {
   todayPending: T[];
@@ -41,11 +42,31 @@ function compareStartAscending(a: Appointment, b: Appointment): number {
   return byStart || a.id.localeCompare(b.id);
 }
 
-function compareStartDescending(a: Appointment, b: Appointment): number {
-  const byStart = `${b.appointmentDate}T${b.appointmentTime}`.localeCompare(
-    `${a.appointmentDate}T${a.appointmentTime}`,
-  );
-  return byStart || a.id.localeCompare(b.id);
+function compareBookedDescending(a: Appointment, b: Appointment): number {
+  const byBookedAt = b.bookedAt.localeCompare(a.bookedAt);
+  return byBookedAt || a.id.localeCompare(b.id);
+}
+
+/**
+ * Return non-cancelled appointments created on the requested clinic-local date.
+ * `bookedAt` is an instant, unlike appointmentStart, so it must be converted
+ * through the clinic timezone before comparing calendar dates.
+ */
+export function filterAppointmentsBookedOnClinicDate<T extends Appointment>(
+  appointments: readonly T[],
+  clinicDate: string,
+  timezone: string,
+): T[] {
+  return appointments
+    .filter((appointment) => {
+      if (appointment.status === 'cancelled' || !appointment.bookedAt) {
+        return false;
+      }
+
+      const bookedAt = new Date(appointment.bookedAt);
+      return !Number.isNaN(bookedAt.getTime()) && getClinicDate(bookedAt, timezone) === clinicDate;
+    })
+    .sort(compareBookedDescending);
 }
 
 /**
@@ -70,12 +91,7 @@ export function groupHomeAppointments<T extends Appointment>(
     )
     .sort(compareStartAscending);
 
-  const missedPending = active
-    .filter(
-      (appointment) =>
-        appointment.status === 'pending_confirmation' && appointment.appointmentDate < clinicDate,
-    )
-    .sort(compareStartDescending);
+  const missedPending = filterMissedPendingAppointments(active, clinicDate);
 
   const limit = Number.isFinite(maxNext) ? Math.max(0, Math.trunc(maxNext)) : 3;
   const todayAppointments = active

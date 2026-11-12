@@ -1,18 +1,22 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import {
   AppError,
+  clinicProfilePatchSchema,
   clinicSettingsPatchSchema,
   type AuthContext,
 } from '@vaidya/shared';
 
-import { DEV_AUTH_HEADERS } from '../../common/constants/auth.constants';
 import { deriveLoginNumber } from '../../common/crypto/password';
 import { ClinicAdmin } from '../../common/decorators/platform-admin.decorator';
 import { ClinicScoped } from '../../common/decorators/clinic-scoped.decorator';
 import { AUTH_CONTEXT_KEY, getAuthContext } from '../../common/guards/auth.guard';
-import { inviteClinicUserSchema, createClinicUserLoginSchema } from '../platform/platform.schemas';
+import {
+  createClinicUserLoginSchema,
+  inviteClinicUserSchema,
+  updateClinicUserLoginSchema,
+} from '../platform/platform.schemas';
 
 import { ClinicSettingsService } from './clinic-settings.service';
 import { ClinicUsersService } from './clinic-users.service';
@@ -49,9 +53,24 @@ function mapSettingsResponse(settings: {
   };
 }
 
-function mapClinicUserRows(
-  rows: Awaited<ReturnType<ClinicUsersService['listUsers']>>['users'],
+function mapClinicProfileResponse(
+  profile: Awaited<ReturnType<ClinicSettingsService['getClinicProfile']>>,
 ) {
+  return {
+    name: profile.name,
+    clinic_unique_number: profile.uniqueNumber,
+    primary_phone: profile.primaryPhone,
+    address_line1: profile.addressLine1,
+    address_line2: profile.addressLine2,
+    city: profile.city,
+    state: profile.state,
+    postal_code: profile.postalCode,
+    country: profile.country,
+    timezone: profile.timezone,
+  };
+}
+
+function mapClinicUserRows(rows: Awaited<ReturnType<ClinicUsersService['listUsers']>>['users']) {
   return rows.map((row) => ({
     id: row.membership.id,
     clinic_id: row.membership.clinicId,
@@ -59,6 +78,13 @@ function mapClinicUserRows(
     role: row.membership.role,
     doctor_id: row.membership.doctorId,
     active: row.membership.active,
+    doctor:
+      row.membership.role === 'doctor'
+        ? {
+            qualification: row.doctorQualification,
+            service_name: row.doctorServiceName,
+          }
+        : null,
     user: {
       id: row.user.id,
       name: row.user.name,
@@ -74,10 +100,11 @@ function resolveClinicIdFromLegacyRequest(
   request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
 ): string {
   const auth = getAuthContext(request);
-  const headerClinicId = request.headers[DEV_AUTH_HEADERS.CLINIC_ID];
-  if (typeof headerClinicId === 'string' && headerClinicId.length > 0) {
-    return headerClinicId;
-  }
+
+  // Legacy routes have no :clinicId parameter for RBAC to compare. Trust only
+  // the clinic context already resolved by authentication; never read a raw
+  // request header here. Platform operators without a resolved clinic must use
+  // the canonical /clinics/:clinicId/users routes.
   if (auth.clinicId) {
     return auth.clinicId;
   }
@@ -87,32 +114,46 @@ function resolveClinicIdFromLegacyRequest(
 @Controller('clinics/:clinicId/profile')
 @ClinicScoped()
 export class ClinicProfileController {
-  constructor(@Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService) {}
+  constructor(
+    @Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService,
+  ) {}
 
   @Get()
   async getProfile(@Param('clinicId') clinicId: string) {
     const profile = await this.settingsService.getClinicProfile(clinicId);
-    return {
-      clinic: {
-        name: profile.name,
-        clinic_unique_number: profile.uniqueNumber,
-        primary_phone: profile.primaryPhone,
-        address_line1: profile.addressLine1,
-        address_line2: profile.addressLine2,
-        city: profile.city,
-        state: profile.state,
-        postal_code: profile.postalCode,
-        country: profile.country,
-        timezone: profile.timezone,
-      },
-    };
+    return { clinic: mapClinicProfileResponse(profile) };
+  }
+
+  @Patch()
+  @ClinicAdmin()
+  async patchProfile(
+    @Param('clinicId') clinicId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = clinicProfilePatchSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message, {
+        fields: parsed.error.issues,
+      });
+    }
+
+    const auth = getAuthContext(request);
+    const profile = await this.settingsService.patchClinicProfile(
+      clinicId,
+      parsed.data,
+      auth.userId,
+    );
+    return { clinic: mapClinicProfileResponse(profile) };
   }
 }
 
 @Controller('clinics/:clinicId/settings')
 @ClinicScoped()
 export class ClinicSettingsController {
-  constructor(@Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService) {}
+  constructor(
+    @Inject(ClinicSettingsService) private readonly settingsService: ClinicSettingsService,
+  ) {}
 
   @Get()
   @ClinicAdmin()
@@ -136,11 +177,7 @@ export class ClinicSettingsController {
     }
 
     const auth = getAuthContext(request);
-    const settings = await this.settingsService.patchSettings(
-      clinicId,
-      parsed.data,
-      auth.userId,
-    );
+    const settings = await this.settingsService.patchSettings(clinicId, parsed.data, auth.userId);
     return { settings: mapSettingsResponse(settings) };
   }
 }
@@ -148,7 +185,9 @@ export class ClinicSettingsController {
 @Controller('clinics/:clinicId/users')
 @ClinicScoped()
 export class ClinicUsersController {
-  constructor(@Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService) {}
+  constructor(
+    @Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService,
+  ) {}
 
   @Get()
   @ClinicAdmin()
@@ -156,7 +195,7 @@ export class ClinicUsersController {
     const result = await this.clinicUsersService.listUsers(clinicId);
     return {
       users: mapClinicUserRows(result.users),
-      clinic_login_number: result.clinicLoginNumber ?? deriveLoginNumber(clinicId),
+      clinic_login_number: String(result.clinicLoginNumber ?? deriveLoginNumber(clinicId)),
     };
   }
 
@@ -205,6 +244,56 @@ export class ClinicUsersController {
     };
   }
 
+  @Patch(':clinicUserId')
+  @ClinicAdmin()
+  async updateLogin(
+    @Param('clinicId') clinicId: string,
+    @Param('clinicUserId') clinicUserId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = updateClinicUserLoginSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid clinic user credential payload.', {
+        fields: parsed.error.issues,
+      });
+    }
+
+    const auth = getAuthContext(request);
+    const result = await this.clinicUsersService.updateLogin(
+      clinicId,
+      clinicUserId,
+      parsed.data,
+      auth.userId,
+    );
+    return {
+      user: {
+        id: result.user.id,
+        name: result.user.name,
+        username: result.user.username,
+        active: result.user.active,
+      },
+      membership: result.membership,
+    };
+  }
+
+  @Delete(':clinicUserId')
+  @ClinicAdmin()
+  async revokeLogin(
+    @Param('clinicId') clinicId: string,
+    @Param('clinicUserId') clinicUserId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const auth = getAuthContext(request);
+    const result = await this.clinicUsersService.revokeLogin(clinicId, clinicUserId, auth.userId);
+    return {
+      deleted: true,
+      revoked: true,
+      clinic_user_id: result.membership.id,
+      credentials_revoked: result.credentialsRevoked,
+    };
+  }
+
   @Post(':clinicUserId/disable')
   @ClinicAdmin()
   async disableUser(
@@ -244,7 +333,9 @@ export class ClinicUsersController {
 @Controller('clinic/users')
 @ClinicScoped()
 export class ClinicUsersLegacyController {
-  constructor(@Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService) {}
+  constructor(
+    @Inject(ClinicUsersService) private readonly clinicUsersService: ClinicUsersService,
+  ) {}
 
   @Get()
   @ClinicAdmin()
@@ -253,7 +344,7 @@ export class ClinicUsersLegacyController {
     const result = await this.clinicUsersService.listUsers(clinicId);
     return {
       users: mapClinicUserRows(result.users),
-      clinic_login_number: result.clinicLoginNumber ?? deriveLoginNumber(clinicId),
+      clinic_login_number: String(result.clinicLoginNumber ?? deriveLoginNumber(clinicId)),
     };
   }
 

@@ -9,7 +9,7 @@ export type ResourceMethodPolicy = {
   disable?: boolean;
 };
 
-/** Global HTTP verb semantics for the Vaidya API. */
+/** Global HTTP verb semantics for the Vaidhyaa API. */
 export const API_METHOD_SEMANTICS = {
   POST: 'Creates resources or triggers actions.',
   PUT: 'Replaces a full resource or collection.',

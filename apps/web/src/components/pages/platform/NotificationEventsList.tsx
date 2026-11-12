@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useIsPlatformAdmin } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchPlatformNotifications } from '@/lib/api/clinic-clinical';
 import {
   cancelPlatformNotification,
@@ -128,6 +128,9 @@ export function NotificationEventsList() {
   const [filterClinic, setFilterClinic] = useState<string>('all');
   const [payloadModal, setPayloadModal] = useState<Record<string, unknown> | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const loadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const handleRetry = async (notificationId: string) => {
     setActionError(null);
@@ -135,6 +138,9 @@ export function NotificationEventsList() {
       await retryPlatformNotification(notificationId);
       await loadEvents();
     } catch (err) {
+      if (!mountedRef.current || isAbortError(err)) {
+        return;
+      }
       setActionError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to retry notification.',
       );
@@ -147,6 +153,9 @@ export function NotificationEventsList() {
       await cancelPlatformNotification(notificationId);
       await loadEvents();
     } catch (err) {
+      if (!mountedRef.current || isAbortError(err)) {
+        return;
+      }
       setActionError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to cancel notification.',
       );
@@ -154,28 +163,60 @@ export function NotificationEventsList() {
   };
 
   const loadEvents = useCallback(async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    loadControllerRef.current?.abort();
+    loadControllerRef.current = null;
+    const sequence = ++loadSequenceRef.current;
+
     if (!isPlatformAdmin) {
       setLoading(false);
       return;
     }
+
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
+    const isCurrentLoad = () =>
+      mountedRef.current &&
+      !controller.signal.aborted &&
+      loadSequenceRef.current === sequence;
+
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchPlatformNotifications();
+      const rows = await fetchPlatformNotifications(controller.signal);
+      if (!isCurrentLoad()) {
+        return;
+      }
       setEvents((rows as ApiNotificationRow[]).map(mapNotification));
     } catch (err) {
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError
           ? err.apiError.message
           : 'Failed to load notification events.',
       );
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+        loadControllerRef.current = null;
+      }
     }
   }, [isPlatformAdmin]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadEvents();
+    return () => {
+      mountedRef.current = false;
+      loadSequenceRef.current += 1;
+      loadControllerRef.current?.abort();
+      loadControllerRef.current = null;
+    };
   }, [loadEvents]);
 
   if (!isPlatformAdmin) {

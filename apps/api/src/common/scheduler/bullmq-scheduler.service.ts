@@ -12,6 +12,7 @@ const REPEATABLE_JOBS: Array<{ cron: string; jobType: string }> = [
   { cron: '5 0 * * *', jobType: JOB_TYPES.GENERATE_SLOTS },
   { cron: '0 2 * * *', jobType: JOB_TYPES.CLEANUP_EXPIRED_RECORDINGS },
   { cron: '0 3 * * *', jobType: JOB_TYPES.CLEANUP_EXPIRED_TRANSCRIPTS },
+  { cron: '30 3 * * *', jobType: JOB_TYPES.CLEANUP_EXPIRED_CALLS },
   { cron: '0 4 * * *', jobType: JOB_TYPES.GENERATE_DAILY_CLINIC_REPORT },
 ];
 

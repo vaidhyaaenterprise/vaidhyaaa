@@ -8,6 +8,11 @@ type GeminiEmbedContentResponse = {
   embedding?: { values?: number[] };
 };
 
+function normalizeVector(vector: number[]): number[] {
+  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return magnitude > 0 ? vector.map((value) => value / magnitude) : vector;
+}
+
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   constructor(
     private readonly apiKey: string,
@@ -18,16 +23,23 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
   ) {}
 
   async embed(input: EmbeddingInput): Promise<EmbeddingResult> {
-    const url = `${GEMINI_BASE_URL}/models/${this.model}:embedContent?key=${this.apiKey}`;
+    const url = `${GEMINI_BASE_URL}/models/${this.model}:embedContent`;
     const response = await fetchWithRetry(
       this.fetchImpl,
       url,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
         body: JSON.stringify({
           model: `models/${this.model}`,
           content: { parts: [{ text: input.text }] },
+          // Keep the reduced-dimension field at the request root for
+          // compatibility with Gemini REST deployments that still ignore the
+          // newer embedContentConfig wrapper.
+          outputDimensionality: this.dimensions,
         }),
       },
       { timeoutMs: this.timeoutMs },
@@ -43,6 +55,20 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       throw new Error('Gemini embedding response missing embedding.values');
     }
 
-    return { vector: values, model: this.model, dimensions: this.dimensions };
+    if (values.length < this.dimensions) {
+      throw new Error(
+        `Gemini embedding dimension mismatch: expected at least ${this.dimensions}, received ${values.length}`,
+      );
+    }
+
+    if (!values.every(Number.isFinite)) {
+      throw new Error('Gemini embedding response contains non-finite values');
+    }
+
+    // Gemini embedding models use Matryoshka Representation Learning, so a
+    // larger default response can be reduced by retaining its leading values.
+    // Normalizing after truncation keeps cosine similarity stable for pgvector.
+    const vector = normalizeVector(values.slice(0, this.dimensions));
+    return { vector, model: this.model, dimensions: vector.length };
   }
 }

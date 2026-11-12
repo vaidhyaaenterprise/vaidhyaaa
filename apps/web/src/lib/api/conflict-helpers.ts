@@ -1,5 +1,11 @@
 import { ApiRequestError } from '@/lib/api/client';
 import { scheduleConflictItemSchema, type ScheduleConflictItem } from '@vaidya/shared';
+import { dayLabel } from '@/lib/clinic-scheduling';
+
+function formatTime(time: string): string {
+  const [hour = 0, minute = 0] = time.split(':').map(Number);
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
 
 function formatClinicLocalTimestamp(value?: string): string | null {
   if (!value) {
@@ -38,7 +44,7 @@ function formatClinicLocalTimestamp(value?: string): string | null {
     'Dec',
   ];
   const monthName = monthNames[month - 1] ?? String(month).padStart(2, '0');
-  return `${day} ${monthName} ${year} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  return `${day} ${monthName} ${year} at ${formatTime(`${hours}:${minutes}`)}`;
 }
 
 function formatSlotRange(conflict: ScheduleConflictItem): string | null {
@@ -51,54 +57,18 @@ function formatSlotRange(conflict: ScheduleConflictItem): string | null {
     return startLabel;
   }
 
-  const endTime = endLabel.split(' ').slice(-1)[0] ?? '';
+  const endTime = endLabel.split(' at ')[1] ?? '';
   return `${startLabel} - ${endTime}`;
-}
-
-function formatAppointmentRange(conflict: ScheduleConflictItem): string | null {
-  const appointment = conflict.appointment;
-  if (!appointment) {
-    return null;
-  }
-  const startLabel = formatClinicLocalTimestamp(appointment.appointment_start);
-  if (!startLabel) {
-    return null;
-  }
-  const endLabel = formatClinicLocalTimestamp(appointment.appointment_end);
-  if (!endLabel) {
-    return startLabel;
-  }
-  const endTime = endLabel.split(' ').slice(-1)[0] ?? '';
-  return `${startLabel} - ${endTime}`;
-}
-
-function humanizeStatus(status: string): string {
-  return status
-    .split('_')
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
 }
 
 function formatAppointmentSummary(conflict: ScheduleConflictItem): string {
   const appointment = conflict.appointment;
   if (!appointment) {
-    return 'An existing appointment';
+    return 'A patient has an existing appointment.';
   }
 
-  const details = [appointment.patient_name];
-  const range = formatAppointmentRange(conflict);
-  if (range) {
-    details.push(range);
-  }
-  if (appointment.doctor_name) {
-    details.push(`Doctor: ${appointment.doctor_name}`);
-  }
-  if (appointment.service_name) {
-    details.push(`Service: ${appointment.service_name}`);
-  }
-  details.push(`Status: ${humanizeStatus(appointment.status)}`);
-  return details.join(' • ');
+  const when = formatClinicLocalTimestamp(appointment.appointment_start);
+  return `${appointment.patient_name} has booked an appointment${when ? ` on ${when}` : ''}${appointment.doctor_name ? ` with ${appointment.doctor_name}` : ''}.`;
 }
 
 export function formatScheduleConflicts(conflicts: readonly unknown[]): string[] {
@@ -109,14 +79,19 @@ export function formatScheduleConflicts(conflicts: readonly unknown[]): string[]
     }
     const conflict: ScheduleConflictItem = parsed.data;
 
+    if (conflict.reason === 'doctor_schedule_outside_clinic_hours' && conflict.doctor_schedule) {
+      const schedule = conflict.doctor_schedule;
+      return `${schedule.doctor_name} is available on ${dayLabel(schedule.day_of_week)} from ${formatTime(schedule.start_time)} to ${formatTime(schedule.end_time)}, outside clinic working hours. Adjust the doctor's working hours, or use Holiday setup for a closure on a particular date.`;
+    }
+
     if (conflict.reason === 'outside_clinic_hours') {
-      return `${formatAppointmentSummary(conflict)} — falls outside the new clinic hours`;
+      return `${formatAppointmentSummary(conflict)} These clinic hours would exclude the appointment.`;
     }
     if (conflict.reason === 'outside_doctor_hours') {
-      return `${formatAppointmentSummary(conflict)} — falls outside the doctor's new working hours`;
+      return `${formatAppointmentSummary(conflict)} These doctor working hours would exclude the appointment.`;
     }
     if (conflict.reason === 'active_appointment_on_holiday') {
-      return `${formatAppointmentSummary(conflict)} — conflicts with the proposed holiday`;
+      return `${formatAppointmentSummary(conflict)} The selected holiday conflicts with this appointment.`;
     }
     if (conflict.reason === 'occupied_exceeds_new_capacity') {
       const slotRange = formatSlotRange(conflict);
@@ -133,7 +108,7 @@ export function formatScheduleConflicts(conflicts: readonly unknown[]): string[]
       return 'A future booked slot has appointments that block the duration change';
     }
     if (conflict.appointment || conflict.appointment_id) {
-      return `${formatAppointmentSummary(conflict)} — conflicts with this schedule change`;
+      return `${formatAppointmentSummary(conflict)} Please reschedule it before making this change.`;
     }
     return 'This schedule change conflicts with existing bookings';
   });

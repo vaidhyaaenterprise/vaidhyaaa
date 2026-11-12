@@ -13,6 +13,7 @@ import { apiErrorBodySchema, apiSuccessBodySchema } from '@vaidya/shared';
 import { prepareTestDatabase } from './db-setup';
 import { devAuthHeaders, SEED } from './test-constants';
 import { createTestApp } from './test-app';
+import { SlotReconciliationService } from '../src/modules/slots/slot-reconciliation.service';
 
 const TIMEZONE = 'Asia/Kolkata';
 
@@ -23,8 +24,7 @@ describe('C07 production gap APIs', () => {
 
   beforeAll(async () => {
     process.env.DATABASE_URL =
-      process.env.TEST_DATABASE_URL ??
-      'postgresql://postgres:postgres@localhost:5433/vaidya_test';
+      process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test';
     await prepareTestDatabase();
     app = await createTestApp();
     sql = postgres(process.env.DATABASE_URL, { max: 1 });
@@ -206,6 +206,7 @@ describe('C07 production gap APIs', () => {
 
       expect(patchBody.booking_rule.slot_duration_minutes).toBe(nextDuration);
       expect(patchBody.booking_rule.capacity_per_slot).toBe(nextCapacity);
+      await app.get(SlotReconciliationService).drain(SEED.CLINIC_ID);
 
       const [futureOpenSlot] = await sql<
         {
@@ -238,6 +239,7 @@ describe('C07 production gap APIs', () => {
           slot_duration_minutes: originalDuration,
         },
       });
+      await app.get(SlotReconciliationService).drain(SEED.CLINIC_ID);
     }
   });
 
@@ -363,9 +365,9 @@ describe('C07 production gap APIs', () => {
       booking_rules: Array<{ id: string }>;
     };
 
-    expect(
-      listAfterDeactivateBody.booking_rules.some((rule) => rule.id === createdRule?.id),
-    ).toBe(false);
+    expect(listAfterDeactivateBody.booking_rules.some((rule) => rule.id === createdRule?.id)).toBe(
+      false,
+    );
   });
 
   it('3e. doctor-specific holiday blocks only selected doctor slots', async () => {

@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useIsPlatformAdmin } from '@/hooks/useActiveClinicId';
-import { ApiRequestError } from '@/lib/api/client';
+import { ApiRequestError, isAbortError } from '@/lib/api/client';
 import { fetchPlatformJobHealth } from '@/lib/api/clinic-clinical';
 
 import type { JobHealth, JobRunLog } from './types';
@@ -105,25 +105,52 @@ export function JobHealthDashboard() {
     lastRunTranscriptCleanup: null,
   });
   const [runLogs, setRunLogs] = useState<JobRunLog[]>([]);
+  const mountedRef = useRef(false);
+  const loadControllerRef = useRef<AbortController | null>(null);
+  const loadSequenceRef = useRef(0);
 
   const loadHealth = useCallback(async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    loadControllerRef.current?.abort();
+    loadControllerRef.current = null;
+    const sequence = ++loadSequenceRef.current;
+
     if (!isPlatformAdmin) {
       setLoading(false);
       return;
     }
+
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
+    const isCurrentLoad = () =>
+      mountedRef.current && !controller.signal.aborted && loadSequenceRef.current === sequence;
+
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchPlatformJobHealth();
+      const data = await fetchPlatformJobHealth(controller.signal);
+      if (!isCurrentLoad()) {
+        return;
+      }
       const runs = (data.recent_runs as ApiJobRunRow[]).map(mapRunLog);
       setRunLogs(runs);
       setHealth({
         queueMode: 'inline',
         redisConnected: false,
-        pendingJobs: countByStatus(data.health, 'pending') + countByStatus(data.health, 'processing'),
+        pendingJobs:
+          countByStatus(data.health, 'pending') + countByStatus(data.health, 'processing'),
         failedJobs: countByStatus(data.health, 'failed'),
-        lastRunSlotGeneration: latestRunForType(data.recent_runs as ApiJobRunRow[], 'GENERATE_SLOTS'),
-        lastRunHoldExpiry: latestRunForType(data.recent_runs as ApiJobRunRow[], 'EXPIRE_SLOT_HOLDS'),
+        lastRunSlotGeneration: latestRunForType(
+          data.recent_runs as ApiJobRunRow[],
+          'GENERATE_SLOTS',
+        ),
+        lastRunHoldExpiry: latestRunForType(
+          data.recent_runs as ApiJobRunRow[],
+          'EXPIRE_SLOT_HOLDS',
+        ),
         lastRunRecordingCleanup: latestRunForType(
           data.recent_runs as ApiJobRunRow[],
           'CLEANUP_EXPIRED_RECORDINGS',
@@ -134,22 +161,38 @@ export function JobHealthDashboard() {
         ),
       });
     } catch (err) {
+      if (!isCurrentLoad() || isAbortError(err)) {
+        return;
+      }
       setError(
         err instanceof ApiRequestError ? err.apiError.message : 'Failed to load job health.',
       );
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+        loadControllerRef.current = null;
+      }
     }
   }, [isPlatformAdmin]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadHealth();
+    return () => {
+      mountedRef.current = false;
+      loadSequenceRef.current += 1;
+      loadControllerRef.current?.abort();
+      loadControllerRef.current = null;
+    };
   }, [loadHealth]);
 
   if (!isPlatformAdmin) {
     return (
       <>
-        <PageHeader title="Job health" description="Background job processing status and run history." />
+        <PageHeader
+          title="Job health"
+          description="Background job processing status and run history."
+        />
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Access denied. Platform admin only.</p>
         </div>
@@ -160,7 +203,10 @@ export function JobHealthDashboard() {
   if (loading) {
     return (
       <>
-        <PageHeader title="Job health" description="Background job processing status and run history." />
+        <PageHeader
+          title="Job health"
+          description="Background job processing status and run history."
+        />
         <LoadingState title="Loading job health" description="Fetching from the platform API." />
       </>
     );
@@ -169,7 +215,10 @@ export function JobHealthDashboard() {
   if (error) {
     return (
       <>
-        <PageHeader title="Job health" description="Background job processing status and run history." />
+        <PageHeader
+          title="Job health"
+          description="Background job processing status and run history."
+        />
         <ErrorState title="Could not load job health" description={error}>
           <button
             type="button"
@@ -190,7 +239,7 @@ export function JobHealthDashboard() {
         description="Background job processing status and run history."
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="portal-stat-grid mb-6 gap-4">
         <HealthCard
           label="Queue mode"
           value={health.queueMode === 'bullmq' ? 'BullMQ' : 'Inline'}
@@ -201,23 +250,15 @@ export function JobHealthDashboard() {
           value={health.redisConnected ? 'Yes' : 'No'}
           ok={health.redisConnected}
         />
-        <HealthCard
-          label="Pending jobs"
-          value={health.pendingJobs}
-          ok={health.pendingJobs === 0}
-        />
-        <HealthCard
-          label="Failed jobs"
-          value={health.failedJobs}
-          ok={health.failedJobs === 0}
-        />
+        <HealthCard label="Pending jobs" value={health.pendingJobs} ok={health.pendingJobs === 0} />
+        <HealthCard label="Failed jobs" value={health.failedJobs} ok={health.failedJobs === 0} />
       </div>
 
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">
           Last scheduled run
         </h3>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="portal-stat-grid gap-4">
           <HealthCard
             label="Slot generation"
             value={
@@ -260,7 +301,9 @@ export function JobHealthDashboard() {
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
           <h3 className="text-lg font-bold text-slate-900">Job run history</h3>
-          <p className="mt-0.5 text-sm text-slate-500">Recent execution logs for background jobs.</p>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Recent execution logs for background jobs.
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">

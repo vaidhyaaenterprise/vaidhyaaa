@@ -18,6 +18,7 @@ export interface Appointment {
   routingSource: RoutingSource;
   source: AppointmentSource;
   status: AppointmentStatus;
+  bookedAt: string;
   hasHistory: boolean;
   overrideReason?: string;
 }
@@ -38,12 +39,28 @@ export interface AppointmentActionRequest {
   status: 'pending' | 'approved' | 'rejected';
 }
 
+export interface AppointmentActivity {
+  id: string;
+  appointmentId: string;
+  patientName: string;
+  patientPhone: string;
+  doctorId: string;
+  doctorName: string;
+  serviceId: string;
+  serviceName: string;
+  reasonForVisit: string;
+  actionType: 'reschedule' | 'cancel';
+  occurredAt: string;
+  previousAppointmentDate: string;
+  previousAppointmentTime: string;
+  appointmentDate: string;
+  appointmentTime: string;
+}
+
 export interface BookingRules {
   slotDurationMinutes: number;
   capacityPerSlot: number;
   bookingHorizonDays: number;
-  manualEditCutoffBeforeStartMinutes: number;
-  manualEditMaxShiftMinutes: number;
   allowDoctorServiceEdit: boolean;
 }
 

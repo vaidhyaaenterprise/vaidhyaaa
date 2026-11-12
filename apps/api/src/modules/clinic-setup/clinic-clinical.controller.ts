@@ -165,7 +165,7 @@ export class ClinicClinicalController {
   ) {
     const parsed = updateBookingRuleSchema.safeParse(body);
     if (!parsed.success) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid booking rule payload.');
+      throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
     }
     const booking_rule = await this.clinicalService.patchBookingRule(clinicId, ruleId, parsed.data);
     return { booking_rule };
@@ -180,7 +180,7 @@ export class ClinicClinicalController {
   ) {
     const parsed = updateBookingRuleSchema.safeParse(body);
     if (!parsed.success) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid booking rule preview payload.');
+      throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
     }
     const previewPatch: { capacity_per_slot?: number; slot_duration_minutes?: number } = {};
     if (parsed.data.capacity_per_slot !== undefined) {
@@ -326,6 +326,16 @@ export class ClinicClinicalController {
     return { patients: result.patients };
   }
 
+  @Put('doctor-schedules')
+  @ClinicAdmin()
+  async replaceAllDoctorSchedules(@Param('clinicId') clinicId: string, @Body() body: unknown) {
+    const parsed = replaceDoctorSchedulesSchema.safeParse(body);
+    if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
+    return {
+      schedules: await this.clinicalService.replaceAllDoctorSchedules(clinicId, parsed.data),
+    };
+  }
+
   @Put('doctors/:doctorId/schedules')
   @Roles('clinic_admin', 'doctor')
   async replaceDoctorSchedules(
@@ -340,7 +350,7 @@ export class ClinicClinicalController {
     }
     const parsed = replaceDoctorSchedulesSchema.safeParse(body);
     if (!parsed.success) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid doctor schedule payload.');
+      throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
     }
     const schedules = await this.clinicalService.replaceDoctorSchedules(
       clinicId,

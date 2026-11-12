@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Appointment } from '@/components/pages/appointments/types';
-import { filterCurrentAndFuturePendingAppointments } from '@/lib/appointment-filters';
+import type { Appointment, AppointmentActivity } from '@/components/pages/appointments/types';
+import {
+  filterCurrentAndFutureConfirmedAppointments,
+  filterCurrentAndFuturePendingAppointments,
+  filterMissedPendingAppointments,
+  filterRetainedAppointmentActivities,
+  latestAppointmentActivities,
+} from '@/lib/appointment-filters';
 
 function appointment(
   id: string,
@@ -17,6 +23,7 @@ function appointment(
     doctorName: 'Doctor',
     serviceId: 'service-1',
     serviceName: 'Consultation',
+    bookedAt: '2026-09-19T04:00:00.000Z',
     appointmentDate,
     appointmentTime,
     reasonForVisit: 'Checkup',
@@ -25,6 +32,31 @@ function appointment(
     source: 'agent',
     status,
     hasHistory: false,
+  };
+}
+
+function activity(
+  id: string,
+  actionType: AppointmentActivity['actionType'],
+  appointmentDate: string,
+  occurredAt: string,
+): AppointmentActivity {
+  return {
+    id,
+    appointmentId: `appointment-${id}`,
+    patientName: id,
+    patientPhone: '9876543210',
+    doctorId: 'doctor-1',
+    doctorName: 'Doctor',
+    serviceId: 'service-1',
+    serviceName: 'Consultation',
+    reasonForVisit: 'Checkup',
+    actionType,
+    occurredAt,
+    previousAppointmentDate: '2026-09-15',
+    previousAppointmentTime: '09:00',
+    appointmentDate,
+    appointmentTime: '10:00',
   };
 }
 
@@ -41,10 +73,145 @@ describe('filterCurrentAndFuturePendingAppointments', () => {
       '2026-09-20',
     );
 
+    expect(result.map((item) => item.id)).toEqual(['today-earlier', 'today-later', 'future-later']);
+  });
+});
+
+describe('filterMissedPendingAppointments', () => {
+  it('keeps only past pending records and sorts the newest missed action first', () => {
+    const result = filterMissedPendingAppointments(
+      [
+        appointment('expired', '2026-09-16', '17:00'),
+        appointment('retention-boundary', '2026-09-17', '08:00'),
+        appointment('older', '2026-09-18', '16:00'),
+        appointment('today', '2026-09-20', '08:00'),
+        appointment('newer-earlier', '2026-09-19', '09:00'),
+        appointment('confirmed-past', '2026-09-19', '12:00', 'confirmed'),
+        appointment('newer-later', '2026-09-19', '11:00'),
+        appointment('future', '2026-09-21', '10:00'),
+      ],
+      '2026-09-20',
+    );
+
     expect(result.map((item) => item.id)).toEqual([
-      'today-earlier',
-      'today-later',
-      'future-later',
+      'newer-later',
+      'newer-earlier',
+      'older',
+      'retention-boundary',
     ]);
+  });
+
+  it('handles the three-day boundary across calendar months', () => {
+    const result = filterMissedPendingAppointments(
+      [
+        appointment('expired', '2026-09-28', '09:00'),
+        appointment('retained', '2026-09-29', '09:00'),
+      ],
+      '2026-10-02',
+    );
+
+    expect(result.map((item) => item.id)).toEqual(['retained']);
+  });
+});
+
+describe('filterRetainedAppointmentActivities', () => {
+  it('retains cancellations for three clinic days and reschedules through three days after the latest appointment', () => {
+    const result = filterRetainedAppointmentActivities(
+      [
+        activity('cancel-boundary', 'cancel', '2026-09-10', '2026-09-16T18:30:00.000Z'),
+        activity('cancel-expired', 'cancel', '2026-09-19', '2026-09-16T18:29:59.000Z'),
+        activity('reschedule-boundary', 'reschedule', '2026-09-17', '2026-09-10T08:00:00Z'),
+        activity('reschedule-expired', 'reschedule', '2026-09-16', '2026-09-19T08:00:00Z'),
+        activity('reschedule-future', 'reschedule', '2026-09-25', '2026-09-19T08:00:00Z'),
+      ],
+      '2026-09-20',
+      'Asia/Kolkata',
+    );
+
+    expect(result.map((item) => item.id)).toEqual([
+      'reschedule-future',
+      'cancel-boundary',
+      'reschedule-boundary',
+    ]);
+  });
+
+  it('excludes cancellation activity with an invalid event timestamp', () => {
+    expect(
+      filterRetainedAppointmentActivities(
+        [activity('invalid', 'cancel', '2026-09-20', 'not-a-date')],
+        '2026-09-20',
+        'Asia/Kolkata',
+      ),
+    ).toEqual([]);
+  });
+
+  it('does not resurrect an old reschedule when the final cancellation has expired', () => {
+    const original = activity('old-reschedule', 'reschedule', '2026-10-30', '2026-10-10T08:00:00Z');
+    const cancellation = {
+      ...activity('final-cancellation', 'cancel', '2026-10-30', '2026-10-18T08:00:00Z'),
+      appointmentId: original.appointmentId,
+    };
+    expect(
+      filterRetainedAppointmentActivities([original, cancellation], '2026-10-23', 'Asia/Kolkata'),
+    ).toEqual([]);
+  });
+
+  it('keeps only the final reschedule and retains it by the latest appointment date', () => {
+    const original = activity('first', 'reschedule', '2026-10-19', '2026-10-10T08:00:00Z');
+    const latest = {
+      ...original,
+      id: 'latest',
+      occurredAt: '2026-10-11T08:00:00Z',
+      appointmentDate: '2026-10-30',
+    };
+    expect(
+      filterRetainedAppointmentActivities([latest, original], '2026-10-23', 'Asia/Kolkata'),
+    ).toEqual([latest]);
+  });
+});
+
+describe('latestAppointmentActivities', () => {
+  it('selects by appointment ID and event time, not input order, patient identity, or phone', () => {
+    const original = activity('first', 'reschedule', '2026-10-25', '2026-10-20T08:00:00Z');
+    const intermediate = { ...original, id: 'middle', occurredAt: '2026-10-21T08:00:00Z' };
+    const final = {
+      ...original,
+      id: 'last',
+      actionType: 'cancel' as const,
+      occurredAt: '2026-10-22T08:00:00Z',
+    };
+    const separateAppointment = {
+      ...original,
+      id: 'separate',
+      appointmentId: 'another-appointment',
+      occurredAt: '2026-10-21T09:00:00Z',
+    };
+    const input = [intermediate, separateAppointment, final, original];
+    expect(latestAppointmentActivities(input)).toEqual([final, separateAppointment]);
+    expect(input).toEqual([intermediate, separateAppointment, final, original]);
+  });
+
+  it('uses the event ID as a deterministic tie-breaker and ignores duplicate copies', () => {
+    const first = activity('event-1', 'reschedule', '2026-10-25', '2026-10-20T08:00:00Z');
+    const last = { ...first, id: 'event-2', actionType: 'cancel' as const };
+    expect(latestAppointmentActivities([last, first, last])).toEqual([last]);
+    expect(latestAppointmentActivities([first, last])).toEqual([last]);
+  });
+});
+
+describe('filterCurrentAndFutureConfirmedAppointments', () => {
+  it('keeps only current and future confirmed records in chronological order', () => {
+    const result = filterCurrentAndFutureConfirmedAppointments(
+      [
+        appointment('future-later', '2026-09-22', '11:00', 'confirmed'),
+        appointment('past', '2026-09-19', '09:00', 'confirmed'),
+        appointment('today-later', '2026-09-20', '10:00', 'confirmed'),
+        appointment('pending-future', '2026-09-21', '09:00'),
+        appointment('today-earlier', '2026-09-20', '08:00', 'confirmed'),
+      ],
+      '2026-09-20',
+    );
+
+    expect(result.map((item) => item.id)).toEqual(['today-earlier', 'today-later', 'future-later']);
   });
 });

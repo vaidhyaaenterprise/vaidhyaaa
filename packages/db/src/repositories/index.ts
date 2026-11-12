@@ -1,4 +1,4 @@
-import { eq, desc, and, or } from 'drizzle-orm';
+import { eq, desc, and, isNull, inArray } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -38,6 +38,33 @@ import { ClinicalSetupRepository } from './clinical-setup.repository';
 import { SlotsRepository } from './slots.repository';
 import { CallInboxRepository } from './call-inbox.repository';
 
+const clinicProfileSelection = {
+  name: clinics.name,
+  uniqueNumber: clinics.uniqueNumber,
+  primaryPhone: clinics.primaryPhone,
+  addressLine1: clinics.addressLine1,
+  addressLine2: clinics.addressLine2,
+  city: clinics.city,
+  state: clinics.state,
+  postalCode: clinics.postalCode,
+  country: clinics.country,
+  timezone: clinics.timezone,
+};
+
+export type ClinicProfileUpdateValues = Partial<
+  Pick<
+    typeof clinics.$inferInsert,
+    | 'name'
+    | 'primaryPhone'
+    | 'addressLine1'
+    | 'addressLine2'
+    | 'city'
+    | 'state'
+    | 'postalCode'
+    | 'country'
+  >
+>;
+
 export { AuthRepository } from './auth.repository';
 export { OtpRepository, type OtpPurpose } from './otp.repository';
 export {
@@ -61,6 +88,7 @@ export {
   normalizeQuestionSignature,
   type KnowledgeEntryRow,
   type KnowledgeEmbeddingStatusSummary,
+  type KnowledgeSectionRow,
   type ManualTemplateEntryRow,
   type KnowledgeVectorSearchRow,
 } from './knowledge.repository';
@@ -94,35 +122,35 @@ export class ClinicsRepository {
 
   getClinicLocation(clinicId: string) {
     return this.db
-      .select({
-        name: clinics.name,
-        uniqueNumber: clinics.uniqueNumber,
-        primaryPhone: clinics.primaryPhone,
-        addressLine1: clinics.addressLine1,
-        addressLine2: clinics.addressLine2,
-        city: clinics.city,
-        state: clinics.state,
-        postalCode: clinics.postalCode,
-        country: clinics.country,
-        timezone: clinics.timezone,
-      })
+      .select(clinicProfileSelection)
       .from(clinics)
       .where(eq(clinics.id, clinicId))
       .limit(1);
   }
 
+  updateClinicProfile(clinicId: string, values: ClinicProfileUpdateValues) {
+    return this.db
+      .update(clinics)
+      .set({ ...values, updatedAt: new Date() })
+      .where(eq(clinics.id, clinicId))
+      .returning(clinicProfileSelection);
+  }
+
   findClinicByPhone(phone: string) {
     const digits = phone.replace(/\D/g, '');
+    const nationalDigits =
+      digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+    const variants = new Set([digits, phone, `+${digits}`]);
+    // Clinic editing uses ten digits; telephony integrations may still send E.164.
+    if (nationalDigits.length === 10) {
+      variants.add(nationalDigits);
+      variants.add(`91${nationalDigits}`);
+      variants.add(`+91${nationalDigits}`);
+    }
     return this.db
       .select()
       .from(clinics)
-      .where(
-        or(
-          eq(clinics.primaryPhone, digits),
-          eq(clinics.primaryPhone, phone),
-          eq(clinics.primaryPhone, `+${digits}`),
-        ),
-      )
+      .where(inArray(clinics.primaryPhone, [...variants]))
       .limit(1);
   }
 
@@ -173,7 +201,9 @@ export class ClinicalRepository {
     return this.db
       .select()
       .from(clinicKnowledgeBase)
-      .where(eq(clinicKnowledgeBase.clinicId, clinicId));
+      .where(
+        and(eq(clinicKnowledgeBase.clinicId, clinicId), isNull(clinicKnowledgeBase.removedAt)),
+      );
   }
 
   getDoctorFeeInfo(clinicId: string, doctorId: string) {
@@ -204,7 +234,11 @@ export class ClinicalRepository {
       .select()
       .from(clinicKnowledgeBase)
       .where(
-        and(eq(clinicKnowledgeBase.clinicId, clinicId), eq(clinicKnowledgeBase.status, 'approved')),
+        and(
+          eq(clinicKnowledgeBase.clinicId, clinicId),
+          eq(clinicKnowledgeBase.status, 'approved'),
+          isNull(clinicKnowledgeBase.removedAt),
+        ),
       );
 
     let best: (typeof rows)[number] | null = null;
@@ -265,6 +299,20 @@ export class ClinicalRepository {
           eq(clinicServices.active, true),
         ),
       );
+  }
+
+  /** One clinic-scoped catalogue query for voice routing; inactive doctors cannot receive bookings. */
+  listActiveDoctorServices(clinicId: string) {
+    return this.db.select({
+      doctorId: doctors.id,
+      doctorName: doctors.name,
+      qualification: doctors.qualification,
+      clinicServiceId: clinicServices.id,
+    }).from(doctorServices)
+      .innerJoin(doctors, and(eq(doctors.clinicId, doctorServices.clinicId), eq(doctors.id, doctorServices.doctorId)))
+      .innerJoin(clinicServices, and(eq(clinicServices.clinicId, doctorServices.clinicId), eq(clinicServices.id, doctorServices.clinicServiceId)))
+      .where(and(eq(doctorServices.clinicId, clinicId), eq(doctorServices.active, true),
+        eq(doctors.active, true), eq(clinicServices.active, true)));
   }
 
   listActiveDoctorServicesForDoctor(clinicId: string, doctorId: string) {

@@ -7,29 +7,39 @@ import { JOB_QUEUE_MAP, JOB_TYPES, type JobType } from '@vaidya/shared';
 
 import { AppModule } from '../app.module';
 import { JobExecutorService } from '../common/jobs/job-executor.service';
+import { SlotReconciliationService } from '../modules/slots/slot-reconciliation.service';
 
 loadLocalEnv();
 
 const JOB_ALIASES: Record<string, string> = {
   'slot-generation': JOB_TYPES.GENERATE_SLOTS,
   'slot-hold-expiry': JOB_TYPES.EXPIRE_SLOT_HOLDS,
+  'call-retention': JOB_TYPES.CLEANUP_EXPIRED_CALLS,
 };
 
 async function main(): Promise<void> {
   const alias = process.argv[2];
   if (!alias) {
-    console.error('Usage: pnpm --filter @vaidya/api jobs:run <slot-generation|slot-hold-expiry>');
+    console.error(
+      'Usage: pnpm --filter @vaidya/api jobs:run <slot-generation|slot-hold-expiry|slot-reconciliation|call-retention> [--retry-failed]',
+    );
     process.exit(1);
   }
 
   const jobType = JOB_ALIASES[alias] as JobType;
-  if (!jobType) {
+  if (!jobType && alias !== 'slot-reconciliation') {
     console.error(`Unknown job alias: ${alias}`);
     process.exit(1);
   }
 
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
   try {
+    if (alias === 'slot-reconciliation') {
+      const jobs = app.get(SlotReconciliationService);
+      if (process.argv.includes('--retry-failed')) await jobs.retryFailed();
+      console.log(JSON.stringify({ processed: await jobs.drain(undefined, 100) }));
+      return;
+    }
     const executor = app.get(JobExecutorService);
     await executor.runValidatedJob(jobType, JOB_QUEUE_MAP[jobType], {});
     console.log(JSON.stringify({ job_type: jobType, status: 'completed' }, null, 2));

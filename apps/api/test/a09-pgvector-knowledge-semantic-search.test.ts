@@ -68,11 +68,12 @@ async function regenerateSeedEmbeddings(app: NestFastifyApplication) {
 }
 
 function configureA09Env() {
-  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test';
+  process.env.DATABASE_URL =
+    process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test';
   process.env.KNOWLEDGE_SEARCH_PROVIDER = 'hybrid';
   process.env.EMBEDDING_PROVIDER = 'mock';
   process.env.EMBEDDING_MODEL = 'mock-embedding-v1';
-  process.env.EMBEDDING_DIMENSIONS = '768';
+  process.env.EMBEDDING_DIMENSIONS = '1024';
   process.env.KNOWLEDGE_VECTOR_MIN_SCORE = '0.70';
   process.env.QUEUE_MODE = 'inline';
   delete process.env.EMBEDDING_MOCK_FAIL_KNOWLEDGE_IDS;
@@ -172,6 +173,18 @@ describe('A09 pgvector knowledge semantic search', () => {
     ]) {
       expect(columnNames).toContain(name);
     }
+
+    const vectorColumns = await sql`
+      SELECT a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      WHERE c.relname = 'clinic_knowledge_base'
+        AND a.attname IN ('embedding', 'question_embedding', 'answer_embedding')
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+    `;
+    expect(vectorColumns).toHaveLength(3);
+    expect(vectorColumns.every((column) => column.data_type === 'vector(1024)')).toBe(true);
 
     const indexes = await sql`
       SELECT indexname FROM pg_indexes WHERE tablename = 'clinic_knowledge_base'
@@ -327,12 +340,7 @@ describe('A09 pgvector knowledge semantic search', () => {
     `;
 
     const sessionId = await createConversation(app, '+919222229006');
-    const result = await sendMessage(
-      app,
-      sessionId,
-      'Disabled parking answer?',
-      'a09_disabled',
-    );
+    const result = await sendMessage(app, sessionId, 'Disabled parking answer?', 'a09_disabled');
     expect(result.assistant_message.message_text).not.toContain('Disabled-only parking answer');
     expect(result.assistant_message.message_text.toLowerCase()).toContain('staff');
 
@@ -358,12 +366,7 @@ describe('A09 pgvector knowledge semantic search', () => {
     expect(location.assistant_message.reply_template_key).toBe('location.answer');
 
     const availSession = await createConversation(app, '+919222229010');
-    const avail = await sendMessage(
-      app,
-      availSession,
-      'Dr Priya inniku irukkangala?',
-      'a09_avail',
-    );
+    const avail = await sendMessage(app, availSession, 'Dr Priya inniku irukkangala?', 'a09_avail');
     expect([
       'availability.today_slots',
       'availability.no_slots',
@@ -442,12 +445,7 @@ describe('A09 pgvector knowledge semantic search', () => {
     `;
 
     const sessionId = await createConversation(app, '+919222229015');
-    const result = await sendMessage(
-      app,
-      sessionId,
-      'Force fail embedding row?',
-      'a09_embed_fail',
-    );
+    const result = await sendMessage(app, sessionId, 'Force fail embedding row?', 'a09_embed_fail');
     expect(result.assistant_message.reply_template_key).toBe('knowledge.answer');
     expect(result.assistant_message.message_text).toContain('Force fail embedding answer');
 
@@ -531,10 +529,10 @@ describe('A09 pgvector knowledge semantic search', () => {
   });
 
   it('15. mock embedding provider is deterministic', () => {
-    const first = buildDeterministicEmbedding('scan fasting abdomen', 768);
-    const second = buildDeterministicEmbedding('scan fasting abdomen', 768);
+    const first = buildDeterministicEmbedding('scan fasting abdomen', 1024);
+    const second = buildDeterministicEmbedding('scan fasting abdomen', 1024);
     expect(first).toEqual(second);
-    expect(first.length).toBe(768);
+    expect(first.length).toBe(1024);
   });
 
   it('16. audit logs are written for knowledge answers', async () => {
@@ -573,7 +571,8 @@ describe('A09 pgvector knowledge semantic search', () => {
     });
     expect(statusResponse.statusCode).toBe(200);
     const statusBody = apiSuccessBodySchema.parse(statusResponse.json());
-    const status = (statusBody.data as { embedding_status: Record<string, number> }).embedding_status;
+    const status = (statusBody.data as { embedding_status: Record<string, number> })
+      .embedding_status;
     expect(status.approved_total).toBeGreaterThan(0);
 
     const [row] = await sql`
@@ -637,7 +636,10 @@ describe('A09 pgvector knowledge semantic search', () => {
     await waitForInlineJob(1500);
 
     for (let index = 0; index < 20; index += 1) {
-      const sessionId = await createConversation(app, `+919222228${String(index).padStart(3, '0')}`);
+      const sessionId = await createConversation(
+        app,
+        `+919222228${String(index).padStart(3, '0')}`,
+      );
       const result = await sendMessage(
         app,
         sessionId,
@@ -651,15 +653,22 @@ describe('A09 pgvector knowledge semantic search', () => {
 
 describe('A09 knowledge search provider selection', () => {
   it('selects text, pgvector, and hybrid providers from env', () => {
-    expect(parseApiEnv({ ...process.env, KNOWLEDGE_SEARCH_PROVIDER: 'text' }).KNOWLEDGE_SEARCH_PROVIDER).toBe('text');
-    expect(parseApiEnv({ ...process.env, KNOWLEDGE_SEARCH_PROVIDER: 'pgvector' }).KNOWLEDGE_SEARCH_PROVIDER).toBe('pgvector');
-    expect(parseApiEnv({ ...process.env, KNOWLEDGE_SEARCH_PROVIDER: 'hybrid' }).KNOWLEDGE_SEARCH_PROVIDER).toBe('hybrid');
+    expect(
+      parseApiEnv({ ...process.env, KNOWLEDGE_SEARCH_PROVIDER: 'text' }).KNOWLEDGE_SEARCH_PROVIDER,
+    ).toBe('text');
+    expect(
+      parseApiEnv({ ...process.env, KNOWLEDGE_SEARCH_PROVIDER: 'pgvector' })
+        .KNOWLEDGE_SEARCH_PROVIDER,
+    ).toBe('pgvector');
+    expect(
+      parseApiEnv({ ...process.env, KNOWLEDGE_SEARCH_PROVIDER: 'hybrid' })
+        .KNOWLEDGE_SEARCH_PROVIDER,
+    ).toBe('hybrid');
   });
 });
 
 function getTestDatabaseUrl(): string {
   return (
-    process.env.TEST_DATABASE_URL ??
-    'postgresql://postgres:postgres@localhost:5433/vaidya_test'
+    process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5433/vaidya_test'
   );
 }

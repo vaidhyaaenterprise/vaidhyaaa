@@ -7,6 +7,7 @@ import {
   markAppointmentVisitedSchema,
   rescheduleAppointmentSchema,
   resolveAppointmentActionRequestSchema,
+  updateAppointmentPatientNameSchema,
   type AuthContext,
 } from '@vaidya/shared';
 
@@ -53,6 +54,13 @@ export class AppointmentsController {
     return { action_requests };
   }
 
+  @Get('activity')
+  @Roles('clinic_admin')
+  async listAppointmentActivity(@Param('clinicId') clinicId: string) {
+    const activities = await this.appointmentsService.listAppointmentActivities(clinicId);
+    return { activities };
+  }
+
   @Get('available-slots')
   @Roles('clinic_admin', 'doctor')
   async listAvailableSlots(
@@ -97,7 +105,8 @@ export class AppointmentsController {
   ) {
     const parsed = manualAppointmentCreateSchema.safeParse(body);
     if (!parsed.success) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid manual appointment payload.');
+      const phoneIssue = parsed.error.issues.find((issue) => issue.path[0] === 'patient_phone');
+      throw new AppError('VALIDATION_ERROR', phoneIssue?.message ?? 'Invalid manual appointment payload.');
     }
     const auth = getAuthContext(request);
     const appointment = await this.appointmentAdminService.createManualAppointment(
@@ -145,10 +154,13 @@ export class AppointmentsController {
   async confirmAppointment(
     @Param('clinicId') clinicId: string,
     @Param('appointmentId') appointmentId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
+    const auth = getAuthContext(request);
     const appointment = await this.appointmentLifecycleService.confirmAppointment({
       clinicId,
       appointmentId,
+      actorUserId: auth.userId,
     });
     return { appointment };
   }
@@ -158,12 +170,36 @@ export class AppointmentsController {
   async cancelAppointment(
     @Param('clinicId') clinicId: string,
     @Param('appointmentId') appointmentId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
+    const auth = getAuthContext(request);
     const appointment = await this.appointmentLifecycleService.cancelAppointment({
       clinicId,
       appointmentId,
+      actorUserId: auth.userId,
     });
     return { appointment };
+  }
+
+  @Patch(':appointmentId/patient-name')
+  @Roles('clinic_admin')
+  async updatePatientName(
+    @Param('clinicId') clinicId: string,
+    @Param('appointmentId') appointmentId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = updateAppointmentPatientNameSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError('VALIDATION_ERROR', 'Patient name must contain 2 to 120 characters.');
+    }
+    const auth = getAuthContext(request);
+    return this.appointmentAdminService.updatePatientName({
+      clinicId,
+      appointmentId,
+      patientName: parsed.data.patient_name,
+      actorUserId: auth.userId,
+    });
   }
 
   @Patch(':appointmentId/reschedule')

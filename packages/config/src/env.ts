@@ -236,6 +236,31 @@ export const apiEnvSchema = z
       });
     }
 
+    if (env.EMBEDDING_PROVIDER === 'gemini' && !env.GEMINI_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['GEMINI_API_KEY'],
+        message: 'GEMINI_API_KEY is required when EMBEDDING_PROVIDER is gemini',
+      });
+    }
+
+    if (env.EMBEDDING_PROVIDER === 'nvidia' && !env.NVIDIA_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['NVIDIA_API_KEY'],
+        message: 'NVIDIA_API_KEY is required when EMBEDDING_PROVIDER is nvidia',
+      });
+    }
+
+    if (env.EMBEDDING_DIMENSIONS !== 1024) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EMBEDDING_DIMENSIONS'],
+        message:
+          'EMBEDDING_DIMENSIONS must be 1024 to match the clinic_knowledge_base vector columns',
+      });
+    }
+
     if (
       (env.PRIMARY_LLM_PROVIDER === 'sarvam' ||
         env.SERVICE_ROUTER_PROVIDER === 'sarvam' ||

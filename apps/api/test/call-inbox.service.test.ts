@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DatabaseConnection, Repositories } from '@vaidya/db';
 
 import { CallInboxService } from '../src/modules/call-inbox/call-inbox.service';
 
 const CLINIC_ID = '00000000-0000-0000-0000-000000000001';
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-23T12:00:00Z'));
+});
+afterEach(() => vi.useRealTimers());
 
 function date(hour: number) {
   return new Date(`2026-09-22T${String(hour).padStart(2, '0')}:00:00.000Z`);
@@ -33,7 +39,7 @@ function makeService(data: {
   return { service, callInbox };
 }
 
-function call(id: string, sessionId: string, outcome: string, hour: number) {
+function call(id: string, sessionId: string | null, outcome: string, hour: number) {
   return {
     id,
     clinicId: CLINIC_ID,
@@ -61,6 +67,83 @@ function call(id: string, sessionId: string, outcome: string, hour: number) {
 }
 
 describe('CallInboxService', () => {
+  it('enforces a fixed 30-day window on every source even when a caller requests older history', async () => {
+    const { service, callInbox } = makeService({});
+    await service.list({
+      clinicId: CLINIC_ID,
+      limit: 200,
+      from: new Date('2020-01-01'),
+      to: new Date('2030-01-01'),
+    });
+    for (const query of Object.values(callInbox)) {
+      expect(query).toHaveBeenCalledWith(CLINIC_ID, {
+        from: new Date('2026-08-24T12:00:00Z'),
+        to: new Date('2026-09-23T12:00:00Z'),
+      });
+    }
+  });
+
+  it('keeps the exact cutoff and null-start fallback but excludes older or future calls', async () => {
+    const old = {
+      ...call('old', null, 'general_inquiry', 1),
+      startedAt: new Date('2026-08-24T11:59:59.999Z'),
+    };
+    const boundary = { ...old, id: 'boundary', startedAt: new Date('2026-08-24T12:00:00Z') };
+    const fallback = { ...old, id: 'fallback', startedAt: null };
+    const future = { ...old, id: 'future', startedAt: new Date('2026-09-24T00:00:00Z') };
+    const { service } = makeService({ calls: [old, boundary, fallback, future] });
+    const result = await service.list({ clinicId: CLINIC_ID, limit: 200 });
+    expect(result.items.map((item) => item.id)).toEqual(['fallback', 'boundary']);
+  });
+
+  it('allows narrower ranges and returns no results for a wholly expired range', async () => {
+    const { service, callInbox } = makeService({});
+    await service.list({ clinicId: CLINIC_ID, limit: 200, from: date(1), to: date(5) });
+    expect(callInbox.listCalls).toHaveBeenCalledWith(CLINIC_ID, { from: date(1), to: date(5) });
+    vi.mocked(callInbox.listCalls).mockClear();
+    expect(
+      await service.list({ clinicId: CLINIC_ID, limit: 200, to: new Date('2026-01-01') }),
+    ).toEqual({ items: [], next_cursor: null });
+    expect(callInbox.listCalls).not.toHaveBeenCalled();
+  });
+
+  it('checks canonical entries against the displayed linked call timestamp, not appointment dates', async () => {
+    const linkedCall = call('linked-old-call', 'booking-session', 'appointment_booked', 1);
+    linkedCall.startedAt = new Date('2026-08-24T11:59:59.999Z');
+    const { service } = makeService({
+      calls: [linkedCall],
+      bookings: [
+        {
+          id: 'booking-1',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'booking-session',
+          patientPhone: '9876543210',
+          patientName: 'Patient',
+          patientId: null,
+          status: 'confirmed',
+          reasonForVisit: 'Review',
+          appointmentStart: '2026-11-01 09:00:00',
+          createdAt: date(1),
+          updatedAt: date(1),
+        },
+      ],
+    });
+    expect((await service.list({ clinicId: CLINIC_ID, limit: 200 })).items).toEqual([]);
+  });
+
+  it('queries every canonical source for an unfiltered inbox request', async () => {
+    const { service, callInbox } = makeService({});
+
+    await service.list({ clinicId: CLINIC_ID, limit: 200 });
+
+    expect(callInbox.listCalls).toHaveBeenCalledOnce();
+    expect(callInbox.listVoiceAppointmentBookings).toHaveBeenCalledOnce();
+    expect(callInbox.listAppointmentCallActions).toHaveBeenCalledOnce();
+    expect(callInbox.listCallbackRequests).toHaveBeenCalledOnce();
+    expect(callInbox.listEmergencyIncidents).toHaveBeenCalledOnce();
+    expect(callInbox.listVoiceInquiryMessages).toHaveBeenCalledOnce();
+  });
+
   it('normalizes canonical DB sources and suppresses duplicate raw call outcomes', async () => {
     const callbackCall = call('call-callback', 'session-callback', 'callback_requested', 5);
     const { service } = makeService({
@@ -161,9 +244,60 @@ describe('CallInboxService', () => {
     ]);
     expect(result.items.filter((item) => item.outcome === 'callback_requested')).toHaveLength(1);
     expect(result.items.some((item) => item.source_id === 'call-transport')).toBe(false);
-    expect(
-      result.items.find((item) => item.source_id === 'action-reschedule')?.action_needed,
-    ).toBe('appointment_action_needed');
+    expect(result.items.find((item) => item.source_id === 'action-reschedule')?.action_needed).toBe(
+      'appointment_action_needed',
+    );
+  });
+
+  it('reconciles legacy unlinked booked calls without returning duplicate records', async () => {
+    const newerRawCall = call('raw-newer', null, 'appointment_booked', 8);
+    const olderRawCall = call('raw-older', null, 'appointment_booked', 7);
+    const { service } = makeService({
+      calls: [newerRawCall, olderRawCall],
+      bookings: [
+        {
+          id: 'booking-newer',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'booking-session-newer',
+          patientPhone: '+91 98765 43210',
+          patientName: 'Newer patient',
+          patientId: null,
+          status: 'pending_confirmation',
+          reasonForVisit: 'Fever and cough',
+          appointmentStart: '2026-10-15 09:30:00',
+          createdAt: date(2),
+          updatedAt: date(2),
+        },
+        {
+          id: 'booking-older',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'booking-session-older',
+          patientPhone: '9876543210',
+          patientName: 'Older patient',
+          patientId: null,
+          status: 'pending_confirmation',
+          reasonForVisit: 'Fever',
+          appointmentStart: '2026-10-14 10:00:00',
+          createdAt: date(1),
+          updatedAt: date(1),
+        },
+      ],
+    });
+
+    const result = await service.list({ clinicId: CLINIC_ID, limit: 200 });
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items.map((item) => item.source_id)).toEqual(['booking-newer', 'booking-older']);
+    expect(result.items.map((item) => item.call_id)).toEqual(['raw-newer', 'raw-older']);
+    expect(result.items.map((item) => item.occurred_at)).toEqual([
+      date(2).toISOString(),
+      date(1).toISOString(),
+    ]);
+    expect(result.items.map((item) => item.appointment_start)).toEqual([
+      '2026-10-15 09:30:00',
+      '2026-10-14 10:00:00',
+    ]);
+    expect(result.items.every((item) => item.outcome === 'appointment_booked')).toBe(true);
   });
 
   it('applies multiple outcomes with OR semantics', async () => {
@@ -185,6 +319,34 @@ describe('CallInboxService', () => {
       'appointment_booked',
       'appointment_cancelled',
     ]);
+  });
+
+  it('uses canonical records for deduplication before applying an outcome filter', async () => {
+    const { service } = makeService({
+      calls: [call('raw-inquiry', 'session-canonical-booking', 'general_inquiry', 2)],
+      bookings: [
+        {
+          id: 'booking-canonical',
+          clinicId: CLINIC_ID,
+          sourceSessionId: 'session-canonical-booking',
+          patientPhone: '9000000010',
+          patientName: 'Booked patient',
+          patientId: null,
+          status: 'pending_confirmation',
+          reasonForVisit: 'Consultation',
+          createdAt: date(2),
+          updatedAt: date(2),
+        },
+      ],
+    });
+
+    const result = await service.list({
+      clinicId: CLINIC_ID,
+      outcomes: ['general_inquiry'],
+      limit: 200,
+    });
+
+    expect(result.items).toEqual([]);
   });
 
   it('derives enquiries from voice intents and never from generic completed calls', async () => {

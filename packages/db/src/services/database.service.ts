@@ -4,6 +4,8 @@ import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { AppError, type ApiErrorCode } from '@vaidya/shared';
 
 import type { Database } from '../client';
+import { slotConfigurationReady } from './slot-configuration-ready';
+import { slotMatchesEffectiveRule } from './slot-effective-rule';
 import {
   appointmentSlots,
   auditLogs,
@@ -136,10 +138,22 @@ export class DatabaseService {
     fn: (slot: typeof appointmentSlots.$inferSelect, tx: Database) => Promise<T>,
   ): Promise<T> {
     return this.withTransaction(async (tx) => {
+      // Schedule writes take the exclusive version of this lock, so an in-flight
+      // booking finishes before the final conflict check and outbox commit.
+      await tx.execute(
+        drizzleSql`SELECT pg_advisory_xact_lock_shared(hashtext(${`clinic-schedule:${clinicId}`}))`,
+      );
       const rows = await tx
         .select()
         .from(appointmentSlots)
-        .where(and(eq(appointmentSlots.clinicId, clinicId), eq(appointmentSlots.id, slotId)))
+        .where(
+          and(
+            eq(appointmentSlots.clinicId, clinicId),
+            eq(appointmentSlots.id, slotId),
+            slotConfigurationReady(),
+            slotMatchesEffectiveRule(),
+          ),
+        )
         .for('update')
         .limit(1);
 

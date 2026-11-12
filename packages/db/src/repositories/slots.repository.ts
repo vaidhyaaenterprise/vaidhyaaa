@@ -1,4 +1,4 @@
-import { and, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 
 import type { Database } from '../client';
 import {
@@ -21,6 +21,8 @@ import {
   slotHolds,
 } from '../schema';
 import { ACTIVE_APPOINTMENT_STATUSES, ACTIVE_HOLD_STATUS } from '../services/slot-capacity';
+import { slotConfigurationReady } from '../services/slot-configuration-ready';
+import { slotMatchesEffectiveRule } from '../services/slot-effective-rule';
 
 function clinicLocalNow(clinicId: string) {
   return sql`(
@@ -177,7 +179,14 @@ export class SlotsRepository {
     return this.db
       .select()
       .from(appointmentSlots)
-      .where(and(eq(appointmentSlots.clinicId, clinicId), eq(appointmentSlots.id, slotId)))
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          eq(appointmentSlots.id, slotId),
+          slotConfigurationReady(),
+          slotMatchesEffectiveRule(),
+        ),
+      )
       .limit(1);
   }
 
@@ -199,6 +208,8 @@ export class SlotsRepository {
           eq(appointmentSlots.startTime, startTime),
           eq(appointmentSlots.endTime, endTime),
           ne(appointmentSlots.status, 'superseded'),
+          slotConfigurationReady(),
+          slotMatchesEffectiveRule(),
           sql`NOT EXISTS (
             SELECT 1
             FROM clinic_holidays h
@@ -251,7 +262,27 @@ export class SlotsRepository {
           lte(appointmentSlots.endTime, to),
           ne(appointmentSlots.status, 'superseded'),
         ),
-      );
+      )
+      .for('update');
+  }
+
+  updateGeneratedSlotConfiguration(
+    clinicId: string,
+    slotIds: string[],
+    values: { generatedFromRuleId: string; configVersion: number; capacityTotal: number },
+  ) {
+    if (slotIds.length === 0) return Promise.resolve([]);
+    return this.db
+      .update(appointmentSlots)
+      .set({ ...values, updatedAt: new Date() })
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          inArray(appointmentSlots.id, slotIds),
+          eq(appointmentSlots.status, 'open'),
+        ),
+      )
+      .returning();
   }
 
   supersedeFutureOpenSlotsByIds(clinicId: string, slotIds: string[]) {
@@ -473,6 +504,8 @@ export class SlotsRepository {
       eq(appointmentSlots.doctorId, doctorId),
       eq(appointmentSlots.clinicServiceId, clinicServiceId),
       eq(appointmentSlots.status, 'open'),
+      slotConfigurationReady(),
+      slotMatchesEffectiveRule(),
       gt(appointmentSlots.startTime, clinicLocalNow(clinicId)),
     ];
     if (date) {
@@ -513,6 +546,62 @@ export class SlotsRepository {
       .orderBy(appointmentSlots.startTime);
   }
 
+  async hasStaleOpenSlotsForDate(
+    clinicId: string,
+    doctorId: string,
+    clinicServiceId: string,
+    date: string,
+  ) {
+    const [row] = await this.db
+      .select({ id: appointmentSlots.id })
+      .from(appointmentSlots)
+      .where(
+        and(
+          eq(appointmentSlots.clinicId, clinicId),
+          eq(appointmentSlots.doctorId, doctorId),
+          eq(appointmentSlots.clinicServiceId, clinicServiceId),
+          eq(appointmentSlots.status, 'open'),
+          sql`date(${appointmentSlots.startTime}) = ${date}::date`,
+          gt(appointmentSlots.startTime, clinicLocalNow(clinicId)),
+          sql`NOT (${slotMatchesEffectiveRule()})`,
+          // Do not try to rewrite an appointment or an active reservation merely
+          // because an older release generated it with a different configuration.
+          sql`NOT EXISTS (SELECT 1 FROM appointment_requests a WHERE a.clinic_id = ${appointmentSlots.clinicId}
+        AND a.slot_id = ${appointmentSlots.id} AND a.status IN ('pending_confirmation', 'confirmed'))`,
+          sql`NOT EXISTS (SELECT 1 FROM slot_holds h WHERE h.clinic_id = ${appointmentSlots.clinicId}
+        AND h.slot_id = ${appointmentSlots.id} AND h.status = 'active' AND h.hold_expires_at > now())`,
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  findEffectiveBookingRuleForDate(
+    clinicId: string,
+    doctorId: string,
+    clinicServiceId: string,
+    date: string,
+  ) {
+    return this.db
+      .select()
+      .from(doctorServiceBookingRules)
+      .where(
+        and(
+          eq(doctorServiceBookingRules.clinicId, clinicId),
+          eq(doctorServiceBookingRules.doctorId, doctorId),
+          eq(doctorServiceBookingRules.clinicServiceId, clinicServiceId),
+          eq(doctorServiceBookingRules.active, true),
+          lte(doctorServiceBookingRules.effectiveFrom, date),
+          or(
+            isNull(doctorServiceBookingRules.effectiveTo),
+            gte(doctorServiceBookingRules.effectiveTo, date),
+          ),
+        ),
+      )
+      .orderBy(desc(doctorServiceBookingRules.version), desc(doctorServiceBookingRules.id))
+      .limit(1);
+  }
+
   findSlotByExactTime(
     clinicId: string,
     doctorId: string,
@@ -532,6 +621,8 @@ export class SlotsRepository {
           eq(appointmentSlots.clinicServiceId, clinicServiceId),
           eq(appointmentSlots.status, 'open'),
           sql`${appointmentSlots.startTime} = ${startTime}`,
+          slotConfigurationReady(),
+          slotMatchesEffectiveRule(),
           sql`NOT EXISTS (
             SELECT 1
             FROM clinic_holidays h
@@ -762,11 +853,7 @@ export class SlotsRepository {
       .returning();
   }
 
-  findActiveHoldForSession(
-    clinicId: string,
-    sessionId: string,
-    db: Database = this.db,
-  ) {
+  findActiveHoldForSession(clinicId: string, sessionId: string, db: Database = this.db) {
     return db
       .select()
       .from(slotHolds)

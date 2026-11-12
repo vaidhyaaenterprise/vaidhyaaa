@@ -146,10 +146,30 @@ export const clinicKnowledgeBase = pgTable(
     lastEmbeddingJobId: uuid('last_embedding_job_id'),
     approvedByUserId: uuid('approved_by_user_id'),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     clinicKnowledgeIdUnique: unique().on(table.clinicId, table.id),
+  }),
+);
+
+export const clinicKnowledgeSections = pgTable(
+  'clinic_knowledge_sections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clinicId: uuid('clinic_id').notNull(),
+    sectionKey: text('section_key').notNull(),
+    title: text('title').notNull(),
+    isCustom: boolean('is_custom').notNull().default(true),
+    active: boolean('active').notNull().default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    clinicKnowledgeSectionKeyUnique: unique().on(table.clinicId, table.sectionKey),
+    clinicKnowledgeSectionIdUnique: unique().on(table.clinicId, table.id),
   }),
 );

@@ -69,9 +69,10 @@ export {
   type NotificationEventRow,
   type KnowledgeEntryRow,
   type KnowledgeEmbeddingStatusSummary,
+  type KnowledgeSectionRow,
   type Repositories,
 } from './repositories';
 
 export { assertResetAllowed, resolveDatabaseUrl } from './cli/env';
 
-export { and, eq, gt, sql } from 'drizzle-orm';
+export { and, eq, gt, isNull, sql } from 'drizzle-orm';

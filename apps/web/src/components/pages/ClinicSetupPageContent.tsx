@@ -20,11 +20,11 @@ export function ClinicSetupPageContent() {
         description={
           effectiveRole === 'doctor'
             ? 'Manage your schedule and services when enabled by clinic policy.'
-            : 'Only what doctors and receptionists need to manage Vaidya.'
+            : 'Manage your doctors, services, schedules, and team in one place.'
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="portal-card-grid gap-4">
         {isAdmin && (
           <>
             <DoctorManagement />
