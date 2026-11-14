@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
-import { createClinicUserLoginSchema, updateClinicUserLoginSchema } from './clinic-users';
+import {
+  createClinicUserLoginSchema,
+  loginWithUsernamePasswordSchema,
+  updateClinicUserLoginSchema,
+} from './clinic-users';
 
 describe('clinic user credential schemas', () => {
+  it('accepts a selected clinic role and rejects unsupported roles at login', () => {
+    const credentials = { username: 'shared@example.test', password: 'secret12' };
+    expect(loginWithUsernamePasswordSchema.parse({ ...credentials, role: 'doctor' }).role).toBe(
+      'doctor',
+    );
+    expect(
+      loginWithUsernamePasswordSchema.parse({ ...credentials, role: 'clinic_admin' }).role,
+    ).toBe('clinic_admin');
+    expect(
+      loginWithUsernamePasswordSchema.safeParse({ ...credentials, role: 'platform_admin' }).success,
+    ).toBe(false);
+    expect(loginWithUsernamePasswordSchema.safeParse(credentials).success).toBe(true);
+  });
   it('normalizes only the editable username prefix', () => {
     const result = createClinicUserLoginSchema.parse({
       role: 'doctor',

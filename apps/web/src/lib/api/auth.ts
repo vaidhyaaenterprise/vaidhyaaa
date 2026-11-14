@@ -1,5 +1,6 @@
 import { apiPost } from '@/lib/api/client';
 import type { MeResponse } from '@/lib/api/types';
+import type { ClinicRole } from '@vaidya/shared';
 
 export type UsernamePasswordLoginResult = {
   access_token: string;
@@ -7,14 +8,18 @@ export type UsernamePasswordLoginResult = {
   clinics: MeResponse['clinics'];
 };
 
-export async function loginWithUsernamePassword(username: string, password: string) {
+export async function loginWithUsernamePassword(
+  username: string,
+  password: string,
+  role: ClinicRole,
+) {
   // Login is safe to repeat: the endpoint only verifies credentials, updates
   // the last-login timestamp and returns a stateless access token. A single
   // bounded retry prevents a transient serverless cold start or connection
   // pool hand-off from surfacing as a failed sign-in.
   return apiPost<UsernamePasswordLoginResult>(
     '/v1/auth/login',
-    { username, password },
+    { username, password, role },
     { retryTransient: true },
   );
 }

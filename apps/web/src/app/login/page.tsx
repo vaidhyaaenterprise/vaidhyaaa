@@ -558,12 +558,12 @@ export default function LoginPage() {
   }, [status, router]);
 
   async function completeLogin(identifier: string, password: string) {
-    const result = await loginWithUsernamePassword(identifier, password);
-    const membership = result.clinics[0];
+    const result = await loginWithUsernamePassword(identifier, password, selectedRole);
+    const membership = result.clinics.find((row) => row.active && row.role === selectedRole);
     if (!membership) {
       throw new ApiRequestError({
         code: 'FORBIDDEN',
-        message: 'This login has no active clinic membership.',
+        message: `This login has no active ${ROLE_LABELS[selectedRole].toLowerCase()} access.`,
       });
     }
     writeAccessToken(result.access_token);
@@ -576,7 +576,10 @@ export default function LoginPage() {
     // The login response already contains the authoritative /me payload.
     // Hydrating it directly avoids an immediate duplicate database request
     // that could turn a successful login into a visible transient failure.
-    establishSession({ user: result.user, clinics: result.clinics });
+    establishSession({
+      user: result.user,
+      clinics: result.clinics.filter((row) => row.active && row.role === selectedRole),
+    });
     router.replace('/');
     router.refresh();
   }
@@ -791,7 +794,13 @@ export default function LoginPage() {
                 onDone={() => setMode('signin')}
               />
             ) : (
-              <>
+              <form
+                aria-label="Sign in"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleRoleSignIn();
+                }}
+              >
                 <h2
                   className="login-card-heading mt-6 text-[30px] font-extrabold leading-none tracking-tight sm:mt-7 sm:text-[34px] xl:mt-8 xl:text-[40px]"
                   style={{ color: NAVY }}
@@ -811,6 +820,7 @@ export default function LoginPage() {
                       <button
                         key={role}
                         type="button"
+                        disabled={pendingLogin}
                         onClick={() => setSelectedRole(role)}
                         aria-pressed={isActive}
                         className={`login-role-card flex h-[104px] flex-col items-center justify-center rounded-2xl border transition-all sm:h-[112px] xl:h-[120px] ${
@@ -841,6 +851,7 @@ export default function LoginPage() {
                   <MailIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8b9bb4] sm:left-5" />
                   <input
                     id="role-email"
+                    name="username"
                     value={roleEmail}
                     onChange={(event) => setRoleEmail(event.target.value)}
                     placeholder="Email Address"
@@ -854,6 +865,7 @@ export default function LoginPage() {
                   <LockIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#8b9bb4] sm:left-5" />
                   <input
                     id="role-password"
+                    name="password"
                     type={showPassword ? 'text' : 'password'}
                     value={rolePassword}
                     onChange={(event) => setRolePassword(event.target.value)}
@@ -886,8 +898,7 @@ export default function LoginPage() {
                 </div>
 
                 <button
-                  type="button"
-                  onClick={() => void handleRoleSignIn()}
+                  type="submit"
                   disabled={pendingLogin || !roleEmail.trim() || !rolePassword}
                   className="login-submit relative mt-5 flex h-[52px] w-full items-center justify-center rounded-2xl bg-[linear-gradient(180deg,#1e9e3c_0%,#136e22_55%,#0b5717_100%)] text-[16px] font-bold text-white shadow-[0_12px_28px_rgba(11,96,29,0.35)] transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 sm:h-14 sm:text-[17px] xl:mt-6 xl:h-[58px] xl:text-[18px]"
                 >
@@ -921,7 +932,7 @@ export default function LoginPage() {
                     vaidhyaaenterprises@gmail.com
                   </a>
                 </div>
-              </>
+              </form>
             )}
           </div>
         </section>

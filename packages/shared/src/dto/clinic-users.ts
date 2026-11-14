@@ -71,6 +71,7 @@ export const updateClinicUserLoginSchema = z
 export const loginWithUsernamePasswordSchema = z.object({
   username: z.string().min(1).max(80),
   password: z.string().min(1),
+  role: z.enum(['clinic_admin', 'doctor']).optional(),
 });
 
 export type ClinicUserResponse = z.infer<typeof clinicUserResponseSchema>;
