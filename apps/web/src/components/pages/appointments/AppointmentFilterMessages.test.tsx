@@ -39,6 +39,29 @@ const appointment: Appointment = {
 };
 
 describe('Appointment date-filter messages', () => {
+  it('distinguishes no-show status from missed pending confirmations and respects the date filter', () => {
+    const { rerender } = render(
+      <MissedAppointments
+        kind="no_show"
+        appointments={[]}
+        dateLabel={dateLabel}
+        onEditPatientName={noOp}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'No show' })).toBeInTheDocument();
+    expect(screen.getByText(`No no-show appointments for ${dateLabel}.`)).toBeInTheDocument();
+    expect(screen.queryByText('Missed actions')).not.toBeInTheDocument();
+    rerender(
+      <MissedAppointments
+        kind="no_show"
+        appointments={[{ ...appointment, status: 'no_show' }]}
+        onEditPatientName={noOp}
+      />,
+    );
+    expect(screen.getByText('Not marked visited')).toBeInTheDocument();
+    expect(screen.getByText('Patient')).toBeInTheDocument();
+  });
+
   it.each([false, true])(
     'uses date-specific confirmed and visited descriptions (has appointments: %s)',
     (hasAppointments) => {

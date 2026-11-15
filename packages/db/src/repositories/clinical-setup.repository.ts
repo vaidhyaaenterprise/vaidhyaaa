@@ -31,6 +31,7 @@ export class ClinicalSetupRepository {
       phone?: string;
       name?: string;
       age?: number;
+      date?: string;
       limit: number;
     },
   ) {
@@ -60,7 +61,27 @@ export class ClinicalSetupRepository {
       )`);
     }
 
-    return this.db
+    if (input.date) {
+      // Stored appointment times are clinic-local wall clocks. Use the entire
+      // selected calendar day, independent of server/browser timezone or status.
+      filters.push(sql`EXISTS (
+        SELECT 1 FROM appointment_requests AS history_appointment
+        WHERE history_appointment.clinic_id = ${patients.clinicId}
+          AND (
+            history_appointment.patient_id = ${patients.id}
+            OR EXISTS (
+              SELECT 1 FROM patient_visits AS history_visit
+              WHERE history_visit.clinic_id = ${patients.clinicId}
+                AND history_visit.patient_id = ${patients.id}
+                AND history_visit.appointment_request_id = history_appointment.id
+            )
+          )
+          AND history_appointment.appointment_start >= ${input.date}::date
+          AND history_appointment.appointment_start < ${input.date}::date + interval '1 day'
+      )`);
+    }
+
+    const query = this.db
       .select({
         id: patients.id,
         name: patients.name,
@@ -77,8 +98,10 @@ export class ClinicalSetupRepository {
       })
       .from(patients)
       .where(and(...filters))
-      .orderBy(desc(patients.updatedAt))
-      .limit(input.limit);
+      .orderBy(desc(patients.updatedAt));
+    // A day's appointment list must not silently drop patients after the usual
+    // broad name/phone search limit. EXISTS also avoids duplicate patient rows.
+    return input.date ? query : query.limit(input.limit);
   }
 
   listVisitsForPatientHistory(clinicId: string, patientIds: string[]) {
@@ -91,6 +114,7 @@ export class ClinicalSetupRepository {
         id: patientVisits.id,
         patientId: patientVisits.patientId,
         appointmentRequestId: patientVisits.appointmentRequestId,
+        appointmentStatus: appointmentRequests.status,
         doctorId: patientVisits.doctorId,
         doctorName: doctors.name,
         clinicServiceId: patientVisits.clinicServiceId,
@@ -102,6 +126,13 @@ export class ClinicalSetupRepository {
         visitedAt: patientVisits.visitedAt,
       })
       .from(patientVisits)
+      .leftJoin(
+        appointmentRequests,
+        and(
+          eq(appointmentRequests.clinicId, patientVisits.clinicId),
+          eq(appointmentRequests.id, patientVisits.appointmentRequestId),
+        ),
+      )
       .innerJoin(
         doctors,
         and(eq(doctors.clinicId, patientVisits.clinicId), eq(doctors.id, patientVisits.doctorId)),
@@ -306,17 +337,28 @@ export class ClinicalSetupRepository {
         endTime: doctorSchedules.endTime,
       })
       .from(doctorSchedules)
-      .innerJoin(doctors, and(eq(doctors.id, doctorSchedules.doctorId), eq(doctors.clinicId, doctorSchedules.clinicId)))
-      .innerJoin(clinics, eq(clinics.id, doctorSchedules.clinicId))
-      .where(and(
-        eq(doctorSchedules.clinicId, clinicId),
-        eq(doctorSchedules.active, true),
-        eq(doctors.active, true),
-        or(
-          isNull(doctorSchedules.effectiveTo),
-          gte(doctorSchedules.effectiveTo, sql<string>`(current_timestamp at time zone ${clinics.timezone})::date`),
+      .innerJoin(
+        doctors,
+        and(
+          eq(doctors.id, doctorSchedules.doctorId),
+          eq(doctors.clinicId, doctorSchedules.clinicId),
         ),
-      ))
+      )
+      .innerJoin(clinics, eq(clinics.id, doctorSchedules.clinicId))
+      .where(
+        and(
+          eq(doctorSchedules.clinicId, clinicId),
+          eq(doctorSchedules.active, true),
+          eq(doctors.active, true),
+          or(
+            isNull(doctorSchedules.effectiveTo),
+            gte(
+              doctorSchedules.effectiveTo,
+              sql<string>`(current_timestamp at time zone ${clinics.timezone})::date`,
+            ),
+          ),
+        ),
+      )
       .orderBy(doctors.name, doctorSchedules.dayOfWeek, doctorSchedules.startTime);
   }
 

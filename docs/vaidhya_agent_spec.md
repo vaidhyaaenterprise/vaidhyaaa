@@ -95,25 +95,35 @@ Services offered: @services. Each entry has clinicServiceId, name, serviceKey, a
 
 **What does this tool do?**
 ```
-Fetches the real open appointment slots for a given date. Call this after the patient has chosen a service and given a date, and again whenever they change the date, time preference, or doctor. Pass doctor_id when a specific doctor is chosen, or clinic_service_id when the patient has no doctor preference. time_preference accepts morning, afternoon, or evening. This is the only source of truth for availability — never invent, guess, or reuse a slot that this tool did not return in its most recent response.
-For “before 12”, send before_time=12:00: the API returns up to the last three available slot starts strictly before noon, displayed chronologically. For “after 12”, send after_time=12:00: the API returns up to the first three available starts at or after noon. Use clinic-local HH:mm (24-hour), a bare hour such as 12, or an explicit AM/PM time such as 5:30 PM. Preserve the selected date, doctor, service, and time_preference when applying a cutoff. Do not fill missing matches with slots outside the requested window. If both cutoffs are supplied, the API returns the first three starts in [after_time, before_time); after_time must be earlier than before_time. Without either cutoff the existing four-slot default is unchanged.
+Fetches real open appointment availability for a selected date. The default Sarvam flow is date-first: after the patient chooses a service and gives a date, call this tool with clinic_id, clinic_service_id, date, and optional validated doctor_id. Do not ask for or send time_preference. The response returns the day's actual 24-hour availability windows and slot frequency, for example 10:00-13:00 and 14:00-18:00, every 30 minutes.
+After the patient chooses an exact time within a returned window, call this tool again with the same clinic/service/date, the doctor selected by the first lookup, and time=HH:mm. Continue only when requestedTimeAvailable is true. If false, offer nearbySlotsText, wait for the patient's choice, and recheck that exact alternative. This is the only source of truth for availability — never infer a slot from a range/frequency, guess, or reuse stale availability.
+The endpoint may continue accepting time_preference, after_time, and before_time for legacy clients, but they are compatibility filters and are not part of the default Sarvam flow.
 ```
 
-**cURL:**
+**First date lookup:**
 ```bash
 curl --get '{{BASE_URL}}/v1/api/tools/check-slots' \
   --data-urlencode 'clinic_id={{clinic_id}}' \
   --data-urlencode 'doctor_id={{doctor_id}}' \
   --data-urlencode 'clinic_service_id={{clinic_service_id}}' \
-  --data-urlencode 'date={{date}}' \
-  --data-urlencode 'before_time=12:00'
+  --data-urlencode 'date={{date}}'
 ```
 
-Replace `before_time` with `after_time` for an “after” request. Both parameters also accept underscored or hyphenated request headers, like `before_time` or `before-time`; query parameters take precedence. Keep these optional parameters in the external agent tool definition so the agent can forward the caller's time constraint.
+**Exact-time recheck:**
+```bash
+curl --get '{{BASE_URL}}/v1/api/tools/check-slots' \
+  --data-urlencode 'clinic_id={{clinic_id}}' \
+  --data-urlencode 'doctor_id={{doctor_id_from_first_lookup}}' \
+  --data-urlencode 'clinic_service_id={{clinic_service_id}}' \
+  --data-urlencode 'date={{date}}' \
+  --data-urlencode 'time={{selected_time_HH:mm}}'
+```
+
+Omit `doctor_id` from the first lookup only when any eligible doctor is acceptable. Keep the returned doctor fixed for the exact-time recheck and booking. Do not configure `time_preference` as a required or default Sarvam tool input.
 
 **Send fields from the API response to the agent:**
 ```
-Success: @success. Available times in comma-separated 24-hour HH:mm: @availableSlotsText. Resolved doctor: @doctorId and @doctorName. Resolved service: @clinicServiceId. Date requested: @date and @dateDisplay. Time preference: @timePreference. Error if any: @error. No slots array is returned. Book using the chosen time, not a slot ID.
+Success: @success. Availability windows in 24-hour format: @availabilityWindowsText. Slot frequency: @slotFrequencyMinutes minutes / @slotFrequencyText. Exact time checked: @requestedTime. Exact time available: @requestedTimeAvailable. Nearby same-day alternatives: @nearbySlotsText. Resolved doctor: @doctorId and @doctorName. Resolved service: @clinicServiceId. Date requested: @date and @dateDisplay. Error if any: @error. No slots array is returned. Book only an exact time whose latest recheck returned requestedTimeAvailable true; do not send a slot ID.
 ```
 
 **Error handling the agent must respect:**
@@ -126,7 +136,9 @@ Success: @success. Available times in comma-separated 24-hour HH:mm: @availableS
 | `no_service_for_doctor` | Mismatch | Re-confirm service with caller |
 | `invalid_before_time` / `invalid_after_time` | Invalid cutoff | Ask for a valid time and resend it as HH:mm or an AM/PM time |
 | `invalid_time_range` | Lower bound is not before upper bound | Ask for a valid same-day time window |
-| `availableSlotsText` says `no slots` (or no matching time preference) with no error | No matches in the requested window | Offer a different date or time |
+| Empty `availabilityWindowsText` with no error | No open slots on the selected date | Ask for a different date |
+| `requestedTimeAvailable: false` with `nearbySlotsText` | Chosen time is unavailable but nearby slots exist | Offer only those nearby times and recheck the selected alternative |
+| `requestedTimeAvailable: false` with empty `nearbySlotsText` | No suitable nearby slot | Ask for a different date |
 
 ---
 
@@ -169,7 +181,7 @@ Topic: @topic. Found: @found. Day: @day. Date: @date. Hours: @hours. Doctor: @do
 
 **What does this tool do?**
 ```
-Books the appointment. Call this only once, and only after the patient has explicitly confirmed a full read-back of the doctor, date, time, patient name, and phone number. Pass patient_name, phone, doctor_id, clinic_service_id, reason_for_visit, date, and time as an exact 24-hour HH:mm value from the latest availableSlotsText. Do not send slot_id; the backend resolves it internally. Never tell the patient the appointment is confirmed unless this call returns status confirmed; pending means awaiting clinic confirmation.
+Books the appointment. Call this only once, and only after the latest exact-time availability recheck returned requestedTimeAvailable true and the patient explicitly confirmed a full read-back of the doctor, date, time, patient name, and phone number. Pass patient_name, phone, doctor_id, clinic_service_id, reason_for_visit, date, and time as that exact 24-hour HH:mm requestedTime. Do not send slot_id; the backend resolves it internally. Never tell the patient the appointment is confirmed unless this call returns status confirmed; pending means awaiting clinic confirmation.
 ```
 
 **cURL:**
@@ -199,7 +211,7 @@ Status: @status. Appointment ID: @appointmentId. Doctor: @doctorName (@doctorId)
 |---|---|
 | `status: "confirmed"` | Confirm to caller, read back details |
 | `error: "missing_fields"` | Collect only the fields listed in `missing`, then retry once |
-| `error: "invalid_slot"` | Slot was taken — apologise, re-run `check_available_slots`, offer alternatives |
+| `error: "invalid_slot"` / `error: "invalid_slot_time"` | Time is no longer available — apologise, recheck that exact time, offer `nearbySlotsText`, and reconfirm a new choice |
 | `error: "booking_failed"` | Do not claim success; offer callback via `request_callback` |
 
 **Advanced — save to variables:** `appointmentId` → `appointment_id`
@@ -272,7 +284,7 @@ Cancelled: @cancelled. Appointment ID: @appointmentId. Status: @status. Error if
 
 **What does this tool do?**
 ```
-Requests a reschedule of an existing appointment. Call this only after looking up the appointment with get_appointment_status, fetching availability for the same doctor/service on the new date with check_available_slots, and getting the patient's explicit confirmation. Pass the appointment ID, new_date and new_time as an exact 24-hour HH:mm value from the latest availableSlotsText. A submitted true response means the request was accepted for processing, not that the appointment has already moved.
+Requests a reschedule of an existing appointment. Call this only after looking up the appointment with get_appointment_status, fetching date-only availability windows and frequency for the same doctor/service, rechecking the patient's chosen exact time until requestedTimeAvailable is true, and getting explicit confirmation. Pass the appointment ID, new_date and new_time as that exact 24-hour HH:mm requestedTime. A submitted true response means the request was accepted for processing, not that the appointment has already moved.
 ```
 
 **cURL:**
@@ -444,9 +456,9 @@ Rules for mapping:
 - If the problem is ambiguous between two services, ask one short clarifying question before choosing.
 - Confirm your choice in plain words before moving on: "For knee pain, that would be our orthopaedic doctor. Shall I check availability?" Never say the service key or ID.
 
-### Step 2 — Date, time, and doctor
+### Step 2 — Date, availability windows, and doctor
 
-Ask which date and roughly what time suits them — morning, afternoon, or evening.
+Ask which date suits them. Do not ask for a morning/afternoon/evening preference and do not send `time_preference`.
 
 Resolve the date to a calendar date yourself using today's date as reference, then read it back to confirm. If it resolves to the past, say so and ask for another date.
 
@@ -455,7 +467,7 @@ Then, based on how many doctors the service has:
 **One doctor for the service:**
 - Call `get_clinic_info` with `topic: doctor_availability` for that doctor and date.
 - If `available` is false: tell the caller the doctor is not available that day, state which days or windows they do work if known, and ask for a different date. Return to the start of this step.
-- If available: call `check_available_slots` with that `doctor_id`, the date, and the time preference.
+- If available: call `check_available_slots` with that `doctor_id` and the date, with no time filter.
 
 **Multiple doctors for the service:**
 - If the caller named a doctor, use that doctor.
@@ -463,18 +475,23 @@ Then, based on how many doctors the service has:
 - If the caller asks who is available, read the doctor names from `list_clinic_services` and let them pick.
 
 **If no slots come back:**
-- Offer a different time preference on the same date first, then a different date.
+- Ask for a different date.
 - Maximum two rounds of slot proposals across the call. After that, offer a callback and close.
 
-### Step 3 — Caller chooses a slot
+**If slots are available:**
+- Read every 24-hour window from `availabilityWindowsText` and the frequency from `slotFrequencyText` (or `slotFrequencyMinutes`). Example: "Appointments are available from 10:00 to 13:00 and 14:00 to 18:00, every 30 minutes."
+- Treat gaps between windows as unavailable.
+- Ask the caller for an exact time within those windows.
 
-Read out at most three slots per turn, in plain language, including the doctor's name.
+### Step 3 — Caller chooses and rechecks an exact time
 
-"I have Dr. Murugan at ten o'clock, ten thirty, or eleven in the morning. Which suits you?"
+Normalize the caller's choice to 24-hour HH:mm. Call `check_available_slots` again with the same clinic, service, date, the doctor returned by the first lookup, and exact `time`. Omit `time_preference`, `after_time`, and `before_time`.
 
-Only offer slots from the most recent `check_available_slots` response. If the caller asks for a time not in that list, say it is not available and offer the nearest one that is.
+- `requestedTimeAvailable: true` → retain `requestedTime` as the chosen time and continue.
+- `requestedTimeAvailable: false` with `nearbySlotsText` → explain that the requested time is unavailable and offer only those nearby same-day times. After the caller chooses one, recheck that exact time.
+- `requestedTimeAvailable: false` without nearby times → ask for another date.
 
-Hold the chosen slot's ID internally. Do not speak it.
+Never assume that a time is bookable merely because it mathematically fits a returned window and frequency. The exact-time recheck is authoritative. No slot ID is exposed or spoken.
 
 ### Step 4 — Patient name
 
@@ -492,7 +509,7 @@ Read back everything in one turn and ask for a clear yes:
 
 - Only proceed on an explicit yes.
 - If the caller corrects any detail, fix it and read back again.
-- If they correct the date or time, go back to Step 2 and fetch fresh slots.
+- If they correct the date, go back to Step 2. If they correct the time, run a fresh exact-time recheck before reading back again.
 - If they give a different phone number, use that instead.
 
 ### Step 6 — Book
@@ -500,7 +517,7 @@ Read back everything in one turn and ask for a clear yes:
 Call `create_appointment` once.
 
 - `status: "confirmed"` → tell the caller it is booked, repeat doctor, date, and time, mention the clinic address, and ask if they need anything else.
-- `error: "invalid_slot"` → apologise, say that slot was just taken, re-run `check_available_slots`, and offer alternatives. Do not say it was booked.
+- `error: "invalid_slot"` / `error: "invalid_slot_time"` → apologise, recheck that doctor/date/exact time, offer `nearbySlotsText` if returned, and reconfirm a new exact choice. Do not say it was booked.
 - `error: "missing_fields"` → collect only what is listed as missing, then retry once.
 - Any other error, or the tool fails → apologise, say the booking could not be completed right now, call `request_callback`, and tell them the clinic will call back.
 
@@ -537,10 +554,10 @@ Never claim an appointment is cancelled without `cancelled: true`.
 1. Call `get_appointment_status` with the caller's number.
 2. `found: false` → tell them no appointment was found; offer to book instead.
 3. `found: true` → read back the current appointment and confirm it is the one they want to move.
-4. Ask for the new date and rough time. Resolve the date and read it back.
-5. Call `check_available_slots` for the same doctor as the existing appointment, on the new date.
-   - No slots → offer another time or date, up to two rounds, then offer a callback.
-6. Offer up to three slots, take their choice.
+4. Ask for the new date. Resolve the date and read it back.
+5. Call `check_available_slots` for the same doctor as the existing appointment, on the new date, with no time filter.
+   - No windows → offer another date, up to two rounds, then offer a callback.
+6. Read the 24-hour availability windows and slot frequency, ask for an exact time, and recheck it. If unavailable, offer `nearbySlotsText` and recheck the caller's new choice.
 7. Read back the change and ask for confirmation: "Moving your appointment to Tuesday the fifth at eleven in the morning. Shall I go ahead?"
 8. On explicit yes, call `reschedule_appointment`.
 9. `submitted: true` → say the reschedule request has been placed and the clinic will confirm shortly. Do not say the appointment has already been moved.
@@ -640,7 +657,7 @@ Until this changes, the agent can only ever act on one appointment per number �
 
 ### 2. `check-slots` with a service only returns slots from the first doctor
 
-Variation D picks the first doctor for the service. Your spec wants doctor selection driven by the caller's date and time preference across all doctors offering that service. Today, a caller wanting Tuesday morning could be told nothing is free when a second doctor is wide open.
+Variation D picks the first doctor for the service. Your spec wants doctor selection driven by the caller's selected date across all doctors offering that service. Today, a caller asking for Tuesday could be told nothing is free when a second doctor is wide open.
 
 **Fix:** when `clinic_service_id` is passed without `doctor_id`, return slots across every doctor providing that service, each slot already carrying its `doctorId` and `doctorName`. This also removes the need for the agent to loop per doctor, which costs turns and latency.
 

@@ -1,7 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { createRepositories, DatabaseService, type Repositories } from '@vaidya/db';
-import { AppError, type ManualAppointmentCreateInput, type ResolveAppointmentActionRequestInput } from '@vaidya/shared';
+import {
+  ACTIVE_APPOINTMENT_STATUSES,
+  createRepositories,
+  DatabaseService,
+  formatClinicLocalTimestamp,
+  type Database,
+  type Repositories,
+} from '@vaidya/db';
+import {
+  AppError,
+  type ManualAppointmentCreateInput,
+  type ResolveAppointmentActionRequestInput,
+  type UpdateAppointmentStatusInput,
+} from '@vaidya/shared';
 
 import { DATABASE_CONNECTION } from '../database/database.module';
 import type { DatabaseConnection } from '@vaidya/db';
@@ -39,7 +51,10 @@ export class AppointmentAdminService {
     actorUserId: string,
   ) {
     if (!/^[0-9]{10}$/.test(input.patient_phone)) {
-      throw new AppError('VALIDATION_ERROR', 'Enter a 10-digit patient phone number without a country code.');
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Enter a 10-digit patient phone number without a country code.',
+      );
     }
     let slotId: string | null = input.slot_id ?? null;
     let appointmentStart = input.appointment_start;
@@ -59,10 +74,7 @@ export class AppointmentAdminService {
         );
       }
 
-      const activeAppointments = await this.repos.slots.countActiveAppointments(
-        clinicId,
-        slot.id,
-      );
+      const activeAppointments = await this.repos.slots.countActiveAppointments(clinicId, slot.id);
 
       const activeHolds = await this.repos.slots.countActiveHolds(clinicId, slot.id);
 
@@ -149,7 +161,8 @@ export class AppointmentAdminService {
 
     const sameAgeMissingDob = requestedDob
       ? byName.find(
-          (candidate) => candidate.ageYears === input.patient_age && (candidate.dateOfBirth ?? null) === null,
+          (candidate) =>
+            candidate.ageYears === input.patient_age && (candidate.dateOfBirth ?? null) === null,
         )
       : undefined;
 
@@ -345,6 +358,138 @@ export class AppointmentAdminService {
     });
   }
 
+  async correctStatus(input: {
+    clinicId: string;
+    appointmentId: string;
+    status: UpdateAppointmentStatusInput['status'];
+    actorUserId: string;
+  }) {
+    const [snapshot] = await this.repos.appointmentLifecycle.findAppointmentById(
+      input.clinicId,
+      input.appointmentId,
+    );
+    if (!snapshot) throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+    const [clinic] = await this.repos.slots.findClinicTimezone(input.clinicId);
+    if (!clinic) throw new AppError('CLINIC_NOT_FOUND', 'Clinic not found.');
+    const restoresCapacity =
+      input.status === 'confirmed' &&
+      !ACTIVE_APPOINTMENT_STATUSES.includes(
+        snapshot.status as 'confirmed' | 'pending_confirmation',
+      ) &&
+      snapshot.appointmentEnd.replace('T', ' ') >
+        formatClinicLocalTimestamp(new Date(), clinic.timezone);
+
+    const applyCorrection = async (
+      tx: Database,
+      slot?: {
+        id: string;
+        doctorId: string;
+        clinicServiceId: string;
+        startTime: string;
+        endTime: string;
+        status: string;
+        capacityTotal: number;
+      },
+    ) => {
+      const [appointment] = await this.repos.appointmentLifecycle.findAppointmentByIdForUpdate(
+        input.clinicId,
+        input.appointmentId,
+        tx,
+      );
+      if (!appointment) throw new AppError('APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+      if (
+        appointment.status !== snapshot.status ||
+        appointment.slotId !== snapshot.slotId ||
+        appointment.appointmentStart !== snapshot.appointmentStart ||
+        appointment.appointmentEnd !== snapshot.appointmentEnd ||
+        appointment.doctorId !== snapshot.doctorId ||
+        appointment.clinicServiceId !== snapshot.clinicServiceId
+      ) {
+        throw new AppError(
+          'CONFLICT',
+          'This appointment changed. Refresh its history and try again.',
+        );
+      }
+      if (appointment.status === input.status) return { appointment };
+      if (restoresCapacity) {
+        if (
+          !slot ||
+          slot.status !== 'open' ||
+          slot.id !== appointment.slotId ||
+          slot.doctorId !== appointment.doctorId ||
+          slot.clinicServiceId !== appointment.clinicServiceId ||
+          slot.startTime !== appointment.appointmentStart ||
+          slot.endTime !== appointment.appointmentEnd
+        ) {
+          throw new AppError(
+            'SLOT_NOT_AVAILABLE',
+            'The original appointment slot is no longer available. Rebook from Appointments.',
+          );
+        }
+        const [holiday] = await this.repos.slots.isDoctorHolidayForWindow(
+          input.clinicId,
+          slot.doctorId,
+          slot.startTime,
+          slot.endTime,
+          tx,
+        );
+        if (holiday)
+          throw new AppError(
+            'SLOT_NOT_AVAILABLE',
+            'The doctor is unavailable for this appointment. Rebook from Appointments.',
+          );
+        const load = await this.repos.slots.countSlotLoad(input.clinicId, slot.id, {}, tx);
+        if (load.activeAppointments + load.activeHolds >= slot.capacityTotal) {
+          throw new AppError(
+            'SLOT_FULL',
+            'This appointment slot is full. Choose another time from Appointments.',
+          );
+        }
+      }
+      // This is an administrative status correction, not a new clinical encounter.
+      // Retain patient_visits and their notes unchanged; never invent or delete them.
+      const [updated] = await this.repos.appointmentLifecycle.setCorrectedStatus(
+        input.clinicId,
+        appointment.id,
+        input.status,
+        tx,
+      );
+      if (!updated) throw new AppError('INTERNAL_ERROR', 'Failed to update appointment status.');
+      if (input.status !== 'confirmed') {
+        await this.repos.appointmentLifecycle.rejectPendingActionRequestsForAppointment(
+          input.clinicId,
+          appointment.id,
+          tx,
+        );
+      }
+      await this.repos.appointmentLifecycle.insertAppointmentEvent(
+        {
+          clinicId: input.clinicId,
+          appointmentRequestId: appointment.id,
+          eventType: 'appointment.status_corrected',
+          actorType: 'clinic_admin',
+          actorUserId: input.actorUserId,
+          oldValuesJson: { status: appointment.status },
+          newValuesJson: { status: input.status, appointment_start: appointment.appointmentStart },
+        },
+        tx,
+      );
+      return { appointment: updated };
+    };
+    if (restoresCapacity) {
+      if (!snapshot.slotId)
+        throw new AppError(
+          'SLOT_NOT_AVAILABLE',
+          'This appointment has no active slot. Rebook it from Appointments.',
+        );
+      // Lock the slot before the appointment, matching normal booking/rescheduling.
+      return this.dbService.withSlotForUpdate(input.clinicId, snapshot.slotId, (slot, tx) =>
+        applyCorrection(tx, slot),
+      );
+    }
+    return this.dbService.withTransaction((tx) => applyCorrection(tx));
+  }
+
   async markVisited(input: {
     clinicId: string;
     appointmentId: string;
@@ -371,41 +516,51 @@ export class AppointmentAdminService {
         );
       }
 
-      let patientId = appointment.patientId;
-      if (!patientId && appointment.patientPhone) {
-        const normalizedPhone = normalizePhone(appointment.patientPhone);
-        const [patient] = await this.repos.patients.upsertByPhone(
+      // A status correction can re-confirm an appointment with an existing clinical
+      // visit. Reuse that record under the appointment lock and preserve its notes.
+      const [retainedVisit] = await this.repos.patients.findVisitByAppointmentId(
+        input.clinicId,
+        appointment.id,
+        tx,
+      );
+      let visit = retainedVisit;
+      if (!visit) {
+        let patientId = appointment.patientId;
+        if (!patientId && appointment.patientPhone) {
+          const normalizedPhone = normalizePhone(appointment.patientPhone);
+          const [patient] = await this.repos.patients.upsertByPhone(
+            {
+              clinicId: input.clinicId,
+              name: appointment.patientName,
+              phone: appointment.patientPhone,
+              normalizedPhone,
+            },
+            tx,
+          );
+          patientId = patient?.id ?? null;
+        }
+        if (!patientId) {
+          throw new AppError('VALIDATION_ERROR', 'Patient record is required to mark a visit.');
+        }
+
+        const visitedAt = new Date();
+        [visit] = await this.repos.patients.insertVisit(
           {
             clinicId: input.clinicId,
-            name: appointment.patientName,
-            phone: appointment.patientPhone,
-            normalizedPhone,
+            patientId,
+            appointmentRequestId: appointment.id,
+            doctorId: appointment.doctorId,
+            clinicServiceId: appointment.clinicServiceId,
+            reasonForVisit: input.visitReason,
+            examinationNotes: input.examinationNotes?.trim() || null,
+            diagnosis: input.diagnosis?.trim() || null,
+            advice: input.advice?.trim() || null,
+            normalizedReason: input.visitReason.toLowerCase(),
+            visitedAt,
           },
           tx,
         );
-        patientId = patient?.id ?? null;
       }
-      if (!patientId) {
-        throw new AppError('VALIDATION_ERROR', 'Patient record is required to mark a visit.');
-      }
-
-      const visitedAt = new Date();
-      const [visit] = await this.repos.patients.insertVisit(
-        {
-          clinicId: input.clinicId,
-          patientId,
-          appointmentRequestId: appointment.id,
-          doctorId: appointment.doctorId,
-          clinicServiceId: appointment.clinicServiceId,
-          reasonForVisit: input.visitReason,
-          examinationNotes: input.examinationNotes?.trim() || null,
-          diagnosis: input.diagnosis?.trim() || null,
-          advice: input.advice?.trim() || null,
-          normalizedReason: input.visitReason.toLowerCase(),
-          visitedAt,
-        },
-        tx,
-      );
       if (!visit) {
         throw new AppError('INTERNAL_ERROR', 'Failed to create patient visit.');
       }
@@ -420,6 +575,13 @@ export class AppointmentAdminService {
         throw new AppError('INTERNAL_ERROR', 'Failed to mark appointment as visited.');
       }
 
+      const visitReason = retainedVisit ? retainedVisit.reasonForVisit : input.visitReason;
+      const examinationNotes = retainedVisit
+        ? retainedVisit.examinationNotes
+        : input.examinationNotes?.trim();
+      const diagnosis = retainedVisit ? retainedVisit.diagnosis : input.diagnosis?.trim();
+      const advice = retainedVisit ? retainedVisit.advice : input.advice?.trim();
+
       await this.repos.appointmentLifecycle.insertAppointmentEvent(
         {
           clinicId: input.clinicId,
@@ -429,12 +591,10 @@ export class AppointmentAdminService {
           actorUserId: input.actorUserId,
           newValuesJson: {
             status: 'visited',
-            visit_reason: input.visitReason,
-            ...(input.examinationNotes?.trim()
-              ? { examination_notes: input.examinationNotes.trim() }
-              : {}),
-            ...(input.diagnosis?.trim() ? { diagnosis: input.diagnosis.trim() } : {}),
-            ...(input.advice?.trim() ? { advice: input.advice.trim() } : {}),
+            visit_reason: visitReason,
+            ...(examinationNotes ? { examination_notes: examinationNotes } : {}),
+            ...(diagnosis ? { diagnosis } : {}),
+            ...(advice ? { advice } : {}),
           },
           oldValuesJson: { status: appointment.status },
         },

@@ -21,10 +21,7 @@ import {
 import { API_ENV } from '../../config/api-config.module';
 
 import { AgentTurnAuditService } from './agent-turn-audit.service';
-import {
-  evaluateAgentFastPath,
-  type AgentFastPathMatch,
-} from './receptionist-agent-fast-path';
+import { evaluateAgentFastPath, type AgentFastPathMatch } from './receptionist-agent-fast-path';
 import { isAmbiguousShortReply } from './receptionist-agent-confirmation';
 import { getReceptionistAgentToolsForRequest } from './receptionist-agent-tool-selection';
 import {
@@ -126,7 +123,10 @@ export class ReceptionistAgentService {
         });
       }
 
-      if (isVaguePatientMessage(input.messageText) && Number(input.collected.agent_clarify_count ?? 0) >= 2) {
+      if (
+        isVaguePatientMessage(input.messageText) &&
+        Number(input.collected.agent_clarify_count ?? 0) >= 2
+      ) {
         const escalated = await this.runForcedCallback(input);
         return this.finishTurn(input, {
           ...escalated,
@@ -162,7 +162,13 @@ export class ReceptionistAgentService {
       if (guidedTurn) {
         return this.finishTurn(input, {
           ...guidedTurn,
-          latencyMetrics: this.buildLatencyMetrics('fast_path', turnStartedAt, 0, null, 'booking_guided'),
+          latencyMetrics: this.buildLatencyMetrics(
+            'fast_path',
+            turnStartedAt,
+            0,
+            null,
+            'booking_guided',
+          ),
         });
       }
 
@@ -217,7 +223,9 @@ export class ReceptionistAgentService {
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'agent_turn_failed';
-      this.logger.warn(JSON.stringify({ event: 'agent_turn_fallback', reason, sessionId: input.sessionId }));
+      this.logger.warn(
+        JSON.stringify({ event: 'agent_turn_fallback', reason, sessionId: input.sessionId }),
+      );
       return { kind: 'fallback', reason };
     }
   }
@@ -415,9 +423,12 @@ export class ReceptionistAgentService {
         });
       }
 
-      const offeredTools = getReceptionistAgentToolsForRequest(this.env.RECEPTIONIST_AGENT_PROVIDER, {
-        collected,
-      });
+      const offeredTools = getReceptionistAgentToolsForRequest(
+        this.env.RECEPTIONIST_AGENT_PROVIDER,
+        {
+          collected,
+        },
+      );
 
       const response = await this.callLlm(messages, input, round, debugTrace, turnStartedAt, {
         streamFinal: false,
@@ -559,7 +570,6 @@ export class ReceptionistAgentService {
         doctorName: parsed.doctor_name,
         reasonForVisit: parsed.reason_for_visit ?? undefined,
         date: parsed.preferred_date,
-        timePreference: parsed.time_preference ?? undefined,
       },
       ctx,
     );
@@ -616,7 +626,13 @@ export class ReceptionistAgentService {
       if (mapped) {
         const executed = await this.runServerTool(
           'update_booking_state',
-          { fields: { doctor_id: mapped.doctorId, doctor_name: mapped.doctorName, clinic_service_id: mapped.clinicServiceId } },
+          {
+            fields: {
+              doctor_id: mapped.doctorId,
+              doctor_name: mapped.doctorName,
+              clinic_service_id: mapped.clinicServiceId,
+            },
+          },
           input,
           collected,
           [],
@@ -635,9 +651,10 @@ export class ReceptionistAgentService {
       !collectedAfterPatch.selected_slot_id &&
       !toolsUsed.includes('check_slot_availability')
     ) {
+      const requestedExactTime = extractActiveExactTime(input.messageText);
       const slotExecuted = await this.runServerTool(
         'check_slot_availability',
-        {},
+        requestedExactTime ? { time: requestedExactTime } : {},
         input,
         collected,
         [],
@@ -646,61 +663,25 @@ export class ReceptionistAgentService {
       toolsUsed.push(slotExecuted.toolName);
       toolResults.push({ toolName: slotExecuted.toolName, result: slotExecuted.result });
       const slotResultCollected = parseBookingCollected(collected);
-      const displaySlots = slotResultCollected.proposed_slots;
-      if (Array.isArray(displaySlots) && displaySlots.length > 3) {
-        const exactTime = extractActiveExactTime(input.messageText);
-        const isBefore = /\b(before|munn|munadi|munnadi|before\s+that)\b/i.test(input.messageText);
-        const parseSlotHour = (s: Record<string, unknown>): number => {
-          const t = String(s.display_time ?? '');
-          const p = t.split(/[:.]/);
-          return Number(p[0] ?? 0);
-        };
-        const parseSlotMin = (s: Record<string, unknown>): number => {
-          const t = String(s.display_time ?? '');
-          const p = t.split(/[:.]/);
-          return Number(p[1] ?? 0);
-        };
-        if (isBefore && exactTime) {
-          const timeParts = exactTime.split(':').map(Number);
-          const beforeH = timeParts[0] ?? 0;
-          const beforeM = timeParts[1] ?? 0;
-          const beforeIdx = displaySlots.findIndex((s) => {
-            const h = parseSlotHour(s);
-            const m = parseSlotMin(s);
-            return h > beforeH || (h === beforeH && m >= beforeM);
-          });
-          const start = Math.max(0, beforeIdx - 3);
-          const beforeLimited = displaySlots.slice(start, beforeIdx);
-          slotResultCollected.proposed_slots = beforeLimited.slice(0, 3);
-        } else if (exactTime) {
-          const timeParts = exactTime.split(':').map(Number);
-          const fromH = timeParts[0] ?? 0;
-          const fromM = timeParts[1] ?? 0;
-          const fromIdx = displaySlots.findIndex((s) => {
-            const h = parseSlotHour(s);
-            const m = parseSlotMin(s);
-            return h > fromH || (h === fromH && m >= fromM);
-          });
-          const fromLimited = displaySlots.slice(Math.max(0, fromIdx));
-          slotResultCollected.proposed_slots = fromLimited.slice(0, 3);
-        } else {
-          slotResultCollected.proposed_slots = displaySlots.slice(0, 3);
-        }
-      }
       slotReplyText = this.formatSlotProposalReply(
         slotResultCollected,
         input.languageCode,
+        slotExecuted.result,
       );
 
       if (!slotReplyText) {
         const slotResult = slotExecuted.result as Record<string, unknown>;
-        const noSlots = !Array.isArray(slotResult.slots) || (slotResult.slots as unknown[]).length === 0;
+        const noSlots =
+          !Array.isArray(slotResult.slots) || (slotResult.slots as unknown[]).length === 0;
         if (noSlots) {
-          const dateDisplay = String(collectedAfterPatch.preferred_date ?? '')
-            .replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1');
-          slotReplyText = input.languageCode !== 'english'
-            ? `${dateDisplay} appointment ille. Vera date select panreengala?`
-            : `No appointments available on ${dateDisplay}. Would you like to check another date?`;
+          const dateDisplay = String(collectedAfterPatch.preferred_date ?? '').replace(
+            /^(\d{4})-(\d{2})-(\d{2})$/,
+            '$3/$2/$1',
+          );
+          slotReplyText =
+            input.languageCode !== 'english'
+              ? `${dateDisplay} appointment ille. Vera date select panreengala?`
+              : `No appointments available on ${dateDisplay}. Would you like to check another date?`;
         }
       }
     }
@@ -726,9 +707,13 @@ export class ReceptionistAgentService {
   } | null {
     const parsed = parseBookingCollected(preflight.collected);
     const normalized = input.messageText.trim().toLowerCase();
-    const isAffirmative = /^(ok|okay|okkey|aama|ama|sari|avasarama|kalandhudu)$/i.test(normalized) || normalized.length <= 2;
+    const isAffirmative =
+      /^(ok|okay|okkey|aama|ama|sari|avasarama|kalandhudu)$/i.test(normalized) ||
+      normalized.length <= 2;
     const isThanks = /^(thanks|thank you|txs|thx)$/i.test(normalized);
-    const isNegative = /^(no|illai|ila|ille|poidu|poyidu|venam|vendam|bye|byee|po\s+po)$/i.test(normalized) || /(thanks|thank you).*(bye|po)/i.test(normalized);
+    const isNegative =
+      /^(no|illai|ila|ille|poidu|poyidu|venam|vendam|bye|byee|po\s+po)$/i.test(normalized) ||
+      /(thanks|thank you).*(bye|po)/i.test(normalized);
 
     if (parsed.appointment_id) {
       const terminal = parsed.awaiting_terminal_ack;
@@ -736,14 +721,18 @@ export class ReceptionistAgentService {
         if (isNegative || isThanks) {
           return this.buildDoneResult(input, preflight, 'booking_completed');
         }
-        const isHelpYes = /\b(yes|aama|aam|ama|ok|okay|okkey|sari|venum)\b/i.test(normalized) && normalized.length > 2;
+        const isHelpYes =
+          /\b(yes|aama|aam|ama|ok|okay|okkey|sari|venum)\b/i.test(normalized) &&
+          normalized.length > 2;
         if (isHelpYes) {
-          const replyText = input.languageCode !== 'english'
-            ? 'Enna help venum?'
-            : 'What help do you need?';
+          const replyText =
+            input.languageCode !== 'english' ? 'Enna help venum?' : 'What help do you need?';
           return {
             replyText,
-            updatedCollected: { ...preflight.collected, awaiting_terminal_ack: 'awaiting_help_topic' },
+            updatedCollected: {
+              ...preflight.collected,
+              awaiting_terminal_ack: 'awaiting_help_topic',
+            },
             toolsUsed: preflight.toolsUsed,
             sessionStatus: 'active',
             guardrailFlags: ['ask_help_topic'],
@@ -772,11 +761,19 @@ export class ReceptionistAgentService {
       if (terminal === 'awaiting_help_topic') {
         return null;
       }
-      if (normalized.includes('epo') || normalized.includes('when') || normalized.includes('time') || normalized.includes('eppo') ||
-          normalized.includes('status') || normalized.includes('enna') || normalized.includes('appointment')) {
-        const replyText = input.languageCode !== 'english'
-          ? 'Unga appointment pending confirmation-la irukku. Staff soon contact pannuvaanga, confirm aagum. Vera enna help venum?'
-          : 'Your appointment is pending confirmation. Staff will contact you soon. What else can I help you with?';
+      if (
+        normalized.includes('epo') ||
+        normalized.includes('when') ||
+        normalized.includes('time') ||
+        normalized.includes('eppo') ||
+        normalized.includes('status') ||
+        normalized.includes('enna') ||
+        normalized.includes('appointment')
+      ) {
+        const replyText =
+          input.languageCode !== 'english'
+            ? 'Unga appointment pending confirmation-la irukku. Staff soon contact pannuvaanga, confirm aagum. Vera enna help venum?'
+            : 'Your appointment is pending confirmation. Staff will contact you soon. What else can I help you with?';
         return {
           replyText,
           updatedCollected: { ...preflight.collected, awaiting_terminal_ack: 'offer_help' },
@@ -792,9 +789,10 @@ export class ReceptionistAgentService {
         };
       }
       if (isAffirmative || isThanks) {
-        const replyText = input.languageCode !== 'english'
-          ? 'Need any other help?'
-          : 'Vera edhavadhu help venumaa?';
+        const replyText =
+          input.languageCode !== 'english'
+            ? 'Need any other help?'
+            : 'Vera edhavadhu help venumaa?';
         return {
           replyText,
           updatedCollected: { ...preflight.collected, awaiting_terminal_ack: 'offer_help' },
@@ -835,10 +833,15 @@ export class ReceptionistAgentService {
       }
       if (isNegative) {
         return {
-          replyText: input.languageCode !== 'english'
-            ? 'No problem. Tell me if you want a different slot or need anything else.'
-            : 'No problem. Let me know if you need anything else.',
-          updatedCollected: { ...preflight.collected, selected_slot_id: undefined, hold_id: undefined },
+          replyText:
+            input.languageCode !== 'english'
+              ? 'No problem. Tell me if you want a different slot or need anything else.'
+              : 'No problem. Let me know if you need anything else.',
+          updatedCollected: {
+            ...preflight.collected,
+            selected_slot_id: undefined,
+            hold_id: undefined,
+          },
           toolsUsed: preflight.toolsUsed,
           sessionStatus: 'active',
           guardrailFlags: ['booking_confirm_no'],
@@ -865,9 +868,10 @@ export class ReceptionistAgentService {
       if (normalized.length <= 2) {
         return null;
       }
-      const replyText = input.languageCode !== 'english'
-        ? 'Sari, edha choose panreenga?'
-        : 'Okay, which slot would you like?';
+      const replyText =
+        input.languageCode !== 'english'
+          ? 'Sari, edha choose panreenga?'
+          : 'Okay, which slot would you like?';
       return {
         replyText,
         updatedCollected: preflight.collected,
@@ -907,9 +911,8 @@ export class ReceptionistAgentService {
     },
     reason: string,
   ) {
-    const replyText = input.languageCode !== 'english'
-      ? 'Thanks, have a nice day!'
-      : 'Thank you, have a nice day!';
+    const replyText =
+      input.languageCode !== 'english' ? 'Thanks, have a nice day!' : 'Thank you, have a nice day!';
     return {
       replyText,
       updatedCollected: preflight.collected,
@@ -974,7 +977,49 @@ export class ReceptionistAgentService {
   private formatSlotProposalReply(
     collected: ReturnType<typeof parseBookingCollected>,
     languageCode: AgentTurnInput['languageCode'],
+    availabilityResult?: Record<string, unknown>,
   ): string | null {
+    const requestedTime =
+      typeof availabilityResult?.requestedTime === 'string'
+        ? availabilityResult.requestedTime
+        : null;
+    const nearbySlotsText =
+      typeof availabilityResult?.nearbySlotsText === 'string'
+        ? availabilityResult.nearbySlotsText
+        : '';
+    const windowsText =
+      typeof availabilityResult?.availabilityWindowsText === 'string'
+        ? availabilityResult.availabilityWindowsText
+        : '';
+    const frequencyText =
+      typeof availabilityResult?.slotFrequencyText === 'string'
+        ? availabilityResult.slotFrequencyText
+        : '';
+    const doctorName = collected.doctor_name ?? 'Doctor';
+    const dateDisplay = collected.preferred_date ?? '';
+
+    if (requestedTime && availabilityResult?.requestedTimeAvailable === true) {
+      if (!collected.patient_name) {
+        return languageCode !== 'english'
+          ? `${requestedTime} slot available. Patient name sollunga.`
+          : `${requestedTime} is available with ${doctorName} on ${dateDisplay}. What is the patient's name?`;
+      }
+      return languageCode !== 'english'
+        ? `${requestedTime} slot available. Indha time continue pannalama?`
+        : `${requestedTime} is available with ${doctorName} on ${dateDisplay}. Shall I continue with this time?`;
+    }
+    if (requestedTime && nearbySlotsText) {
+      return languageCode !== 'english'
+        ? `${requestedTime} available illa. Nearby slots: ${nearbySlotsText}. Edha choose panreenga?`
+        : `${requestedTime} is not available. Nearby times are ${nearbySlotsText}. Which one would you prefer?`;
+    }
+    if (windowsText && windowsText !== 'no slots') {
+      const frequency = frequencyText ? `, ${frequencyText}` : '';
+      return languageCode !== 'english'
+        ? `${doctorName} ${dateDisplay} available time: ${windowsText}${frequency}. Exact time sollunga.`
+        : `${doctorName} is available on ${dateDisplay} during ${windowsText}${frequency}. What exact time would you prefer?`;
+    }
+
     const proposed = collected.proposed_slots;
     if (!Array.isArray(proposed) || proposed.length === 0) {
       return null;
@@ -983,8 +1028,6 @@ export class ReceptionistAgentService {
       .map((slot) => slot.display_time)
       .filter((value): value is string => typeof value === 'string')
       .join(', ');
-    const doctorName = collected.doctor_name ?? 'Doctor';
-    const dateDisplay = collected.preferred_date ?? '';
     if (languageCode !== 'english') {
       return `${doctorName} ${dateDisplay} ${slotList} slots irukku. Edha choose panreenga?`;
     }
@@ -1027,9 +1070,7 @@ export class ReceptionistAgentService {
       return { ...result, guardrailFlags: result.guardrailFlags ?? [] };
     }
 
-    this.logger.warn(
-      JSON.stringify({ event: 'agent_output_guardrail', violations }),
-    );
+    this.logger.warn(JSON.stringify({ event: 'agent_output_guardrail', violations }));
 
     return {
       ...result,
@@ -1142,8 +1183,7 @@ export class ReceptionistAgentService {
     );
     const prevCount = Number(input.collected.agent_clarify_count ?? 0);
     return {
-      replyText:
-        'No problem — I will have a clinic staff member call you back shortly to help.',
+      replyText: 'No problem — I will have a clinic staff member call you back shortly to help.',
       updatedCollected: {
         ...input.collected,
         agent_clarify_count: prevCount + 1,
@@ -1155,7 +1195,10 @@ export class ReceptionistAgentService {
 
   private resolveLlmTimeoutMs(turnStartedAt: number): number {
     const elapsed = Date.now() - turnStartedAt;
-    const remaining = Math.max(MIN_LLM_TIMEOUT_MS, this.env.RECEPTIONIST_AGENT_TURN_BUDGET_MS - elapsed);
+    const remaining = Math.max(
+      MIN_LLM_TIMEOUT_MS,
+      this.env.RECEPTIONIST_AGENT_TURN_BUDGET_MS - elapsed,
+    );
     return Math.min(this.env.RECEPTIONIST_AGENT_TIMEOUT_MS, remaining);
   }
 
@@ -1172,7 +1215,12 @@ export class ReceptionistAgentService {
       modelTier?: 'tool_loop' | 'fastpath';
     },
   ): Promise<{
-    response: { content: string; toolCalls?: LlmToolCall[]; finishReason?: string | null; model: string };
+    response: {
+      content: string;
+      toolCalls?: LlmToolCall[];
+      finishReason?: string | null;
+      model: string;
+    };
     ttftMs?: number;
   }> {
     const request = this.buildLlmRequest(messages, options);
@@ -1237,7 +1285,10 @@ export class ReceptionistAgentService {
       response = await this.withTurnBudget(turnStartedAt, () =>
         this.llm.chat({ ...request, model: this.env.RECEPTIONIST_AGENT_FALLBACK_MODEL }, runtime),
       );
-      debugTrace.push({ event: 'agent_llm_fallback_model', model: this.env.RECEPTIONIST_AGENT_FALLBACK_MODEL });
+      debugTrace.push({
+        event: 'agent_llm_fallback_model',
+        model: this.env.RECEPTIONIST_AGENT_FALLBACK_MODEL,
+      });
     }
 
     debugTrace.push({
@@ -1354,7 +1405,11 @@ export class ReceptionistAgentService {
     let nextCollected = collected;
     let sessionStatus: AgentSessionStatus | null = null;
 
-    if (toolName === 'update_booking_state' && result.collected && typeof result.collected === 'object') {
+    if (
+      toolName === 'update_booking_state' &&
+      result.collected &&
+      typeof result.collected === 'object'
+    ) {
       nextCollected = result.collected as Record<string, unknown>;
     } else if (toolName === 'create_appointment_request' && result.appointmentId) {
       nextCollected = {
@@ -1374,17 +1429,31 @@ export class ReceptionistAgentService {
     } else if (toolName === 'reschedule_appointment' && result.submitted) {
       sessionStatus = 'active';
     } else if (toolName === 'check_slot_availability' && Array.isArray(result.slots)) {
+      const resultSlots = result.slots as Array<Record<string, unknown>>;
+      const isExactTimeCheck = typeof result.requestedTime === 'string';
+      const exactTimeMatched = isExactTimeCheck && result.requestedTimeAvailable === true;
+      const matchedSlotId =
+        exactTimeMatched && resultSlots.length === 1
+          ? resultSlots[0]?.slotId
+          : null;
       nextCollected = {
         ...nextCollected,
-        proposed_slots: (result.slots as Array<Record<string, unknown>>).map((slot) => ({
-          slot_id: slot.slotId,
-          display_time: slot.time,
-          start_time: `${slot.dateDisplay} ${slot.time}`,
-          end_time: `${slot.dateDisplay} ${slot.time}`,
-        })),
+        // Nearby alternatives are suggestions, not verified selections. Do not
+        // cache them as selectable proposals or the next turn's fast path can
+        // bypass the required exact-time availability recheck.
+        proposed_slots: exactTimeMatched
+          ? resultSlots.map((slot) => ({
+              slot_id: slot.slotId,
+              display_time: slot.time,
+              start_time: slot.startTime ?? `${slot.dateDisplay} ${slot.time}`,
+              end_time: slot.endTime ?? `${slot.dateDisplay} ${slot.time}`,
+            }))
+          : [],
         preferred_date: result.preferredDate ?? nextCollected.preferred_date,
         doctor_id: result.doctorId ?? nextCollected.doctor_id,
+        doctor_name: result.doctorName ?? nextCollected.doctor_name,
         clinic_service_id: result.clinicServiceId ?? nextCollected.clinic_service_id,
+        ...(typeof matchedSlotId === 'string' ? { selected_slot_id: matchedSlotId } : {}),
       };
     }
 

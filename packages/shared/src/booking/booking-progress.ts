@@ -6,14 +6,14 @@ const NON_BOOKING_ACTIVE_FLOWS = new Set<string>([CANCEL_FLOW, RESCHEDULE_FLOW, 
 export function hasBookingProgress(collected: BookingCollected): boolean {
   return Boolean(
     collected.reason_for_visit ||
-      collected.doctor_id ||
-      collected.doctor_name ||
-      collected.clinic_service_id ||
-      collected.preferred_date ||
-      collected.hold_id ||
-      collected.proposed_slots?.length ||
-      collected.selected_slot_id ||
-      collected.appointment_id,
+    collected.doctor_id ||
+    collected.doctor_name ||
+    collected.clinic_service_id ||
+    collected.preferred_date ||
+    collected.hold_id ||
+    collected.proposed_slots?.length ||
+    collected.selected_slot_id ||
+    collected.appointment_id,
   );
 }
 
@@ -33,9 +33,6 @@ export function inferBookingState(collected: BookingCollected): string {
   if (!collected.preferred_date) {
     return 'ASK_DATE';
   }
-  if (!collected.time_preference && !collected.hold_id && !collected.selected_slot_id) {
-    return 'ASK_TIME';
-  }
   if (!collected.hold_id && !collected.selected_slot_id) {
     return 'PROPOSE_SLOTS';
   }
@@ -45,9 +42,9 @@ export function inferBookingState(collected: BookingCollected): string {
   return 'CONFIRM_DOCTOR';
 }
 
-export function resumeBookingSession<T extends { currentFlow: string; currentState: string; collectedJson?: unknown }>(
-  session: T,
-): T {
+export function resumeBookingSession<
+  T extends { currentFlow: string; currentState: string; collectedJson?: unknown },
+>(session: T): T {
   if (session.currentFlow === 'booking') {
     return session;
   }

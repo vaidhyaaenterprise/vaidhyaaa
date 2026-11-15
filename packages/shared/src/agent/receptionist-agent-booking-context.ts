@@ -48,15 +48,16 @@ const NEXT_ACTION_BY_STATE: Record<
     tools: ['update_booking_state'],
   },
   ASK_TIME: {
-    action: 'ask_time_preference',
-    example_ta: 'Morning, afternoon, illena evening — edha prefer panreenga?',
-    example_en: 'Do you prefer morning, afternoon, or evening?',
+    action: 'check_date_windows_and_ask_exact_time',
+    example_ta: 'Available window-um frequency-um sollitu exact time kelunga.',
+    example_en: 'Explain the available windows and frequency, then ask for an exact time.',
     tools: ['update_booking_state', 'check_slot_availability'],
   },
   PROPOSE_SLOTS: {
-    action: 'check_slots_and_offer',
-    example_ta: 'Available slots check pannitu edha choose panreenga-nu kelunga.',
-    example_en: 'Call check_slot_availability, then offer real slots and ask which one they prefer.',
+    action: 'check_date_windows_and_ask_exact_time',
+    example_ta: 'Date availability windows-um slot frequency-um check pannitu exact time kelunga.',
+    example_en:
+      'Call check_slot_availability for the date, explain the 24-hour windows and frequency, then ask for an exact time.',
     tools: ['check_slot_availability', 'update_booking_state'],
   },
   ASK_PATIENT_NAME: {
@@ -73,8 +74,10 @@ const NEXT_ACTION_BY_STATE: Record<
   },
   AWAITING_CONFIRMATION: {
     action: 'inform_pending',
-    example_ta: 'Unga appointment pending confirmation-la irukku. Staff confirm panna odane confirm aagidum.',
-    example_en: 'Your appointment is pending confirmation. Once the staff confirms, it will be confirmed.',
+    example_ta:
+      'Unga appointment pending confirmation-la irukku. Staff confirm panna odane confirm aagidum.',
+    example_en:
+      'Your appointment is pending confirmation. Once the staff confirms, it will be confirmed.',
     tools: [],
   },
 };
@@ -83,6 +86,8 @@ const BOOKING_REPLY_RULES: string[] = [
   'Ask exactly ONE short question this turn — never a numbered list of all required fields.',
   'If patient_message contains any booking field (reason, doctor, date, time, name, phone), call update_booking_state first, then ask only the next missing field.',
   'Offer times only from check_slot_availability — never invent slots or doctors.',
+  'After the date, check availability without time_preference; state the 24-hour windows and slot frequency, then ask for one exact time.',
+  'Recheck the exact time. If unavailable, offer only nearbySlotsText and wait for another choice.',
   'Book with create_appointment_request only after explicit patient yes (confirmedByPatient=true).',
 ];
 
@@ -100,9 +105,6 @@ function listMissingBookingFields(
   if (!collected.preferred_date) {
     missing.push('preferred_date');
   }
-  if (!collected.time_preference && !collected.selected_slot_id && !collected.hold_id) {
-    missing.push('time_preference_or_slot');
-  }
   if (!collected.selected_slot_id && !collected.hold_id) {
     missing.push('confirmed_slot');
   }
@@ -111,8 +113,8 @@ function listMissingBookingFields(
   }
   const phoneKnown = Boolean(
     patientPhone ||
-      (collected as Record<string, unknown>).patient_phone ||
-      (collected as Record<string, unknown>).known_patient_phone,
+    (collected as Record<string, unknown>).patient_phone ||
+    (collected as Record<string, unknown>).known_patient_phone,
   );
   if (!phoneKnown) {
     missing.push('patient_phone');
@@ -160,8 +162,7 @@ export function buildReceptionistAgentBookingContext(
   }
 
   const state = inferBookingState(input.collected);
-  const guide =
-    NEXT_ACTION_BY_STATE[state] ?? NEXT_ACTION_BY_STATE.ASK_PROBLEM_OR_DOCTOR!;
+  const guide = NEXT_ACTION_BY_STATE[state] ?? NEXT_ACTION_BY_STATE.ASK_PROBLEM_OR_DOCTOR!;
   const useTamil = input.languageCode !== 'english';
   const patientMove = isBookingMetaQuestion(input.messageText)
     ? 'meta_question_what_details_needed'

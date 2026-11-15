@@ -40,6 +40,13 @@ describe('A29 receptionist agent Sarvam payload strategy', () => {
     expect(asDateNames).toContain('check_slot_availability');
     expect(asDateNames).not.toContain('create_appointment_request');
     expect(asDateCollected).toHaveLength(8);
+    const availabilityTool = asDateCollected.find(
+      (tool) => tool.function.name === 'check_slot_availability',
+    );
+    const properties = availabilityTool?.function.parameters.properties ?? {};
+    expect(properties).toHaveProperty('date');
+    expect(properties).toHaveProperty('time');
+    expect(properties).not.toHaveProperty('timePreference');
 
     const confirmCollected = getReceptionistAgentToolsForRequest('sarvam', {
       collected: {

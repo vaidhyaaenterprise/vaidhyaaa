@@ -58,7 +58,12 @@ function filterByDate<T extends { appointmentDate: string }>(appointments: T[], 
   return appointments.filter((apt) => apt.appointmentDate === date);
 }
 
-const VISIBLE_APPOINTMENT_STATUSES = ['pending_confirmation', 'confirmed', 'visited'] as const;
+const VISIBLE_APPOINTMENT_STATUSES = [
+  'pending_confirmation',
+  'confirmed',
+  'visited',
+  'no_show',
+] as const;
 
 type PageDataSelection = {
   showLoading?: boolean;
@@ -92,6 +97,7 @@ export function AppointmentsPageContent() {
   const [pendingAppointments, setPendingAppointments] = useState<Appointment[]>([]);
   const [confirmedAppointments, setConfirmedAppointments] = useState<Appointment[]>([]);
   const [visitedAppointments, setVisitedAppointments] = useState<Appointment[]>([]);
+  const [noShowAppointments, setNoShowAppointments] = useState<Appointment[]>([]);
   const [actionRequests, setActionRequests] = useState<AppointmentActionRequest[]>([]);
   const [appointmentActivities, setAppointmentActivities] = useState<AppointmentActivity[]>([]);
   const [doctorOptions, setDoctorOptions] = useState<Array<{ id: string; name: string }>>([]);
@@ -185,6 +191,7 @@ export function AppointmentsPageContent() {
           setPendingAppointments(mapped.filter((apt) => apt.status === 'pending_confirmation'));
           setConfirmedAppointments(mapped.filter((apt) => apt.status === 'confirmed'));
           setVisitedAppointments(mapped.filter((apt) => apt.status === 'visited'));
+          setNoShowAppointments(mapped.filter((apt) => apt.status === 'no_show'));
         }
         if (requests) {
           setActionRequests(requests.map(mapActionRequestRow));
@@ -378,30 +385,70 @@ export function AppointmentsPageContent() {
 
   const doctors = useMemo(() => {
     const map = new Map<string, string>(doctorOptions.map((d) => [d.id, d.name]));
-    for (const apt of [...pendingAppointments, ...confirmedAppointments, ...visitedAppointments]) {
+    for (const apt of [
+      ...pendingAppointments,
+      ...confirmedAppointments,
+      ...visitedAppointments,
+      ...noShowAppointments,
+    ]) {
       map.set(apt.doctorId, apt.doctorName);
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [doctorOptions, pendingAppointments, confirmedAppointments, visitedAppointments]);
+  }, [
+    doctorOptions,
+    pendingAppointments,
+    confirmedAppointments,
+    visitedAppointments,
+    noShowAppointments,
+  ]);
 
   const services = useMemo(() => {
     const map = new Map<string, string>(serviceOptions.map((s) => [s.id, s.name]));
-    for (const apt of [...pendingAppointments, ...confirmedAppointments, ...visitedAppointments]) {
+    for (const apt of [
+      ...pendingAppointments,
+      ...confirmedAppointments,
+      ...visitedAppointments,
+      ...noShowAppointments,
+    ]) {
       map.set(apt.serviceId, apt.serviceName);
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [serviceOptions, pendingAppointments, confirmedAppointments, visitedAppointments]);
+  }, [
+    serviceOptions,
+    pendingAppointments,
+    confirmedAppointments,
+    visitedAppointments,
+    noShowAppointments,
+  ]);
 
-  const clinicDate = useMemo(() => {
-    if (!clinicProfile?.timezone) {
-      return null;
+  const [clinicDate, setClinicDate] = useState<string | null>(null);
+  useEffect(() => {
+    const timezone = clinicProfile?.timezone;
+    if (!timezone) {
+      setClinicDate(null);
+      return;
     }
-    try {
-      return getClinicDate(new Date(), clinicProfile.timezone);
-    } catch {
-      return null;
-    }
-  }, [clinicProfile?.timezone]);
+    let previousDate: string | null = null;
+    const refreshDate = () => {
+      try {
+        const date = getClinicDate(new Date(), timezone);
+        setClinicDate(date);
+        if (previousDate && previousDate !== date) {
+          void loadAppointments({ showLoading: false, includeSettings: false });
+        }
+        previousDate = date;
+      } catch {
+        setClinicDate(null);
+      }
+    };
+    refreshDate();
+    const timer = window.setInterval(refreshDate, 60_000);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshDate);
+    };
+  }, [clinicProfile?.timezone, loadAppointments]);
 
   const currentAndFuturePending = useMemo(
     () =>
@@ -426,15 +473,21 @@ export function AppointmentsPageContent() {
   const visibleMissed = filterByDate(missedPending, selectedDate);
   const visibleConfirmed = filterByDate(currentAndFutureConfirmed, selectedDate);
   const visibleVisited = filterByDate(visitedAppointments, selectedDate);
+  const visibleNoShows = filterByDate(noShowAppointments, selectedDate);
   const selectedDateLabel = selectedDate ? selectedDate.split('-').reverse().join('/') : '';
   // Pending requests still belong to their current appointment, not an unapproved proposed slot.
   const appointmentDates = new Map(
-    [...pendingAppointments, ...confirmedAppointments, ...visitedAppointments].map(
-      (appointment) => [appointment.id, appointment.appointmentDate],
-    ),
+    [
+      ...pendingAppointments,
+      ...confirmedAppointments,
+      ...visitedAppointments,
+      ...noShowAppointments,
+    ].map((appointment) => [appointment.id, appointment.appointmentDate]),
   );
   const visibleActionRequests = selectedDate
-    ? actionRequests.filter((request) => appointmentDates.get(request.appointmentId) === selectedDate)
+    ? actionRequests.filter(
+        (request) => appointmentDates.get(request.appointmentId) === selectedDate,
+      )
     : actionRequests;
   // Resolve the latest event before filtering so an older matching change cannot reappear.
   const visibleAppointmentActivities = useMemo(
@@ -794,6 +847,12 @@ export function AppointmentsPageContent() {
           appointments={visibleVisited}
           dateLabel={selectedDateLabel}
           onViewHistory={handleViewHistory}
+          onEditPatientName={handleEditPatientName}
+        />
+        <MissedAppointments
+          kind="no_show"
+          appointments={visibleNoShows}
+          dateLabel={selectedDateLabel}
           onEditPatientName={handleEditPatientName}
         />
         {isAdmin && (

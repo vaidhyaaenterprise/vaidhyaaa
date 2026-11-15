@@ -7,6 +7,7 @@ import type { Appointment } from './types';
 interface MissedAppointmentsProps {
   appointments: Appointment[];
   dateLabel?: string;
+  kind?: 'missed_action' | 'no_show';
   onEditPatientName: (id: string, patientName: string) => Promise<void>;
 }
 
@@ -25,8 +26,11 @@ function formatDate(date: string) {
 export function MissedAppointments({
   appointments,
   dateLabel,
+  kind = 'missed_action',
   onEditPatientName,
 }: MissedAppointmentsProps) {
+  const isNoShow = kind === 'no_show';
+  const headingId = isNoShow ? 'no-show-appointments-heading' : 'missed-appointments-heading';
   const { effectiveRole, clinicRole } = useAuth();
   const currentDoctorId = clinicRole?.doctor_id;
   const visibleAppointments =
@@ -36,21 +40,31 @@ export function MissedAppointments({
 
   return (
     <section
-      aria-labelledby="missed-appointments-heading"
+      aria-labelledby={headingId}
       className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
     >
-      <h3 id="missed-appointments-heading" className="mb-1 text-lg font-bold text-slate-900">
-        Missed actions
+      <h3 id={headingId} className="mb-1 text-lg font-bold text-slate-900">
+        {isNoShow ? 'No show' : 'Missed actions'}
       </h3>
       <p className="mb-4 text-sm text-slate-500">
-        {dateLabel
-          ? `Appointments for ${dateLabel} where no clinic-admin action was taken.`
-          : 'Recent past appointments where no clinic-admin action was taken.'}
+        {isNoShow
+          ? dateLabel
+            ? `Confirmed appointments for ${dateLabel} that were not marked visited by the end of that day.`
+            : 'Confirmed appointments that were not marked visited by the end of the appointment day.'
+          : dateLabel
+            ? `Appointments for ${dateLabel} where no clinic-admin action was taken.`
+            : 'Recent past appointments where no clinic-admin action was taken.'}
       </p>
 
       {visibleAppointments.length === 0 ? (
         <p className="text-sm text-slate-500">
-          {dateLabel ? `No missed actions for ${dateLabel}.` : 'No missed actions'}
+          {isNoShow
+            ? dateLabel
+              ? `No no-show appointments for ${dateLabel}.`
+              : 'No no-show appointments.'
+            : dateLabel
+              ? `No missed actions for ${dateLabel}.`
+              : 'No missed actions'}
         </p>
       ) : (
         <ul className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200">
@@ -83,9 +97,11 @@ export function MissedAppointments({
               </div>
               <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
                 <span className="rounded-full border-2 border-rose-300 bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
-                  Missed
+                  {isNoShow ? 'No show' : 'Missed'}
                 </span>
-                <span className="text-xs font-semibold text-slate-500">No action taken</span>
+                <span className="text-xs font-semibold text-slate-500">
+                  {isNoShow ? 'Not marked visited' : 'No action taken'}
+                </span>
               </div>
             </li>
           ))}

@@ -140,6 +140,19 @@ export async function updateAppointmentPatientName(
   );
 }
 
+export type EditableAppointmentStatus = 'confirmed' | 'cancelled' | 'no_show' | 'visited';
+
+export async function updateAppointmentStatus(
+  clinicId: string,
+  appointmentId: string,
+  status: EditableAppointmentStatus,
+) {
+  return apiPatch<{ appointment: { id: string; status: EditableAppointmentStatus } }>(
+    `/v1/clinics/${clinicId}/appointments/${appointmentId}/status`,
+    { status },
+  );
+}
+
 export async function rescheduleAppointment(
   clinicId: string,
   appointmentId: string,

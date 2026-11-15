@@ -159,6 +159,7 @@ export {
   patchAppointmentRequestSchema,
   rescheduleAppointmentSchema,
   updateAppointmentPatientNameSchema,
+  updateAppointmentStatusSchema,
   type AppointmentResponse,
   type CreateAppointmentRequestInput,
   type ManualAppointmentCreateInput,
@@ -166,6 +167,7 @@ export {
   type PatchAppointmentRequestInput,
   type RescheduleAppointmentInput,
   type UpdateAppointmentPatientNameInput,
+  type UpdateAppointmentStatusInput,
 } from './appointment';
 
 export {

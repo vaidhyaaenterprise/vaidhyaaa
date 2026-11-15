@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import {
@@ -8,6 +19,7 @@ import {
   rescheduleAppointmentSchema,
   resolveAppointmentActionRequestSchema,
   updateAppointmentPatientNameSchema,
+  updateAppointmentStatusSchema,
   type AuthContext,
 } from '@vaidya/shared';
 
@@ -27,7 +39,8 @@ export class AppointmentsController {
     @Inject(AppointmentsService) private readonly appointmentsService: AppointmentsService,
     @Inject(AppointmentLifecycleService)
     private readonly appointmentLifecycleService: AppointmentLifecycleService,
-    @Inject(AppointmentAdminService) private readonly appointmentAdminService: AppointmentAdminService,
+    @Inject(AppointmentAdminService)
+    private readonly appointmentAdminService: AppointmentAdminService,
   ) {}
 
   @Get()
@@ -38,7 +51,10 @@ export class AppointmentsController {
     @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
     const auth = getAuthContext(request);
-    const statuses = status?.split(',').map((value) => value.trim()).filter(Boolean);
+    const statuses = status
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
     const appointments = await this.appointmentsService.listAppointments({
       clinicId,
       ...(auth.clinicRole === 'doctor' && auth.doctorId ? { doctorId: auth.doctorId } : {}),
@@ -106,7 +122,10 @@ export class AppointmentsController {
     const parsed = manualAppointmentCreateSchema.safeParse(body);
     if (!parsed.success) {
       const phoneIssue = parsed.error.issues.find((issue) => issue.path[0] === 'patient_phone');
-      throw new AppError('VALIDATION_ERROR', phoneIssue?.message ?? 'Invalid manual appointment payload.');
+      throw new AppError(
+        'VALIDATION_ERROR',
+        phoneIssue?.message ?? 'Invalid manual appointment payload.',
+      );
     }
     const auth = getAuthContext(request);
     const appointment = await this.appointmentAdminService.createManualAppointment(
@@ -198,6 +217,30 @@ export class AppointmentsController {
       clinicId,
       appointmentId,
       patientName: parsed.data.patient_name,
+      actorUserId: auth.userId,
+    });
+  }
+
+  @Patch(':appointmentId/status')
+  @Roles('clinic_admin')
+  async updateAppointmentStatus(
+    @Param('clinicId') clinicId: string,
+    @Param('appointmentId') appointmentId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const parsed = updateAppointmentStatusSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Choose confirmed, cancelled, no show, or visited. Only appointment status can be changed.',
+      );
+    }
+    const auth = getAuthContext(request);
+    return this.appointmentAdminService.correctStatus({
+      clinicId,
+      appointmentId,
+      status: parsed.data.status,
       actorUserId: auth.userId,
     });
   }

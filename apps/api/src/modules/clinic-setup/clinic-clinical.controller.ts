@@ -308,6 +308,7 @@ export class ClinicClinicalController {
     @Query('phone') phone?: string,
     @Query('name') name?: string,
     @Query('age') age?: string,
+    @Query('date') date?: string,
   ) {
     let parsedAge: number | undefined;
     if (age !== undefined && age.trim().length > 0) {
@@ -321,6 +322,7 @@ export class ClinicClinicalController {
       ...(phone?.trim() ? { phone: phone.trim() } : {}),
       ...(name?.trim() ? { name: name.trim() } : {}),
       ...(parsedAge !== undefined ? { age: parsedAge } : {}),
+      ...(date !== undefined ? { date } : {}),
     });
 
     return { patients: result.patients };

@@ -125,6 +125,8 @@ export class AppointmentsService {
     doctorId?: string | null;
     status?: string[];
   }): Promise<AppointmentListItem[]> {
+    // Catch up before reading, including when a scheduled run was delayed.
+    await this.repos.appointmentLifecycle.markPastConfirmedNoShows(input.clinicId);
     const rows = await this.repos.appointmentLifecycle.listAppointmentsForClinic({
       clinicId: input.clinicId,
       ...(input.doctorId ? { doctorId: input.doctorId } : {}),

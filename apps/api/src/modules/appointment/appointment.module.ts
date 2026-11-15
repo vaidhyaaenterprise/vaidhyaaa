@@ -9,14 +9,17 @@ import { AppointmentAdminService } from './appointment-admin.service';
 import { AppointmentLifecycleService } from './appointment-lifecycle.service';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsService } from './appointments.service';
+import { AppointmentNoShowService } from './appointment-no-show.service';
+import { AppointmentNoShowController } from './appointment-no-show.controller';
 
 @Module({
   imports: [DatabaseModule, NotificationModule, SlotsModule],
-  controllers: [AppointmentsController],
+  controllers: [AppointmentsController, AppointmentNoShowController],
   providers: [
     AppointmentsService,
     AppointmentLifecycleService,
     AppointmentAdminService,
+    AppointmentNoShowService,
     DoctorOwnershipGuard,
   ],
   exports: [AppointmentsService, AppointmentLifecycleService, AppointmentAdminService],

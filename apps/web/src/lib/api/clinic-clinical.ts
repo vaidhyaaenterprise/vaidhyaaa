@@ -412,6 +412,7 @@ export async function searchPatientHistory(
     phone?: string;
     name?: string;
     age?: number;
+    date?: string;
   },
   signal?: AbortSignal,
 ) {
@@ -424,6 +425,9 @@ export async function searchPatientHistory(
   }
   if (query.age !== undefined) {
     params.set('age', String(query.age));
+  }
+  if (query.date) {
+    params.set('date', query.date);
   }
 
   const suffix = params.toString();

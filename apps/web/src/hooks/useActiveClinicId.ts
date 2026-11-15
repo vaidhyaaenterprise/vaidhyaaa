@@ -3,17 +3,17 @@
 import { useAuth } from '@/components/auth/AuthProvider';
 
 export function useActiveClinicId(): string | null {
-  const { clinicRole, me } = useAuth();
+  const { status, clinicRole } = useAuth();
+  if (status !== 'authenticated') {
+    return null;
+  }
   if (clinicRole?.clinic_id) {
     return clinicRole.clinic_id;
-  }
-  if (me?.clinics[0]?.clinic_id) {
-    return me.clinics[0].clinic_id;
   }
   return null;
 }
 
 export function useIsPlatformAdmin(): boolean {
-  const { me } = useAuth();
-  return me?.user.platform_role === 'platform_admin';
+  const { status, me } = useAuth();
+  return status === 'authenticated' && me?.user.platform_role === 'platform_admin';
 }

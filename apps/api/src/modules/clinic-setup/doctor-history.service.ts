@@ -10,6 +10,7 @@ type DoctorPatientHistorySearchInput = {
   phone?: string;
   name?: string;
   age?: number;
+  date?: string;
 };
 
 type HistoryTimelineItem = {
@@ -77,11 +78,18 @@ export class DoctorHistoryService {
     const normalizedPhone = input.phone ? normalizePhone(input.phone) : undefined;
     const normalizedName = input.name ? normalizeName(input.name) : undefined;
     const age = input.age;
-
-    if (!normalizedPhone && !normalizedName && age === undefined) {
+    if (input.date !== undefined && typeof input.date !== 'string') {
       throw new AppError(
         'VALIDATION_ERROR',
-        'At least one search field is required: phone, name, or age.',
+        'Date must be a valid calendar date in YYYY-MM-DD format.',
+      );
+    }
+    const date = input.date?.trim() || undefined;
+
+    if (!normalizedPhone && !normalizedName && age === undefined && !date) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'At least one search field is required: phone, name, age, or date.',
       );
     }
 
@@ -97,10 +105,26 @@ export class DoctorHistoryService {
       throw new AppError('VALIDATION_ERROR', 'Age must be an integer between 0 and 130.');
     }
 
+    if (date) {
+      const parsed = new Date(`${date}T00:00:00Z`);
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        date.startsWith('0000') ||
+        Number.isNaN(parsed.getTime()) ||
+        parsed.toISOString().slice(0, 10) !== date
+      ) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'Date must be a valid calendar date in YYYY-MM-DD format.',
+        );
+      }
+    }
+
     const patients = await this.repos.clinicalSetup.searchPatientsForHistory(clinicId, {
       ...(normalizedPhone ? { phone: normalizedPhone } : {}),
       ...(normalizedName ? { name: normalizedName } : {}),
       ...(age !== undefined ? { age } : {}),
+      ...(date ? { date } : {}),
       limit: 50,
     });
 
@@ -110,13 +134,21 @@ export class DoctorHistoryService {
 
     const patientIds = patients.map((row) => row.id);
 
+    await this.repos.appointmentLifecycle.markPastConfirmedNoShows(clinicId);
+
     const [visits, appointments] = await Promise.all([
       this.repos.clinicalSetup.listVisitsForPatientHistory(clinicId, patientIds),
       this.repos.clinicalSetup.listAppointmentsForPatientHistory(clinicId, patientIds),
     ]);
 
     const visitsByPatient = new Map<string, HistoryTimelineItem[]>();
+    const appointmentById = new Map(appointments.map((row) => [row.id, row]));
     for (const visit of visits) {
+      const linkedStatus =
+        visit.appointmentStatus ??
+        (visit.appointmentRequestId
+          ? appointmentById.get(visit.appointmentRequestId)?.status
+          : undefined);
       const row: HistoryTimelineItem = {
         kind: 'visit',
         id: visit.id,
@@ -130,6 +162,7 @@ export class DoctorHistoryService {
         ...(visit.diagnosis ? { diagnosis: visit.diagnosis } : {}),
         ...(visit.advice ? { advice: visit.advice } : {}),
         appointment_request_id: visit.appointmentRequestId,
+        ...(linkedStatus ? { status: linkedStatus } : {}),
       };
 
       const list = visitsByPatient.get(visit.patientId) ?? [];

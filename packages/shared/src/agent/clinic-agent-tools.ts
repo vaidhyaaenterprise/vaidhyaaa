@@ -74,17 +74,16 @@ export const CLINIC_AGENT_TOOLS: LlmToolDefinition[] = [
     function: {
       name: 'check_slot_availability',
       description:
-        'List available appointment slots for a doctor/service on a date. Call before confirming a time.',
+        'Check availability for a doctor/service on a date. First call with only the date to get 24-hour windows and frequency, then recheck the exact time chosen by the patient.',
       parameters: {
         type: 'object',
         properties: {
           doctor_name: nullableStringProp('Preferred doctor name.'),
           reason_for_visit: nullableStringProp('Symptom or visit reason for service routing.'),
           preferred_date: stringProp('ISO date YYYY-MM-DD or relative day the patient wants.'),
-          time_preference: {
+          time: {
             type: ['string', 'null'],
-            enum: ['morning', 'afternoon', 'evening', null],
-            description: 'Rough time-of-day preference.',
+            description: 'Exact clinic-local time in 24-hour HH:mm for the follow-up recheck.',
           },
         },
         required: ['preferred_date'],
@@ -150,7 +149,8 @@ export const CLINIC_AGENT_TOOLS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'request_human_callback',
-      description: 'Escalate to clinic staff when the patient asks for a human or the issue needs staff follow-up.',
+      description:
+        'Escalate to clinic staff when the patient asks for a human or the issue needs staff follow-up.',
       parameters: {
         type: 'object',
         properties: {

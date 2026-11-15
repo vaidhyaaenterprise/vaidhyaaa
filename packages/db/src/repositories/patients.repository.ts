@@ -1,7 +1,13 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import type { Database } from '../client';
-import { appointmentRequests, calls, conversationSessions, patientVisits, patients } from '../schema';
+import {
+  appointmentRequests,
+  calls,
+  conversationSessions,
+  patientVisits,
+  patients,
+} from '../schema';
 
 function normalizeName(value: string): string {
   return value.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -140,6 +146,20 @@ export class PatientsRepository {
 
   insertVisit(values: typeof patientVisits.$inferInsert, db: Database = this.db) {
     return db.insert(patientVisits).values(values).returning();
+  }
+
+  findVisitByAppointmentId(clinicId: string, appointmentId: string, db: Database = this.db) {
+    return db
+      .select()
+      .from(patientVisits)
+      .where(
+        and(
+          eq(patientVisits.clinicId, clinicId),
+          eq(patientVisits.appointmentRequestId, appointmentId),
+        ),
+      )
+      .orderBy(desc(patientVisits.createdAt), desc(patientVisits.id))
+      .limit(1);
   }
 
   listVisitsByAppointmentIds(clinicId: string, appointmentIds: string[]) {

@@ -30,15 +30,16 @@ Required information must be collected/resolved first. `session_id` is included 
 | `recommend_service`, no requested doctor | `clinic_id`, mapped `service_key`, current `reason_for_visit` | `doctor_id`, `doctor_name`, `clinic_service_id`, date/time, session/patient/search fields |
 | `recommend_service`, unresolved requested name | Same base plus `doctor_name` | `doctor_id`, `clinic_service_id` and unrelated fields |
 | `recommend_service`, uniquely identified doctor | Same base plus `doctor_id` | `doctor_name`, `clinic_service_id` and unrelated fields |
-| `check_available_slots`, ordinary search, any doctor | `clinic_id`, validated `clinic_service_id`, `date`, applicable time fields | Both doctor fields; `mode`, `from_date`, `to_date`, `service_key`, `reason_for_visit`, session/patient/slot fields |
-| Ordinary search, requested or accepted doctor | Same base plus that `doctor_id` | `doctor_name`, `exclude_doctor_ids` and unrelated fields; search only that doctor |
-| Rejected random doctor, search others | Ordinary base plus non-empty same-service `exclude_doctor_ids` | Both doctor fields; old/random doctor cannot be sent as a restriction |
+| `check_available_slots`, first date lookup, any doctor | `clinic_id`, validated `clinic_service_id`, `date` | Both doctor fields; all time filters including `time_preference`; `mode`, range dates and unrelated fields |
+| First date lookup, requested doctor | Same base plus validated `doctor_id` | `doctor_name`, `exclude_doctor_ids`, all time filters and unrelated fields; search only that doctor |
+| Exact-time recheck after the caller chooses | Date lookup base plus returned `doctor_id` and exact `time` in HH:mm | `mode`, range dates, `time_preference`, `after_time`, `before_time`, `doctor_name` |
+| Rejected random doctor, search others | Fresh date-only base plus non-empty same-service `exclude_doctor_ids` | Both doctor fields, all time filters; old/random doctor cannot be sent as a restriction |
 | `overview`, all times on one day | `clinic_id`, `clinic_service_id`, `mode=overview`, `date` | `from_date`, `to_date`, all four time filters, unrelated fields |
 | `overview`, all available dates | `clinic_id`, `clinic_service_id`, `mode=overview` | `date`, `from_date`, `to_date`, all time filters, unrelated fields |
 | `overview`, caller-requested date range | Same overview base plus known `from_date` and/or `to_date` | `date`, unknown range boundary, all time filters, unrelated fields |
 | Any overview for a single doctor | Add that doctor's `doctor_id` | `doctor_name`, `exclude_doctor_ids` |
 | Any overview for all eligible doctors | Optionally add genuine non-empty same-service `exclude_doctor_ids` | Both doctor fields |
-| Exact-time recheck after overview | Ordinary search base plus exact `time`; add chosen doctor ID only if specified, otherwise optional genuine exclusions | `mode`, range dates, `time_preference`, `after_time`, `before_time`, `doctor_name` |
+| Exact-time recheck after overview | Date lookup base plus exact `time`; add chosen doctor ID only if specified, otherwise optional genuine exclusions | `mode`, range dates, `time_preference`, `after_time`, `before_time`, `doctor_name` |
 | `create_appointment` | `clinic_id`, `patient_name`, `phone`, `reason_for_visit`, accepted `doctor_id`, `clinic_service_id`, `date`, `time`; known `session_id` | `slot_id`, `doctor_name`, `service_key`, search/overview fields, exclusions, `appointment_id` |
 | `get_appointment_status` | `clinic_id`, `phone` only | Session, appointment ID, doctor/service/date/time/search fields |
 | `cancel_appointment` | `clinic_id`, `phone`, `appointment_id`; known `session_id` | Doctor/service/date/time/search fields, patient name, slot ID |
@@ -51,18 +52,15 @@ Required information must be collected/resolved first. `session_id` is included 
 | `request_callback` | `clinic_id`, `phone`; known `session_id`, `name`, `reason` only | Unknown optional details, `patient_name`, `patient_phone`, all booking/search fields |
 | `record_call` | `clinic_id`, `outcome`, `summary`; known `session_id`, `patient_phone`, actual individual timing fields | Unknown timing/phone values, `phone`, all booking/search and unconfigured fields |
 
-Normal-search time fields are also conditional:
+The default Sarvam booking flow is date-first:
 
-| Caller request | Send | Omit |
+| Step | Send | Omit |
 | --- | --- | --- |
-| Morning/afternoon/evening | `time_preference` | `time`, `after_time`, `before_time` |
-| After a time | `after_time` | `time`, `time_preference`, `before_time` |
-| Before a time | `before_time` | `time`, `time_preference`, `after_time` |
-| Between two times | `after_time`, `before_time` | `time`, `time_preference` |
-| Exact/chosen time | `time` | `time_preference`, `after_time`, `before_time` |
-| Any time | No time fields | All four time fields; never send `time_preference=any` |
+| First lookup after the caller gives a date | No time fields | `time`, `time_preference`, `after_time`, `before_time` |
+| Caller chooses an exact time from the spoken windows | `time` in 24-hour HH:mm | `time_preference`, `after_time`, `before_time` |
+| Nearby suggestion is chosen | Recheck that suggestion as exact `time` | `time_preference`, `after_time`, `before_time` |
 
-Combine a period with a cutoff only if the caller explicitly requests both and the interval is consistent. A changed preference replaces old fields. Switching from overview to search removes `mode=overview` and range fields; switching to overview removes all time filters.
+Do not configure or send `time_preference` in this default flow. The endpoint may continue accepting `time_preference`, `after_time` and `before_time` for older clients, but those are compatibility filters, not inputs for the Sarvam date-first conversation. Switching from overview to search removes `mode=overview` and range fields; switching to overview removes all time filters.
 
 ## 1. resolve_clinic
 
@@ -116,7 +114,8 @@ These are companion fields in the full recommendation response, not a new endpoi
 
 GET `/check-slots`.
 
-- Normal search: `clinic_id`, validated `clinic_service_id`, `date`; optional `time_preference`, `after_time`, `before_time`, exact `time`.
+- First date lookup: `clinic_id`, validated `clinic_service_id`, `date`; omit every time filter, including `time_preference`.
+- Exact-time recheck: use the same clinic/service/date, the doctor selected by the first lookup, and exact `time` in HH:mm. Omit `time_preference`, `after_time` and `before_time`.
 - Requested doctor: add `doctor_id` from validated caller preference. Any doctor: omit both doctor ID and name. An earlier random offer must not restrict a new preference search.
 - Declined random doctor: add its ID to comma-separated `exclude_doctor_ids`. The response echoes this list into the saved rejection variable; new service searches omit it to reset it.
 - Explicit overview request: `mode=overview`; use `date` for one day or omit `date` for future available dates. Optional `from_date`/`to_date` restrict the range. Omit all time filters. Restrict doctor/exclusions as requested.
@@ -134,23 +133,33 @@ GET `/check-slots`.
 | `clinicServiceId` | `slots_service_id` |
 | `date` | `slots_date` |
 | `dateDisplay` | `slots_date_display` |
+| `availabilityWindowsText` | `availability_windows_text` |
+| `slotFrequencyMinutes` | `slot_frequency_minutes` |
+| `slotFrequencyText` | `slot_frequency_text` |
+| `requestedTime` | `requested_time` |
+| `requestedTimeAvailable` | `requested_time_available` |
+| `nearbySlotsText` | `nearby_slots_text` |
 | `availableSlotsText` | `available_slots_text` |
 | `excludedDoctorIdsText` | `rejected_doctor_ids` |
 | `availableDatesText` | `available_dates_text` |
 | `availabilityText` | `doctor_availability_text` |
 | `availabilityChoicesText` | `doctor_availability_choices_text` |
 
-Search mode fills the selected doctor/date/time fields. Overview fills the date/availability text fields and does not select a doctor randomly. Never book directly from an overview; recheck the chosen doctor/date/exact time in normal search.
+The first search fills the selected doctor/date, `availabilityWindowsText`, and slot frequency fields. Speak every 24-hour window and the frequency before asking for an exact time. Example: `availabilityWindowsText="10:00-13:00, 14:00-18:00"`, `slotFrequencyMinutes=30`, and `slotFrequencyText="every 30 minutes"`. Gaps between windows are not bookable.
 
-`availableSlotsText` is comma-separated 24-hour HH:mm, e.g. `09:00, 13:30, 18:00`; no `slots` array. `matched` means requested-window match; `same_day_alternative` means the returned times are nearest same-day alternatives outside that window; `no_slots` asks for another date without searching it automatically.
+After the caller chooses a time, run the exact-time recheck. `requestedTime` echoes the normalized HH:mm value. Continue only when `requestedTimeAvailable=true`. When false, `nearbySlotsText` contains comma-separated nearby same-day HH:mm alternatives; offer them, wait for a choice, and recheck the chosen alternative. Never derive a valid slot merely from a range and frequency.
+
+`availableSlotsText` remains a legacy compatibility field for exact slot starts; no `slots` array is returned. New Sarvam speech should use the window/frequency fields for the first turn and the requested-time/nearby fields for the second turn. Overview fills the date/availability text fields and does not select a doctor randomly. Never book directly from an overview; recheck the chosen doctor/date/exact time in normal search.
 
 `availabilityChoicesText` is a flat string with doctor IDs, qualifications and actual dates/times, e.g. `Dr. Arun (MBBS) | doctor_id=doctor-a | 2026-11-04: 09:00, 09:30`. This allows a selected doctor's ID to be used without reading `doctorAvailability` arrays. Use `doctor_availability_text` for speech and `doctor_availability_choices_text` for internal matching.
 
-Searches choose uniformly among doctors with matching slots, not by creation order or slot count. An explicit doctor remains fixed even for same-day alternatives. `after_time` takes the first three starts at/after the cutoff; `before_time` the last three strictly before it; both use `[after_time, before_time)`. Exact time restricts random selection to doctors at that time. Queries stay within the fixed 45-day booking horizon; overview across days runs only on explicit request.
+Searches choose uniformly among doctors with matching slots, not by creation order or slot count. Keep that returned doctor fixed for the exact-time recheck and booking. An explicit doctor remains fixed for windows and nearby alternatives. Legacy clients may still use `after_time`, `before_time`, or `time_preference`, but the default Sarvam flow does not. Queries stay within the fixed 45-day booking horizon; overview across days runs only on explicit request.
 
 ## 4. create_appointment
 
 POST `/create-appointment`. After confirmation, send only `clinic_id`, `patient_name`, `phone`, `reason_for_visit`, accepted `doctor_id`, `clinic_service_id`, `date`, `time` in HH:mm; include `session_id` when available. Omit `slot_id` and all search-only fields. Use current slot variables, never an older random doctor.
+
+Call this only after the latest exact-time recheck returned the same `requestedTime` with `requestedTimeAvailable=true` and the caller explicitly confirmed the full read-back. If booking returns `invalid_slot` or `invalid_slot_time`, re-run the exact-time availability check. When that response has `requestedTimeAvailable=false`, offer `nearbySlotsText`, recheck the caller's new choice, and obtain confirmation again before another booking attempt.
 
 | Response field | Save into variable |
 | --- | --- |

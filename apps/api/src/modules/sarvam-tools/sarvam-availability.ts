@@ -4,7 +4,7 @@ import type { DoctorChoice } from './sarvam-routing';
 
 export type DoctorAvailability = {
   doctor: DoctorChoice;
-  rows: Array<{ start_time: string; available_count?: number }>;
+  rows: Array<{ start_time: string; end_time?: string; available_count?: number }>;
 };
 export type TimeWindow = { lower: number; upper: number };
 
