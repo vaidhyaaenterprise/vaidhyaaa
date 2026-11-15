@@ -19,10 +19,18 @@ function normalizeAmount(value: string): string {
 }
 
 function normalizeDoctorToken(value: string): string {
-  return value.toLowerCase().replace(/^dr\.?\s*/, '').replace(/\./g, '').trim();
+  return value
+    .toLowerCase()
+    .replace(/^dr\.?\s*/, '')
+    .replace(/\./g, '')
+    .trim();
 }
 
-function normalizeTimeToken(hour: string, minute: string | undefined, meridiem: string | undefined): string {
+function normalizeTimeToken(
+  hour: string,
+  minute: string | undefined,
+  meridiem: string | undefined,
+): string {
   let h = Number(hour);
   const m = minute ?? '00';
   const mer = meridiem?.toLowerCase();
@@ -56,13 +64,18 @@ function addTimeToken(snapshot: AllowedFactSnapshot, value: unknown) {
     snapshot.timeTokens.add(text);
     return;
   }
-  snapshot.timeTokens.add(
-    normalizeTimeToken(match[1]!, match[2], match[3]),
-  );
+  snapshot.timeTokens.add(normalizeTimeToken(match[1]!, match[2], match[3]));
   if (match[2]) {
     snapshot.timeTokens.add(`${match[1]}:${match[2]}`);
   }
   snapshot.timeTokens.add(match[1]!);
+}
+
+function addTimeTokensFromText(snapshot: AllowedFactSnapshot, value: unknown) {
+  if (typeof value !== 'string') return;
+  for (const match of value.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) {
+    addTimeToken(snapshot, `${match[1]}:${match[2]}`);
+  }
 }
 
 function addDoctorToken(snapshot: AllowedFactSnapshot, value: unknown) {
@@ -116,6 +129,13 @@ export function buildAllowedFactSnapshot(input: {
         addTimeToken(snapshot, slot.time);
         addDoctorToken(snapshot, slot.doctorName);
       }
+      addTimeTokensFromText(snapshot, result.availabilityWindowsText);
+      addTimeTokensFromText(snapshot, result.nearbySlotsText);
+      addTimeToken(snapshot, result.requestedTime);
+      if (typeof result.slotFrequencyMinutes === 'number') {
+        addTimeToken(snapshot, String(result.slotFrequencyMinutes));
+      }
+      addDoctorToken(snapshot, result.doctorName);
     }
     if (entry.toolName === 'create_appointment_request') {
       addDoctorToken(snapshot, result.doctorName);
@@ -139,7 +159,12 @@ function feeIsGrounded(amount: string, snapshot: AllowedFactSnapshot): boolean {
   return snapshot.feeAmounts.has(normalized);
 }
 
-function timeIsGrounded(hour: string, minute: string | undefined, meridiem: string | undefined, snapshot: AllowedFactSnapshot): boolean {
+function timeIsGrounded(
+  hour: string,
+  minute: string | undefined,
+  meridiem: string | undefined,
+  snapshot: AllowedFactSnapshot,
+): boolean {
   if (snapshot.timeTokens.size === 0) {
     return true;
   }
@@ -159,7 +184,9 @@ function doctorIsGrounded(name: string, snapshot: AllowedFactSnapshot): boolean 
   const token = normalizeDoctorToken(name);
   return (
     snapshot.doctorNameTokens.has(token) ||
-    [...snapshot.doctorNameTokens].some((allowed) => token.includes(allowed) || allowed.includes(token))
+    [...snapshot.doctorNameTokens].some(
+      (allowed) => token.includes(allowed) || allowed.includes(token),
+    )
   );
 }
 
@@ -168,13 +195,12 @@ function addressIsGrounded(fragment: string, snapshot: AllowedFactSnapshot): boo
     return true;
   }
   const lower = fragment.toLowerCase();
-  return [...snapshot.addressTokens].some((allowed) => lower.includes(allowed) || allowed.includes(lower));
+  return [...snapshot.addressTokens].some(
+    (allowed) => lower.includes(allowed) || allowed.includes(lower),
+  );
 }
 
-export function detectUngroundedFacts(
-  replyText: string,
-  snapshot: AllowedFactSnapshot,
-): string[] {
+export function detectUngroundedFacts(replyText: string, snapshot: AllowedFactSnapshot): string[] {
   const violations: string[] = [];
 
   if (snapshot.feeAmounts.size > 0 || /₹|fee|consultation/i.test(replyText)) {

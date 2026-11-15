@@ -15,13 +15,14 @@ const JOB_ALIASES: Record<string, string> = {
   'slot-generation': JOB_TYPES.GENERATE_SLOTS,
   'slot-hold-expiry': JOB_TYPES.EXPIRE_SLOT_HOLDS,
   'call-retention': JOB_TYPES.CLEANUP_EXPIRED_CALLS,
+  'appointment-no-shows': JOB_TYPES.MARK_APPOINTMENT_NO_SHOWS,
 };
 
 async function main(): Promise<void> {
   const alias = process.argv[2];
   if (!alias) {
     console.error(
-      'Usage: pnpm --filter @vaidya/api jobs:run <slot-generation|slot-hold-expiry|slot-reconciliation|call-retention> [--retry-failed]',
+      'Usage: pnpm --filter @vaidya/api jobs:run <slot-generation|slot-hold-expiry|slot-reconciliation|call-retention|appointment-no-shows> [--retry-failed]',
     );
     process.exit(1);
   }

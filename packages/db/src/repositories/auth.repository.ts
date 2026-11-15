@@ -1,4 +1,6 @@
-import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, isNull, or, sql } from 'drizzle-orm';
+
+import type { ClinicRole } from '@vaidya/shared';
 
 import type { Database } from '../client';
 import { clinicUsers, doctors, otpChallenges, users } from '../schema';
@@ -35,13 +37,30 @@ export class AuthRepository {
       .limit(1);
   }
 
-  findUserByUsernameOrEmail(identifier: string) {
+  findUserByUsernameOrEmail(identifier: string, role?: ClinicRole) {
     const normalized = identifier.trim().toLowerCase();
     return this.db
       .select()
       .from(users)
       .where(
-        or(sql<boolean>`lower(${users.username}) = ${normalized}`, eq(users.email, normalized)),
+        and(
+          or(sql<boolean>`lower(${users.username}) = ${normalized}`, eq(users.email, normalized)),
+          role
+            ? exists(
+                this.db
+                  .select({ id: clinicUsers.id })
+                  .from(clinicUsers)
+                  .where(
+                    and(
+                      eq(clinicUsers.userId, users.id),
+                      eq(clinicUsers.role, role),
+                      eq(clinicUsers.active, true),
+                      isNull(clinicUsers.deletedAt),
+                    ),
+                  ),
+              )
+            : undefined,
+        ),
       )
       .limit(1);
   }

@@ -4,5 +4,8 @@
   "buildCommand": "cd ../.. && pnpm exec turbo run build --filter=@vaidya/api && pnpm --filter @vaidya/api validate:deployment-env",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile --prod=false",
   "outputDirectory": null,
-  "crons": [{ "path": "/internal/jobs/call-retention", "schedule": "30 3 * * *" }]
+  "crons": [
+    { "path": "/internal/jobs/call-retention", "schedule": "30 3 * * *" },
+    { "path": "/internal/jobs/appointment-no-shows", "schedule": "0 19 * * *" }
+  ]
 }

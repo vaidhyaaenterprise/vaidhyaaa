@@ -108,10 +108,12 @@ vi.mock('@/components/pages/appointments/VisitedPatients', () => ({
 vi.mock('@/components/pages/appointments/MissedAppointments', () => ({
   MissedAppointments: ({
     appointments,
+    kind,
   }: {
     appointments: Array<{ id: string; patientName: string }>;
+    kind?: 'missed_action' | 'no_show';
   }) => (
-    <section aria-label="Missed actions">
+    <section aria-label={kind === 'no_show' ? 'No show' : 'Missed actions'}>
       {appointments.map((appointment) => (
         <p key={appointment.id}>{appointment.patientName}</p>
       ))}
@@ -274,9 +276,61 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe('AppointmentsPageContent', () => {
+  it('keeps same-day confirmed appointments visible until clinic midnight, then reloads them as no show', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-14T18:29:59Z')); // 23:59:59 in the clinic.
+    mockedFetchAppointments
+      .mockResolvedValueOnce([
+        appointmentRow('end-of-day', 'End of day patient', '2026-11-14', 'confirmed'),
+      ])
+      .mockResolvedValue([
+        appointmentRow('end-of-day', 'End of day patient', '2026-11-14', 'no_show'),
+      ]);
+    render(<AppointmentsPageContent />);
+    await screen.findByText('End of day patient');
+    const confirmedSection = screen.getByRole('heading', {
+      name: 'Confirmed appointments',
+    }).parentElement!;
+    expect(within(confirmedSection).getByText('End of day patient')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'No show' })).queryByText('End of day patient'),
+    ).not.toBeInTheDocument();
+
+    vi.setSystemTime(new Date('2026-11-14T18:30:00Z')); // Next clinic day, still the same UTC day.
+    fireEvent(document, new Event('visibilitychange'));
+    await waitFor(() => expect(mockedFetchAppointments).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('region', { name: 'No show' })).getByText('End of day patient'),
+      ).toBeInTheDocument(),
+    );
+    expect(within(confirmedSection).queryByText('End of day patient')).not.toBeInTheDocument();
+  });
+
+  it('filters no-show appointments by the selected appointment date', async () => {
+    const today = getClinicDate(new Date(), 'Asia/Kolkata');
+    const yesterday = shiftDate(today, -1);
+    mockedFetchAppointments.mockResolvedValue([
+      appointmentRow('no-show-1', 'Yesterday no show', yesterday, 'no_show'),
+      appointmentRow('no-show-2', 'Older no show', shiftDate(today, -2), 'no_show'),
+      appointmentRow('confirmed-today', 'Confirmed today', today, 'confirmed'),
+    ]);
+    const { container } = render(<AppointmentsPageContent />);
+    await screen.findByText('Yesterday no show');
+    const noShows = screen.getByRole('region', { name: 'No show' });
+    expect(within(noShows).getByText('Older no show')).toBeInTheDocument();
+    expect(within(noShows).queryByText('Confirmed today')).not.toBeInTheDocument();
+    fireEvent.change(container.querySelector('input[type="date"]')!, {
+      target: { value: yesterday },
+    });
+    expect(within(noShows).getByText('Yesterday no show')).toBeInTheDocument();
+    expect(within(noShows).queryByText('Older no show')).not.toBeInTheDocument();
+  });
+
   it('persists a patient name and reloads every appointment-related block', async () => {
     const clinicToday = getClinicDate(new Date(), 'Asia/Kolkata');
     mockedFetchAppointments
@@ -750,7 +804,7 @@ describe('AppointmentsPageContent', () => {
     await waitFor(() => {
       expect(mockedFetchAppointments).toHaveBeenCalledWith(
         CLINIC_ID,
-        ['pending_confirmation', 'confirmed', 'visited'],
+        ['pending_confirmation', 'confirmed', 'visited', 'no_show'],
         expect.any(AbortSignal),
       );
     });

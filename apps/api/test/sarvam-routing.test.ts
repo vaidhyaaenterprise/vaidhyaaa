@@ -381,7 +381,7 @@ describe('Sarvam service and doctor routing', () => {
         },
         req,
       ),
-    ).toEqual({ error: 'invalid_slot_time', time: '21:00', date });
+    ).toMatchObject({ error: 'invalid_slot_time', time: '21:00', date });
     expect(createAppointmentFromFreshHold).not.toHaveBeenCalled();
   });
 

@@ -10,15 +10,20 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-
-import { ApiRequestError, apiGet } from '@/lib/api/client';
+import { ApiRequestError, apiGet, isAbortError } from '@/lib/api/client';
 import type { MeResponse } from '@/lib/api/types';
-import { DEV_SEED, type DevAuthProfile } from '@/lib/dev-auth/constants';
-import { clearDevAuthProfile, readDevAuthProfile } from '@/lib/dev-auth/storage';
+import type { DevAuthProfile } from '@/lib/dev-auth/constants';
+import {
+  AUTH_SESSION_CHANGED_EVENT,
+  clearDevAuthProfile,
+  getAuthSessionVersion,
+  initializeTabSession,
+  readAccessToken,
+  readDevAuthProfile,
+} from '@/lib/dev-auth/storage';
 import { resolveEffectiveRole, type EffectiveRole } from '@/lib/navigation';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'inactive' | 'error';
-
 type AuthContextValue = {
   status: AuthStatus;
   me: MeResponse | null;
@@ -29,175 +34,147 @@ type AuthContextValue = {
   refresh: () => Promise<void>;
   establishSession: (session: MeResponse) => void;
 };
-
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function buildDevMockMe(profile: DevAuthProfile): MeResponse {
-  const identityMap: Record<string, { name: string; email: string; phone: string }> = {
-    [DEV_SEED.PLATFORM_ADMIN_ID]: {
-      name: 'Platform Admin',
-      email: 'platform@vaidya.local',
-      phone: '+910000000001',
-    },
-    [DEV_SEED.CLINIC_ADMIN_ID]: {
-      name: 'Clinic Admin',
-      email: 'admin@sri-murugan.local',
-      phone: '+919840012345',
-    },
-    [DEV_SEED.DOCTOR_PRIYA_USER_ID]: {
-      name: 'Dr. Priya Login',
-      email: 'priya@sri-murugan.local',
-      phone: '+919840012346',
-    },
-  };
-
-  const identity = identityMap[profile.userId] ?? {
-    name: 'Dev User',
-    email: 'dev@vaidya.local',
-    phone: '+910000000000',
-  };
-
-  const clinics: MeResponse['clinics'] = profile.clinicId
-    ? [
-        {
-          clinic_id: profile.clinicId,
-          role: profile.role === 'doctor' ? 'doctor' : 'clinic_admin',
-          doctor_id: profile.doctorId ?? null,
-          active: true,
-        },
-      ]
-    : [];
-
-  return {
-    user: {
-      id: profile.userId,
-      name: identity.name,
-      email: identity.email,
-      phone: identity.phone,
-      platform_role: profile.role === 'platform_admin' ? 'platform_admin' : null,
-      active: true,
-    },
-    clinics,
-  };
+function selectedMembership(session: MeResponse, profile: DevAuthProfile) {
+  return (
+    session.clinics.find(
+      (row) =>
+        row.active &&
+        row.clinic_id === profile.clinicId &&
+        row.role === profile.role &&
+        (row.role !== 'doctor' || Boolean(profile.doctorId && row.doctor_id === profile.doctorId)),
+    ) ?? null
+  );
 }
-
-let inflightMeRequest: Promise<MeResponse> | null = null;
-
-async function fetchMeOnce(): Promise<MeResponse> {
-  if (!inflightMeRequest) {
-    inflightMeRequest = apiGet<MeResponse>('/v1/me').finally(() => {
-      inflightMeRequest = null;
-    });
-  }
-  return inflightMeRequest;
+function matchesAccount(session: MeResponse, profile: DevAuthProfile): boolean {
+  if (session.user.id !== profile.userId) return false;
+  if (profile.role === 'platform_admin') return session.user.platform_role === 'platform_admin';
+  return !session.user.platform_role && Boolean(selectedMembership(session, profile));
 }
-
+function sessionIdentity(): string {
+  return JSON.stringify([getAuthSessionVersion(), readAccessToken(), readDevAuthProfile()]);
+}
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [profile, setProfile] = useState<DevAuthProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const mountedRef = useRef(true);
-
+  const sequenceRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
+  const identityRef = useRef('');
+  const invalidateRequest = useCallback(() => {
+    sequenceRef.current += 1;
+    requestRef.current?.abort();
+    requestRef.current = null;
+  }, []);
   const loadMe = useCallback(async () => {
-    const profile = readDevAuthProfile();
-    if (!profile) {
-      setMe(null);
-      setError(null);
-      setErrorCode(null);
+    invalidateRequest();
+    const sequence = sequenceRef.current;
+    setStatus('loading');
+    setMe(null);
+    setProfile(null);
+    setError(null);
+    setErrorCode(null);
+    await initializeTabSession();
+    if (!mountedRef.current || sequence !== sequenceRef.current) return;
+    const savedProfile = readDevAuthProfile();
+    const token = readAccessToken();
+    const identity = sessionIdentity();
+    identityRef.current = identity;
+    if (!savedProfile || !token) {
       setStatus('unauthenticated');
       return;
     }
-
-    setStatus('loading');
-    setError(null);
-    setErrorCode(null);
-
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const isCurrent = () =>
+      mountedRef.current &&
+      !controller.signal.aborted &&
+      sequenceRef.current === sequence &&
+      sessionIdentity() === identity;
     try {
-      const response = await fetchMeOnce();
-      if (!mountedRef.current) {
+      const response = await apiGet<MeResponse>('/v1/me', controller.signal);
+      if (!isCurrent()) return;
+      if (!matchesAccount(response, savedProfile)) {
+        clearDevAuthProfile();
         return;
       }
-
-      if (!response.user.active) {
-        setMe(response);
-        setStatus('inactive');
-        return;
-      }
-
       setMe(response);
-      setStatus('authenticated');
+      setProfile(savedProfile);
+      setStatus(response.user.active ? 'authenticated' : 'inactive');
     } catch (err) {
-      if (!mountedRef.current) {
-        return;
-      }
-
+      if (!isCurrent() || isAbortError(err)) return;
       if (err instanceof ApiRequestError) {
-        setError(err.apiError.message);
-        setErrorCode(err.apiError.code);
         if (err.apiError.code === 'UNAUTHORIZED' || err.apiError.code === 'FORBIDDEN') {
           clearDevAuthProfile();
-          setMe(null);
-          setStatus('unauthenticated');
           return;
         }
-
-        if (
-          profile &&
-          process.env.NODE_ENV !== 'production' &&
-          err.apiError.code === 'INTERNAL_ERROR'
-        ) {
-          setMe(buildDevMockMe(profile));
-          setError(null);
-          setErrorCode(null);
-          setStatus('authenticated');
-          return;
-        }
+        setError(err.apiError.message);
+        setErrorCode(err.apiError.code);
       } else {
-        if (profile && process.env.NODE_ENV !== 'production') {
-          setMe(buildDevMockMe(profile));
-          setError(null);
-          setErrorCode(null);
-          setStatus('authenticated');
-          return;
-        }
-        setError(
-          err instanceof Error && process.env.NODE_ENV !== 'production'
-            ? err.message
-            : 'Unable to reach the API. Please check your connection and try again.',
-        );
+        setError('Unable to reach the API. Please check your connection and try again.');
         setErrorCode('INTERNAL_ERROR');
       }
+      // Never invent a logged-in user from local hints after a failed identity check.
       setStatus('error');
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
     }
-  }, []);
-
-  const establishSession = useCallback((session: MeResponse) => {
-    setMe(session);
-    setError(null);
-    setErrorCode(null);
-    setStatus(session.user.active ? 'authenticated' : 'inactive');
-  }, []);
-
+  }, [invalidateRequest]);
+  const establishSession = useCallback(
+    (session: MeResponse) => {
+      invalidateRequest();
+      const savedProfile = readDevAuthProfile();
+      if (!savedProfile || !readAccessToken() || !matchesAccount(session, savedProfile)) {
+        clearDevAuthProfile();
+        throw new Error('The login session does not match this account. Please sign in again.');
+      }
+      identityRef.current = sessionIdentity();
+      setMe(session);
+      setProfile(savedProfile);
+      setError(null);
+      setErrorCode(null);
+      setStatus(session.user.active ? 'authenticated' : 'inactive');
+    },
+    [invalidateRequest],
+  );
   useEffect(() => {
     mountedRef.current = true;
+    const onChange = () => {
+      void loadMe();
+    };
+    const onPageHide = () => {
+      invalidateRequest();
+      setMe(null);
+      setProfile(null);
+      setStatus('loading');
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) void loadMe();
+    };
+    const onFocus = () => {
+      if (sessionIdentity() !== identityRef.current) void loadMe();
+    };
+    window.addEventListener(AUTH_SESSION_CHANGED_EVENT, onChange);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', onFocus);
     void loadMe();
     return () => {
       mountedRef.current = false;
+      invalidateRequest();
+      window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, onChange);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [loadMe]);
-
-  const clinicRole = useMemo(() => {
-    if (!me) {
-      return null;
-    }
-    const profile = readDevAuthProfile();
-    if (profile?.clinicId) {
-      return me.clinics.find((row) => row.clinic_id === profile.clinicId) ?? me.clinics[0] ?? null;
-    }
-    return me.clinics[0] ?? null;
-  }, [me]);
-
+  }, [loadMe, invalidateRequest]);
+  const clinicRole = useMemo(
+    () => (me && profile ? selectedMembership(me, profile) : null),
+    [me, profile],
+  );
   const effectiveRole = useMemo(
     () =>
       resolveEffectiveRole({
@@ -206,7 +183,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }),
     [me, clinicRole],
   );
-
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -220,14 +196,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [status, me, effectiveRole, clinicRole, error, errorCode, loadMe, establishSession],
   );
-
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 }

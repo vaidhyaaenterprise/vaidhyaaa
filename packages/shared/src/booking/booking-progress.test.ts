@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildReceptionistAgentBookingContext } from '../agent/receptionist-agent-booking-context';
 import { hasBookingProgress, inferBookingState, resumeBookingSession } from './booking-progress';
 
 describe('booking-progress', () => {
@@ -21,6 +22,25 @@ describe('booking-progress', () => {
 
   it('infers ASK_DATE when reason exists but date does not', () => {
     expect(inferBookingState({ reason_for_visit: 'fever' })).toBe('ASK_DATE');
+  });
+
+  it('checks date availability directly without requiring a time preference', () => {
+    const collected = {
+      reason_for_visit: 'fever',
+      preferred_date: '2026-11-20',
+    };
+    expect(inferBookingState(collected)).toBe('PROPOSE_SLOTS');
+
+    const context = buildReceptionistAgentBookingContext({
+      messageText: 'November 20',
+      languageCode: 'english',
+      collected,
+    });
+    expect(context).toMatchObject({
+      state: 'PROPOSE_SLOTS',
+      next_action: 'check_date_windows_and_ask_exact_time',
+    });
+    expect(context?.missing_fields).not.toContain('time_preference_or_slot');
   });
 
   it('infers ASK_REASON when doctor name exists but reason does not', () => {

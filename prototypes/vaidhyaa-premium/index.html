@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Vaidhyaa premium application design prototype"
+    />
+    <title>Vaidhyaa Premium Design Preview</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%2313293d'/%3E%3Cpath d='M16 15c3 12 9 25 16 34 7-9 13-22 16-34M32 24v24M25 34h14' fill='none' stroke='%23c9a96e' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <div id="prototypeBanner" class="prototype-banner" role="note">
+      <span class="prototype-banner__dot" aria-hidden="true"></span>
+      <span><strong>Design preview</strong> · Synthetic data · No production actions</span>
+      <button id="dismissBanner" class="icon-button icon-button--quiet" type="button" aria-label="Dismiss preview notice">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+
+    <section id="authExperience" class="auth-experience">
+      <header class="marketing-nav" aria-label="Public navigation">
+        <a class="brand brand--dark" href="#top" aria-label="Vaidhyaa home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M12 11c2 8 7 17 12 24 5-7 10-16 12-24" />
+              <circle cx="24" cy="13" r="3.5" />
+              <path d="M24 22v13M19 27h10" />
+              <path d="M15 34c4 0 7 2 9 5 2-3 5-5 9-5" />
+            </svg>
+          </span>
+          <span>
+            <strong>Vaidhyaa</strong>
+            <small>Clinic intelligence, calmly orchestrated</small>
+          </span>
+        </a>
+        <nav class="marketing-links" aria-label="About Vaidhyaa">
+          <a href="#capabilities">Capabilities</a>
+          <a href="#workflows">Workflows</a>
+          <a href="#trust">Trust & safety</a>
+        </nav>
+        <button class="button button--light button--compact" data-enter-portal="admin" type="button">
+          Open design preview
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg>
+        </button>
+      </header>
+
+      <main id="main-content">
+        <section id="top" class="auth-hero" aria-labelledby="auth-title">
+          <div class="auth-hero__ambient" aria-hidden="true">
+            <span class="ambient-orbit ambient-orbit--one"></span>
+            <span class="ambient-orbit ambient-orbit--two"></span>
+            <span class="ambient-grid"></span>
+          </div>
+
+          <div class="auth-story">
+            <div class="eyebrow eyebrow--dark">
+              <span class="signal-dot" aria-hidden="true"></span>
+              The voice-first operating layer for clinics
+            </div>
+            <h1 id="auth-title">Every patient call, appointment and clinic decision—beautifully in flow.</h1>
+            <p class="auth-story__lead">
+              Vaidhyaa brings the AI voice receptionist, appointment operations and doctor workflows into one calm, permission-aware workspace.
+            </p>
+
+            <div class="voice-journey" aria-label="Illustrative call journey">
+              <div class="voice-journey__pulse" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="voice-journey__copy">
+                <span class="voice-journey__label">Live workflow preview</span>
+                <strong>Caller intent understood</strong>
+                <small>Slot checked · Patient details confirmed · Staff review ready</small>
+              </div>
+              <span class="status status--success">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg>
+                Safe handoff
+              </span>
+            </div>
+
+            <div class="trust-row" aria-label="Product characteristics">
+              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v6c0 4.3 2.8 7 7 9 4.2-2 7-4.7 7-9V6zM9 12l2 2 4-4" /></svg>Permission-aware</span>
+              <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>Clinic-timezone safe</span>
+              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9l8-5 8 5v10M8 19v-5h8v5" /></svg>Built for real clinics</span>
+            </div>
+          </div>
+
+          <aside class="auth-card" aria-label="Authentication preview">
+            <div class="auth-card__header">
+              <span class="auth-card__kicker">Welcome to Vaidhyaa</span>
+              <h2 id="authCardTitle">Sign in to your clinic</h2>
+              <p id="authCardDescription">Use your assigned account to continue securely.</p>
+            </div>
+
+            <div class="segmented-control" role="tablist" aria-label="Authentication options">
+              <button class="segment is-active" type="button" role="tab" aria-selected="true" data-auth-tab="signin">Sign in</button>
+              <button class="segment" type="button" role="tab" aria-selected="false" data-auth-tab="register">Register clinic</button>
+            </div>
+
+            <form id="signInForm" class="auth-form" novalidate>
+              <fieldset class="role-choice">
+                <legend>Workspace preview</legend>
+                <label class="role-card is-selected">
+                  <input type="radio" name="preview-role" value="admin" checked />
+                  <span class="role-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13M3 21h18M9 12h6M12 9v6" /></svg></span>
+                  <span><strong>Clinic Admin</strong><small>Operations & configuration</small></span>
+                  <span class="role-card__check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg></span>
+                </label>
+                <label class="role-card">
+                  <input type="radio" name="preview-role" value="doctor" />
+                  <span class="role-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4" /><path d="M5 21c0-4 3-7 7-7s7 3 7 7M9 15v2a3 3 0 0 0 6 0v-2" /></svg></span>
+                  <span><strong>Doctor</strong><small>Queue & consultations</small></span>
+                  <span class="role-card__check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg></span>
+                </label>
+              </fieldset>
+
+              <label class="form-field">
+                <span>Username or email</span>
+                <span class="input-shell">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
+                  <input type="text" value="preview@vaidhyaa.example" autocomplete="username" aria-describedby="authPreviewNote" />
+                </span>
+              </label>
+              <label class="form-field">
+                <span>Password</span>
+                <span class="input-shell">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+                  <input id="passwordInput" type="password" value="prototype" autocomplete="current-password" />
+                  <button id="togglePassword" class="input-action" type="button" aria-label="Show password">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+                  </button>
+                </span>
+              </label>
+              <div class="auth-form__meta">
+                <label class="checkbox"><input type="checkbox" checked /><span>Keep me signed in</span></label>
+                <button class="text-button" type="button" data-open-modal="recovery">Forgot password?</button>
+              </div>
+              <button class="button button--primary button--wide" type="submit">
+                Enter secure workspace
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg>
+              </button>
+              <p id="authPreviewNote" class="form-note">
+                The selected card changes this prototype preview only. Production access always comes from authenticated membership.
+              </p>
+            </form>
+
+            <form id="registerForm" class="auth-form is-hidden" novalidate>
+              <div class="registration-progress" aria-label="Registration progress">
+                <span class="is-active"><b>1</b>Clinic</span>
+                <i></i>
+                <span><b>2</b>Administrator</span>
+                <i></i>
+                <span><b>3</b>Verify</span>
+              </div>
+              <div class="field-grid field-grid--two">
+                <label class="form-field"><span>Clinic name</span><input type="text" placeholder="Sundaram Family Clinic" /></label>
+                <label class="form-field"><span>Clinic phone</span><input type="tel" placeholder="+91 90000 00000" /></label>
+              </div>
+              <label class="form-field"><span>Clinic address</span><input type="text" placeholder="Street and area" /></label>
+              <div class="field-grid field-grid--two">
+                <label class="form-field"><span>City</span><input type="text" placeholder="Chennai" /></label>
+                <label class="form-field"><span>Postal code</span><input type="text" placeholder="600000" /></label>
+              </div>
+              <button class="button button--primary button--wide" type="button" data-registration-next>
+                Continue to administrator
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg>
+              </button>
+              <p class="form-note">The production flow includes administrator details, six-digit email verification and an immutable clinic number.</p>
+            </form>
+
+            <div class="auth-card__footer">
+              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v6c0 4.3 2.8 7 7 9 4.2-2 7-4.7 7-9V6z" /></svg>Secure clinic access</span>
+              <button class="text-button" type="button">Need help?</button>
+            </div>
+          </aside>
+        </section>
+
+        <section class="confidence-strip" aria-label="Product principles">
+          <span>Designed for daily clinic pressure</span>
+          <i aria-hidden="true"></i>
+          <span>Approved knowledge only</span>
+          <i aria-hidden="true"></i>
+          <span>Human confirmation at critical moments</span>
+          <i aria-hidden="true"></i>
+          <span>Responsive at every desk and device</span>
+        </section>
+
+        <section id="capabilities" class="marketing-section marketing-section--light reveal-section">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">One connected clinical operations layer</span>
+              <h2>From the first ring to the completed visit.</h2>
+            </div>
+            <p>Every experience shares one visual system while respecting the permissions and information each role actually needs.</p>
+          </div>
+
+          <div class="capability-grid">
+            <article class="capability-card capability-card--featured">
+              <div class="capability-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13a8 8 0 0 1 16 0M4 13v5h4v-5M20 13v5h-4v-5M16 20h-4" /></svg></div>
+              <span class="capability-card__number">01</span>
+              <h3>AI voice reception, with clinical boundaries</h3>
+              <p>Handle clinic information, find valid slots, confirm booking details and escalate urgent or human-support needs—without diagnosis or medical advice.</p>
+              <div class="mini-flow" aria-label="Voice reception workflow">
+                <span>Intent</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M15 8l4 4-4 4" /></svg><span>Availability</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M15 8l4 4-4 4" /></svg><span>Confirm</span>
+              </div>
+            </article>
+            <article class="capability-card">
+              <div class="capability-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4M8 15l2 2 5-5" /></svg></div>
+              <span class="capability-card__number">02</span>
+              <h3>Schedule-aware appointments</h3>
+              <p>Respect clinic hours, doctor schedules, holidays, capacity and live slot changes before any appointment moves.</p>
+            </article>
+            <article class="capability-card">
+              <div class="capability-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4" /><path d="M5 21c0-4 3-7 7-7s7 3 7 7M9 17h6" /></svg></div>
+              <span class="capability-card__number">03</span>
+              <h3>A focused doctor workspace</h3>
+              <p>See the owned queue, previous context and consultation fields without clinic-wide administrative distraction.</p>
+            </article>
+            <article class="capability-card capability-card--dark">
+              <div class="capability-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5zM9 9h6M9 13h6M9 17h4" /></svg></div>
+              <span class="capability-card__number">04</span>
+              <h3>Knowledge that earns its answer</h3>
+              <p>Draft, review, approve and embed only safe, applicable clinic answers for the receptionist to use.</p>
+              <span class="inline-badge">Human reviewed</span>
+            </article>
+          </div>
+        </section>
+
+        <section id="workflows" class="marketing-section marketing-section--ink reveal-section">
+          <div class="section-heading section-heading--dark">
+            <div>
+              <span class="eyebrow eyebrow--dark">Operational clarity, end to end</span>
+              <h2>A premium interface that stays practical.</h2>
+            </div>
+            <p>The visual rhythm changes with the job: decisive for administrators, focused for doctors and dense—but legible—for platform operations.</p>
+          </div>
+
+          <div class="workflow-showcase">
+            <div class="workflow-tabs" role="tablist" aria-label="Role previews">
+              <button class="workflow-tab is-active" type="button" data-workflow-tab="admin" role="tab" aria-selected="true"><span>Clinic administrator</span><small>Run the day</small></button>
+              <button class="workflow-tab" type="button" data-workflow-tab="doctor" role="tab" aria-selected="false"><span>Doctor</span><small>Care with context</small></button>
+              <button class="workflow-tab" type="button" data-workflow-tab="platform" role="tab" aria-selected="false"><span>Platform operations</span><small>Monitor the system</small></button>
+            </div>
+            <div class="workflow-canvas" data-workflow-canvas>
+              <div class="workflow-canvas__topbar"><span></span><span></span><span></span><b>Today · Sundaram Family Clinic</b></div>
+              <div class="workflow-canvas__sidebar"><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="workflow-canvas__content">
+                <div class="workflow-canvas__headline"><span></span><span></span></div>
+                <div class="workflow-canvas__metrics"><i></i><i></i><i></i></div>
+                <div class="workflow-canvas__columns"><div><b></b><span></span><span></span><span></span></div><div><b></b><span></span><span></span></div></div>
+              </div>
+              <div class="workflow-canvas__annotation"><span>Designed around the next safe action</span></div>
+            </div>
+          </div>
+
+          <div class="workflow-actions">
+            <p>Explore every route and representative interaction in the live prototype.</p>
+            <button class="button button--light" data-enter-portal="admin" type="button">Enter application preview<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg></button>
+          </div>
+        </section>
+
+        <section id="trust" class="marketing-section marketing-section--warm reveal-section">
+          <div class="trust-layout">
+            <div class="trust-copy">
+              <span class="eyebrow">Trust is a product behavior</span>
+              <h2>Clear guardrails. Visible responsibility.</h2>
+              <p>Vaidhyaa uses calm hierarchy, readable statuses and permission-aware actions so staff understand what the system knows, what it needs and what remains theirs to decide.</p>
+              <ul class="check-list">
+                <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg>Role access comes from authenticated membership.</li>
+                <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg>Patient-changing actions confirm before completion.</li>
+                <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg>Urgent states use words and icons—not color alone.</li>
+                <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7" /></svg>Incomplete integrations are labeled honestly.</li>
+              </ul>
+            </div>
+            <div class="safety-panel">
+              <div class="safety-panel__header">
+                <span class="safety-panel__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v6c0 4.3 2.8 7 7 9 4.2-2 7-4.7 7-9V6z" /></svg></span>
+                <div><small>AI reception policy</small><strong>Safety boundary active</strong></div>
+                <span class="status status--success">Protected</span>
+              </div>
+              <div class="safety-rule"><span>Clinic information</span><b class="permission permission--allow">Allowed</b></div>
+              <div class="safety-rule"><span>Live slot search</span><b class="permission permission--allow">Allowed</b></div>
+              <div class="safety-rule"><span>Medical diagnosis</span><b class="permission permission--deny">Blocked</b></div>
+              <div class="safety-rule"><span>Medicine or dosage advice</span><b class="permission permission--deny">Blocked</b></div>
+              <div class="safety-rule"><span>Emergency escalation</span><b class="permission permission--escalate">Escalate</b></div>
+              <p>In an emergency, the normal booking flow stops and an incident is created for staff follow-up.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="marketing-cta reveal-section">
+          <div>
+            <span class="eyebrow eyebrow--dark">Review the full concept</span>
+            <h2>See how every screen feels as one product.</h2>
+          </div>
+          <button class="button button--light" data-enter-portal="admin" type="button">Open interactive prototype<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg></button>
+        </section>
+      </main>
+
+      <footer class="marketing-footer">
+        <a class="brand brand--dark" href="#top">
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M12 11c2 8 7 17 12 24 5-7 10-16 12-24" /><circle cx="24" cy="13" r="3.5" /><path d="M24 22v13M19 27h10" /><path d="M15 34c4 0 7 2 9 5 2-3 5-5 9-5" /></svg></span>
+          <span><strong>Vaidhyaa</strong><small>Premium application design preview</small></span>
+        </a>
+        <p>All names, phone numbers and operational records in this preview are synthetic.</p>
+      </footer>
+    </section>
+
+    <section id="portalExperience" class="portal-experience is-hidden" aria-label="Application design preview">
+      <div id="mobileScrim" class="mobile-scrim" hidden></div>
+      <aside id="appSidebar" class="app-sidebar">
+        <div class="app-sidebar__brand">
+          <button class="brand brand--light" type="button" data-return-login aria-label="Return to public preview">
+            <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M12 11c2 8 7 17 12 24 5-7 10-16 12-24" /><circle cx="24" cy="13" r="3.5" /><path d="M24 22v13M19 27h10" /><path d="M15 34c4 0 7 2 9 5 2-3 5-5 9-5" /></svg></span>
+            <span><strong>Vaidhyaa</strong><small id="shellDescriptor">AI clinic operations</small></span>
+          </button>
+          <button id="closeMobileNav" class="icon-button icon-button--sidebar" type="button" aria-label="Close navigation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+
+        <button id="clinicCard" class="clinic-card" type="button" data-open-modal="clinic-profile">
+          <span class="clinic-card__avatar">SF</span>
+          <span class="clinic-card__copy"><strong>Sundaram Family Clinic</strong><small>VAI-CL-2048 · Chennai</small></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2 2 0 0 1 3 3L8 18l-4 1 1-4z" /></svg>
+        </button>
+
+        <div class="nav-label">Workspace</div>
+        <nav id="primaryNavigation" class="primary-navigation" aria-label="Primary navigation"></nav>
+
+        <div class="sidebar-spacer"></div>
+        <div class="agent-readiness">
+          <span class="signal-dot" aria-hidden="true"></span>
+          <div><strong>AI receptionist ready</strong><small>Operational status · View only</small></div>
+        </div>
+        <button class="user-card" type="button" data-return-login>
+          <span class="user-card__avatar">KJ</span>
+          <span><strong>Kavya Jayaraman</strong><small id="signedInRole">Clinic administrator</small></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M14 4h6v16h-6" /></svg>
+        </button>
+      </aside>
+
+      <div class="app-stage">
+        <header class="app-topbar">
+          <div class="app-topbar__left">
+            <button id="openMobileNav" class="icon-button icon-button--surface" type="button" aria-label="Open navigation">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+            </button>
+            <div class="breadcrumb"><span id="breadcrumbScope">Sundaram Family Clinic</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg><strong id="breadcrumbPage">Home</strong></div>
+          </div>
+          <div class="app-topbar__right">
+            <span class="sync-state"><span></span>Data current</span>
+            <button class="icon-button icon-button--surface has-indicator" type="button" aria-label="Notifications">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 19h4" /></svg>
+            </button>
+            <div class="persona-switcher">
+              <label for="personaSelect">Preview as</label>
+              <select id="personaSelect">
+                <option value="admin">Clinic admin</option>
+                <option value="doctor">Doctor</option>
+                <option value="platform">Platform admin</option>
+                <option value="support">Support (read only)</option>
+              </select>
+            </div>
+          </div>
+        </header>
+
+        <main id="appContent" class="app-content" tabindex="-1"></main>
+      </div>
+
+      <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Mobile navigation"></nav>
+    </section>
+
+    <div id="modalRoot" class="modal-root" aria-live="polite"></div>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

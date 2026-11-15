@@ -52,6 +52,14 @@ type DevAuthHint = {
   doctorId?: string;
 };
 
+type LoginScope = { clinicId: string; clinicRole: ClinicRole };
+type AccessTokenPayload = {
+  sub: string;
+  exp: number;
+  clinicId?: string;
+  clinicRole?: ClinicRole;
+};
+
 @Injectable()
 export class AuthService {
   private readonly repos: Repositories;
@@ -130,9 +138,11 @@ export class AuthService {
       throw new AppError('FORBIDDEN', 'User has no active clinic membership.');
     }
 
-    const membership = hint.clinicId
-      ? memberships.find((row) => row.clinicId === hint.clinicId)
-      : memberships[0];
+    const membership = memberships.find(
+      (row) =>
+        (!hint.clinicId || row.clinicId === hint.clinicId) &&
+        (!hint.clinicRole || row.role === hint.clinicRole),
+    );
 
     if (!membership) {
       throw new AppError('FORBIDDEN', 'Requested clinic membership was not found.');
@@ -168,8 +178,12 @@ export class AuthService {
   }
 
   async authenticateBearerToken(token: string): Promise<AuthContext> {
-    const userId = this.verifyAccessToken(token);
-    return this.resolveAuthContext({ userId });
+    const payload = this.readAccessToken(token);
+    return this.resolveAuthContext({
+      userId: payload.sub,
+      ...(payload.clinicId ? { clinicId: payload.clinicId } : {}),
+      ...(payload.clinicRole ? { clinicRole: payload.clinicRole } : {}),
+    });
   }
 
   async getMe(auth: AuthContext): Promise<MeResponse> {
@@ -202,12 +216,14 @@ export class AuthService {
         platform_role: null,
         active: user.active,
       },
-      clinics: memberships.map((membership) => ({
-        clinic_id: membership.clinicId,
-        role: membership.role as ClinicRole,
-        doctor_id: membership.doctorId,
-        active: membership.active,
-      })),
+      clinics: memberships
+        .filter((membership) => membership.role === auth.clinicRole)
+        .map((membership) => ({
+          clinic_id: membership.clinicId,
+          role: membership.role as ClinicRole,
+          doctor_id: membership.doctorId,
+          active: membership.active,
+        })),
     };
   }
 
@@ -273,41 +289,54 @@ export class AuthService {
     };
   }
 
-  async loginWithUsernamePassword(username: string, password: string) {
+  async loginWithUsernamePassword(username: string, password: string, requestedRole?: ClinicRole) {
     const normalized = username.trim().toLowerCase();
-    const [user] = await this.repos.auth.findUserByUsernameOrEmail(normalized);
+    const invalidCredentialsMessage = requestedRole
+      ? 'Invalid username or password for the selected role.'
+      : 'Invalid username or password.';
+    const [user] = await this.repos.auth.findUserByUsernameOrEmail(normalized, requestedRole);
     if (!user || !user.active) {
-      throw new AppError('UNAUTHORIZED', 'Invalid username or password.');
+      throw new AppError('UNAUTHORIZED', invalidCredentialsMessage);
     }
 
     if (!user.passwordHash || !user.passwordSalt) {
-      throw new AppError('UNAUTHORIZED', 'Invalid username or password.');
+      throw new AppError('UNAUTHORIZED', invalidCredentialsMessage);
     }
 
     if (!verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-      throw new AppError('UNAUTHORIZED', 'Invalid username or password.');
+      throw new AppError('UNAUTHORIZED', invalidCredentialsMessage);
     }
-
-    await this.repos.auth.touchUserLastLogin(user.id);
 
     const platformRole = user.platformRole as PlatformRole | null;
     let clinics: MeResponse['clinics'] = [];
+    let loginScope: LoginScope | undefined;
+
+    if (requestedRole && (platformRole === 'platform_admin' || platformRole === 'support')) {
+      throw new AppError('FORBIDDEN', 'This account cannot sign in with the selected clinic role.');
+    }
 
     if (platformRole !== 'platform_admin' && platformRole !== 'support') {
       // Login already loaded the user. Resolve and return memberships once
       // instead of reloading the same user and memberships through
       // resolveAuthContext() followed by getMe(). This cuts the normal login
       // path from six sequential database round trips to three.
-      const memberships = await this.repos.auth.listActiveClinicMemberships(user.id);
+      const memberships = (await this.repos.auth.listActiveClinicMemberships(user.id)).filter(
+        (row) => !requestedRole || row.role === requestedRole,
+      );
       const membership = memberships[0];
       if (!membership) {
-        throw new AppError('FORBIDDEN', 'User has no active clinic membership.');
+        throw new AppError(
+          'FORBIDDEN',
+          'This account has no active membership for the selected role.',
+        );
       }
 
       const clinicRole = membership.role as ClinicRole;
       if (clinicRole === 'doctor' && !membership.doctorId) {
         throw new AppError('DOCTOR_NOT_OWNER', 'Doctor profile is not linked to this account.');
       }
+
+      loginScope = { clinicId: membership.clinicId, clinicRole };
 
       clinics = memberships.map((row) => ({
         clinic_id: row.clinicId,
@@ -317,8 +346,10 @@ export class AuthService {
       }));
     }
 
+    await this.repos.auth.touchUserLastLogin(user.id);
+
     return {
-      access_token: this.createAccessToken(user.id),
+      access_token: this.createAccessToken(user.id, loginScope),
       user: {
         id: user.id,
         name: user.name,
@@ -511,11 +542,12 @@ export class AuthService {
     }
   }
 
-  createAccessToken(userId: string): string {
+  createAccessToken(userId: string, scope?: LoginScope): string {
     const payload = Buffer.from(
       JSON.stringify({
         sub: userId,
         exp: Math.floor(Date.now() / 1000) + 60 * 60 * 12,
+        ...scope,
       }),
     ).toString('base64url');
     const signature = createHash('sha256')
@@ -525,6 +557,10 @@ export class AuthService {
   }
 
   verifyAccessToken(token: string): string {
+    return this.readAccessToken(token).sub;
+  }
+
+  private readAccessToken(token: string): AccessTokenPayload {
     const [payloadPart, signaturePart] = token.split('.');
     if (!payloadPart || !signaturePart) {
       throw new AppError('UNAUTHORIZED', 'Invalid access token.');
@@ -549,7 +585,16 @@ export class AuthService {
       throw new AppError('UNAUTHORIZED', 'Access token expired.');
     }
 
-    return payload.sub;
+    const scopedPayload = payload as AccessTokenPayload;
+    if (
+      scopedPayload.clinicRole !== undefined &&
+      (typeof scopedPayload.clinicId !== 'string' ||
+        !['clinic_admin', 'doctor'].includes(scopedPayload.clinicRole))
+    ) {
+      throw new AppError('UNAUTHORIZED', 'Invalid access token.');
+    }
+
+    return scopedPayload;
   }
 
   private hashOtp(otp: string): string {

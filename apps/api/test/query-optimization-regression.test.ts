@@ -30,7 +30,10 @@ describe('query optimization regressions', () => {
     ]);
     const service = Object.create(AppointmentsService.prototype) as AppointmentsService;
     installPrivateDependency(service, 'repos', {
-      appointmentLifecycle: { listAppointmentsForClinic },
+      appointmentLifecycle: {
+        listAppointmentsForClinic,
+        markPastConfirmedNoShows: vi.fn().mockResolvedValue(0),
+      },
       clinical: {
         listDoctors: vi.fn().mockResolvedValue([{ id: 'doctor-1', name: 'Dr. Test' }]),
         listServices: vi

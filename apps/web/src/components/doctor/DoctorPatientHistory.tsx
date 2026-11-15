@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import {
@@ -10,11 +11,30 @@ import {
   searchPatientHistory,
 } from '@/lib/api/clinic-clinical';
 import { isAbortError } from '@/lib/api/client';
+import { updateAppointmentStatus, type EditableAppointmentStatus } from '@/lib/api/appointments';
+
+const STATUS_OPTIONS: Array<{ value: EditableAppointmentStatus; label: string }> = [
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'no_show', label: 'No show' },
+  { value: 'visited', label: 'Visited' },
+];
+
+function appointmentIdForHistory(row: PatientHistoryItemApiRow): string | null {
+  return row.kind === 'appointment' ? row.id : (row.appointment_request_id ?? null);
+}
+
+function statusLabel(status: string): string {
+  return (
+    STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status.replaceAll('_', ' ')
+  );
+}
 
 type HistoryFilter = {
   phone: string;
   name: string;
   age: string;
+  date: string;
 };
 
 function formatDateTime(value: string): string {
@@ -42,22 +62,48 @@ function hasClinicalDetails(row: PatientHistoryItemApiRow): boolean {
 }
 
 function latestVisitedAt(history: PatientHistoryItemApiRow[]): string | null {
-  const latestVisit = history.find((row) => row.kind === 'visit');
+  const latestVisit = history.find(
+    (row) =>
+      row.status === 'visited' ||
+      (row.kind === 'visit' && !row.appointment_request_id && !row.status),
+  );
   return latestVisit ? formatDateTime(latestVisit.at) : null;
 }
 
 export function DoctorPatientHistory() {
+  const { effectiveRole } = useAuth();
   const clinicId = useActiveClinicId();
-  const [filter, setFilter] = useState<HistoryFilter>({ phone: '', name: '', age: '' });
+  const [filter, setFilter] = useState<HistoryFilter>({ phone: '', name: '', age: '', date: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [patients, setPatients] = useState<PatientHistoryApiRow[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<PatientHistoryApiRow | null>(null);
   const activeSearchControllerRef = useRef<AbortController | null>(null);
+  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [draftStatus, setDraftStatus] = useState<EditableAppointmentStatus>('confirmed');
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
+  const statusEditSequenceRef = useRef(0);
+  const statusSaveRef = useRef<number | null>(null);
+
+  const resetStatusEditor = useCallback(() => {
+    statusEditSequenceRef.current += 1;
+    statusSaveRef.current = null;
+    setEditingRowKey(null);
+    setSavingStatus(false);
+    setStatusError(null);
+    setStatusSuccess(null);
+  }, []);
+
+  const closeDetails = useCallback(() => {
+    resetStatusEditor();
+    setSelectedPatient(null);
+  }, [resetStatusEditor]);
 
   const isSearchDisabled = useMemo(() => {
-    return !filter.phone.trim() && !filter.name.trim() && !filter.age.trim();
+    return !filter.phone.trim() && !filter.name.trim() && !filter.age.trim() && !filter.date;
   }, [filter]);
 
   useEffect(() => {
@@ -67,13 +113,13 @@ export function DoctorPatientHistory() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setSelectedPatient(null);
+        closeDetails();
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedPatient]);
+  }, [selectedPatient, closeDetails]);
 
   useEffect(() => {
     activeSearchControllerRef.current?.abort();
@@ -83,12 +129,19 @@ export function DoctorPatientHistory() {
     setPatients([]);
     setHasSearched(false);
     setSelectedPatient(null);
+    resetStatusEditor();
 
     return () => {
       activeSearchControllerRef.current?.abort();
       activeSearchControllerRef.current = null;
+      statusEditSequenceRef.current += 1;
+      statusSaveRef.current = null;
     };
-  }, [clinicId]);
+  }, [clinicId, resetStatusEditor]);
+
+  useEffect(() => {
+    resetStatusEditor();
+  }, [effectiveRole, resetStatusEditor]);
 
   async function onSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -99,6 +152,7 @@ export function DoctorPatientHistory() {
     }
 
     activeSearchControllerRef.current?.abort();
+    closeDetails();
     const controller = new AbortController();
     activeSearchControllerRef.current = controller;
     setLoading(true);
@@ -120,6 +174,7 @@ export function DoctorPatientHistory() {
           ...(filter.phone.trim() ? { phone: filter.phone.trim() } : {}),
           ...(filter.name.trim() ? { name: filter.name.trim() } : {}),
           ...(age !== undefined ? { age } : {}),
+          ...(filter.date ? { date: filter.date } : {}),
         },
         controller.signal,
       );
@@ -147,13 +202,63 @@ export function DoctorPatientHistory() {
     }
   }
 
+  function startStatusEdit(row: PatientHistoryItemApiRow) {
+    if (
+      effectiveRole !== 'admin' ||
+      statusSaveRef.current !== null ||
+      !appointmentIdForHistory(row)
+    )
+      return;
+    resetStatusEditor();
+    setEditingRowKey(`${row.kind}-${row.id}`);
+    setDraftStatus(
+      STATUS_OPTIONS.find((option) => option.value === row.status)?.value ?? 'confirmed',
+    );
+  }
+
+  async function saveStatus(row: PatientHistoryItemApiRow) {
+    const appointmentId = appointmentIdForHistory(row);
+    if (effectiveRole !== 'admin' || !clinicId || !appointmentId || statusSaveRef.current !== null)
+      return;
+    const sequence = statusEditSequenceRef.current;
+    statusSaveRef.current = sequence;
+    setSavingStatus(true);
+    setStatusError(null);
+    setStatusSuccess(null);
+    try {
+      const result = await updateAppointmentStatus(clinicId, appointmentId, draftStatus);
+      if (statusEditSequenceRef.current !== sequence) return;
+      const updatePatient = (patient: PatientHistoryApiRow): PatientHistoryApiRow => ({
+        ...patient,
+        history: patient.history.map((item) =>
+          appointmentIdForHistory(item) === appointmentId
+            ? { ...item, status: result.appointment.status }
+            : item,
+        ),
+      });
+      setPatients((current) => current.map(updatePatient));
+      setSelectedPatient((current) => (current ? updatePatient(current) : current));
+      setEditingRowKey(null);
+      setStatusSuccess('Appointment status updated.');
+    } catch (err) {
+      if (statusEditSequenceRef.current === sequence) {
+        setStatusError(err instanceof Error ? err.message : 'Unable to update appointment status.');
+      }
+    } finally {
+      if (statusEditSequenceRef.current === sequence) {
+        statusSaveRef.current = null;
+        setSavingStatus(false);
+      }
+    }
+  }
+
   return (
     <>
       <div className="mb-5">
         <h1 className="text-[26px] font-black tracking-tight text-slate-900">Patient History</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Search by phone number, patient name, or age. Click a patient name bar to open full
-          history.
+          Search by phone number, patient name, age, or appointment date. Click a patient name bar
+          to open full history.
         </p>
       </div>
 
@@ -161,7 +266,7 @@ export function DoctorPatientHistory() {
         onSubmit={onSearch}
         className="mb-5 rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"
       >
-        <div className="portal-search-grid gap-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label
             className="text-xs font-bold uppercase tracking-wide text-slate-500"
             htmlFor="history-phone"
@@ -204,10 +309,26 @@ export function DoctorPatientHistory() {
               className="mt-1.5 w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-600/20"
             />
           </label>
+
+          <label
+            className="text-xs font-bold uppercase tracking-wide text-slate-500"
+            htmlFor="history-date"
+          >
+            Date
+            <input
+              id="history-date"
+              type="date"
+              value={filter.date}
+              onChange={(e) => setFilter((prev) => ({ ...prev, date: e.target.value }))}
+              className="mt-1.5 w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-600/20"
+            />
+          </label>
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <p className="text-xs text-slate-500">Enter any one field to search.</p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-slate-500">
+            Enter any field to search. Date finds appointments in any status.
+          </p>
           <button
             type="submit"
             disabled={loading || isSearchDisabled}
@@ -230,7 +351,9 @@ export function DoctorPatientHistory() {
       {!loading && !error && hasSearched && patients.length === 0 ? (
         <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-8 py-12 text-center">
           <p className="text-base font-bold text-slate-900">No patient records found</p>
-          <p className="mt-2 text-sm text-slate-500">Try a different phone, name, or age.</p>
+          <p className="mt-2 text-sm text-slate-500">
+            Try a different phone, name, age, or appointment date.
+          </p>
         </div>
       ) : null}
 
@@ -243,7 +366,10 @@ export function DoctorPatientHistory() {
               <button
                 key={patient.id}
                 type="button"
-                onClick={() => setSelectedPatient(patient)}
+                onClick={() => {
+                  resetStatusEditor();
+                  setSelectedPatient(patient);
+                }}
                 className="w-full rounded-[18px] border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-teal-200 hover:bg-teal-50/40"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -282,7 +408,7 @@ export function DoctorPatientHistory() {
           aria-modal="true"
           onClick={(event) => {
             if (event.target === event.currentTarget) {
-              setSelectedPatient(null);
+              closeDetails();
             }
           }}
         >
@@ -302,7 +428,7 @@ export function DoctorPatientHistory() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setSelectedPatient(null)}
+                  onClick={closeDetails}
                   className="rounded-[11px] border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold text-slate-600 hover:bg-slate-100"
                 >
                   Close
@@ -311,6 +437,22 @@ export function DoctorPatientHistory() {
             </div>
 
             <div className="max-h-[70vh] overflow-auto p-5">
+              {statusError ? (
+                <p
+                  role="alert"
+                  className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+                >
+                  {statusError}
+                </p>
+              ) : null}
+              {statusSuccess ? (
+                <p
+                  role="status"
+                  className="mb-3 rounded-xl bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-800"
+                >
+                  {statusSuccess}
+                </p>
+              ) : null}
               {selectedPatient.history.length === 0 ? (
                 <p className="text-sm text-slate-500">No appointments or visits recorded yet.</p>
               ) : (
@@ -364,7 +506,9 @@ export function DoctorPatientHistory() {
                             {row.reason_for_visit}
                           </td>
                           <td className="px-2 py-2 text-sm text-slate-700">
-                            {row.kind === 'visit' || hasClinicalDetails(row) ? (
+                            {row.kind === 'visit' ||
+                            row.status === 'visited' ||
+                            hasClinicalDetails(row) ? (
                               <div className="space-y-1">
                                 <p>
                                   <span className="font-semibold text-slate-900">Notes:</span>{' '}
@@ -386,7 +530,75 @@ export function DoctorPatientHistory() {
                             )}
                           </td>
                           <td className="px-2 py-2 text-sm text-slate-700">
-                            {row.status ?? 'visited'}
+                            {effectiveRole === 'admin' &&
+                            editingRowKey === `${row.kind}-${row.id}` ? (
+                              <div className="min-w-[160px] space-y-2">
+                                <select
+                                  aria-label={`Appointment status for ${formatDateTime(row.at)}`}
+                                  value={draftStatus}
+                                  disabled={savingStatus}
+                                  onChange={(event) =>
+                                    setDraftStatus(event.target.value as EditableAppointmentStatus)
+                                  }
+                                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-600/20"
+                                >
+                                  {STATUS_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    aria-label="Save appointment status"
+                                    disabled={savingStatus}
+                                    onClick={() => void saveStatus(row)}
+                                    className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:opacity-50"
+                                  >
+                                    {savingStatus ? 'Saving…' : 'Save'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="Cancel editing status"
+                                    disabled={savingStatus}
+                                    onClick={resetStatusEditor}
+                                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex min-w-[120px] items-center justify-between gap-3">
+                                <span>{statusLabel(row.status ?? 'visited')}</span>
+                                {effectiveRole === 'admin' && appointmentIdForHistory(row) ? (
+                                  <button
+                                    type="button"
+                                    aria-label={`Edit appointment status for ${formatDateTime(row.at)}`}
+                                    title="Edit appointment status"
+                                    disabled={savingStatus}
+                                    onClick={() => startStatusEdit(row)}
+                                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-600/20 disabled:opacity-50"
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      className="h-4 w-4"
+                                      viewBox="0 0 20 20"
+                                      fill="none"
+                                    >
+                                      <path
+                                        d="M4 13.75V16h2.25L14.4 7.85l-2.25-2.25L4 13.75Zm6.9-6.9 2.25 2.25"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                  </button>
+                                ) : null}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}

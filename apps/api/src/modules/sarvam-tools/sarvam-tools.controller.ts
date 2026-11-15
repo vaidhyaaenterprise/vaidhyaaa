@@ -33,6 +33,11 @@ import {
 } from '../structured-info/structured-info-field-extractor';
 import { SlotHoldService } from '../slots/slot-hold.service';
 import { SlotService } from '../slots/slot.service';
+import {
+  nearestAvailableRows,
+  slotStartTime24h,
+  summarizeAvailability,
+} from '../slots/availability-summary';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipApiEnvelope } from '../../common/decorators/skip-api-envelope.decorator';
 import { publicService, resolveSarvamRouting, type RoutingService } from './sarvam-routing';
@@ -184,7 +189,24 @@ function formatTimeText(startTime: string): string {
   return `${hour12}:${minute} ${period}`;
 }
 
-type SlotLike = { start_time: string; slot_id: string };
+type SlotLike = {
+  start_time: string;
+  end_time?: string;
+  slot_id: string;
+  available_count?: number;
+};
+
+function nearbySlotFields(rows: SlotLike[], date: string, requestedTime: string | null) {
+  const nearbyRows = requestedTime ? nearestAvailableRows(rows, date, requestedTime, 3) : [];
+  const nearbySlotsText = nearbyRows.map((row) => slotStartTime24h(row.start_time)).join(', ');
+  return {
+    requestedTime,
+    requestedTimeAvailable: false,
+    nearbySlotsText,
+    availabilityStatus: nearbyRows.length > 0 ? 'same_day_alternative' : 'no_slots',
+    suggestAnotherDate: nearbyRows.length === 0,
+  };
+}
 
 function findSlotByDateAndTime(
   slots: SlotLike[],
@@ -668,6 +690,15 @@ export class SarvamToolsController {
       afterTime || beforeTime || timePreference || exactTime ? 3 : 4,
     );
 
+    const selectedAvailability = selected.doctor
+      ? availability.find((entry) => entry.doctor.doctorId === selected.doctor?.doctorId)
+      : undefined;
+    const summary = summarizeAvailability(selectedAvailability?.rows ?? [], preferredDate!);
+    const selectedTimesText = joinTimesText(selected.times, timePreference);
+    const requestedTimeAvailable = exactTime ? selected.status === 'matched' : null;
+    const nearbySlotsText =
+      exactTime && selected.status === 'same_day_alternative' ? selectedTimesText : '';
+
     return {
       success: true,
       availabilityStatus: selected.status,
@@ -682,7 +713,14 @@ export class SarvamToolsController {
       date: preferredDate,
       dateDisplay: formatDateDisplay(preferredDate!),
       timePreference,
-      availableSlotsText: joinTimesText(selected.times, timePreference),
+      availabilityWindows: summary.availabilityWindows,
+      availabilityWindowsText: summary.availabilityWindowsText || 'no slots',
+      slotFrequencyMinutes: summary.slotFrequencyMinutes,
+      slotFrequencyText: summary.slotFrequencyText,
+      requestedTime: exactTime,
+      requestedTimeAvailable,
+      nearbySlotsText,
+      availableSlotsText: selectedTimesText,
       error: '',
     };
   }
@@ -724,6 +762,7 @@ export class SarvamToolsController {
     if (!target.doctorId) return { error: 'doctor_required', needsClarification: true };
 
     let resolvedSlotId = slotId;
+    const normalizedRequestedTime = timeInput ? normalizeTimeTo24h(timeInput) : null;
 
     if (!resolvedSlotId && timeInput) {
       const available = await this.slotService.findAvailableSlots(
@@ -733,7 +772,14 @@ export class SarvamToolsController {
         date ?? undefined,
       );
       const timeMatch = findSlotByDateAndTime(available, date, timeInput);
-      if (!timeMatch) return { error: 'invalid_slot_time', time: timeInput, date };
+      if (!timeMatch) {
+        return {
+          error: 'invalid_slot_time',
+          time: timeInput,
+          date,
+          ...nearbySlotFields(available, date!, normalizedRequestedTime),
+        };
+      }
       resolvedSlotId = timeMatch.slot_id;
     }
 
@@ -776,7 +822,21 @@ export class SarvamToolsController {
       };
     } catch (error) {
       const err = error as { code?: string };
-      if (err?.code === 'SLOT_NOT_AVAILABLE') return { error: 'invalid_slot', slotId };
+      if (err?.code === 'SLOT_NOT_AVAILABLE' || err?.code === 'SLOT_FULL') {
+        const refreshed = await this.slotService.findAvailableSlots(
+          clinicId,
+          target.doctorId,
+          target.clinicServiceId,
+          date!,
+        );
+        return {
+          error: 'invalid_slot',
+          slotId: resolvedSlotId,
+          time: timeInput,
+          date,
+          ...nearbySlotFields(refreshed, date!, normalizedRequestedTime),
+        };
+      }
       return {
         error: 'booking_failed',
         message: error instanceof Error ? error.message : 'unknown_error',
@@ -822,9 +882,10 @@ export class SarvamToolsController {
     if ('error' in target) return target;
     if (!target.doctorId) return { error: 'doctor_required', needsClarification: true };
     let resolvedSlotId = slotId;
+    const normalizedRequestedTime = timeInput ? normalizeTimeTo24h(timeInput) : null;
 
     if (!resolvedSlotId && timeInput) {
-      const normalizedTime = normalizeTimeTo24h(timeInput);
+      const normalizedTime = normalizedRequestedTime;
       if (!normalizedTime) return { error: 'invalid_slot_time', time: timeInput, date };
       const [timeSlot] = await this.repos.slots.findSlotByExactTime(
         clinicId,
@@ -833,7 +894,20 @@ export class SarvamToolsController {
         date!,
         normalizedTime,
       );
-      if (!timeSlot) return { error: 'invalid_slot_time', time: timeInput, date };
+      if (!timeSlot) {
+        const available = await this.slotService.findAvailableSlots(
+          clinicId,
+          target.doctorId,
+          target.clinicServiceId,
+          date!,
+        );
+        return {
+          error: 'invalid_slot_time',
+          time: timeInput,
+          date,
+          ...nearbySlotFields(available, date!, normalizedTime),
+        };
+      }
       resolvedSlotId = timeSlot.id;
     }
 
@@ -876,7 +950,21 @@ export class SarvamToolsController {
       };
     } catch (error) {
       const err = error as { code?: string };
-      if (err?.code === 'SLOT_NOT_AVAILABLE') return { error: 'invalid_slot', slotId };
+      if (err?.code === 'SLOT_NOT_AVAILABLE' || err?.code === 'SLOT_FULL') {
+        const refreshed = await this.slotService.findAvailableSlots(
+          clinicId,
+          target.doctorId,
+          target.clinicServiceId,
+          date!,
+        );
+        return {
+          error: 'invalid_slot',
+          slotId: resolvedSlotId,
+          time: timeInput,
+          date,
+          ...nearbySlotFields(refreshed, date!, normalizedRequestedTime),
+        };
+      }
       return {
         error: 'booking_failed',
         message: error instanceof Error ? error.message : 'unknown_error',

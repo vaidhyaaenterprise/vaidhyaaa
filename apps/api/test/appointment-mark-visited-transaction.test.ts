@@ -26,6 +26,7 @@ function createHarness(status: 'confirmed' | 'visited' = 'confirmed') {
     insertAppointmentEvent: vi.fn().mockResolvedValue([{ id: 'event-1' }]),
   };
   const patients = {
+    findVisitByAppointmentId: vi.fn().mockResolvedValue([]),
     upsertByPhone: vi.fn().mockResolvedValue([patient]),
     insertVisit: vi.fn().mockResolvedValue([patientVisit]),
   };
@@ -87,6 +88,11 @@ describe('AppointmentAdminService.markVisited', () => {
       },
       harness.tx,
     );
+    expect(harness.patients.findVisitByAppointmentId).toHaveBeenCalledWith(
+      'clinic-1',
+      'appointment-1',
+      harness.tx,
+    );
     expect(harness.patients.insertVisit).toHaveBeenCalledWith(
       expect.objectContaining({
         clinicId: 'clinic-1',
@@ -117,6 +123,57 @@ describe('AppointmentAdminService.markVisited', () => {
     );
   });
 
+  it('reuses a retained clinical visit after re-confirmation and preserves its original notes', async () => {
+    const harness = createHarness();
+    const retainedVisit = Object.freeze({
+      id: 'retained-visit',
+      patientId: 'original-patient',
+      appointmentRequestId: harness.appointment.id,
+      visitedAt: new Date('2026-10-12T05:00:00Z'),
+      reasonForVisit: 'Original consultation',
+      examinationNotes: 'Original examination findings',
+      diagnosis: 'Original diagnosis',
+      advice: 'Original advice',
+    });
+    harness.patients.findVisitByAppointmentId.mockResolvedValue([retainedVisit]);
+
+    const result = await harness.service.markVisited({
+      clinicId: 'clinic-1',
+      appointmentId: 'appointment-1',
+      visitReason: 'Replacement reason must not overwrite the original',
+      examinationNotes: 'Replacement notes',
+      diagnosis: 'Replacement diagnosis',
+      advice: 'Replacement advice',
+      actorUserId: 'admin-1',
+    });
+
+    expect(result.patient_visit).toBe(retainedVisit);
+    expect(result.appointment).toBe(harness.updatedAppointment);
+    expect(harness.patients.upsertByPhone).not.toHaveBeenCalled();
+    expect(harness.patients.insertVisit).not.toHaveBeenCalled();
+    expect(
+      harness.appointmentLifecycle.findAppointmentByIdForUpdate.mock.invocationCallOrder[0],
+    ).toBeLessThan(harness.patients.findVisitByAppointmentId.mock.invocationCallOrder[0]!);
+    expect(harness.slots.updateAppointmentStatus).toHaveBeenCalledWith(
+      'clinic-1',
+      'appointment-1',
+      'visited',
+      harness.tx,
+    );
+    expect(harness.appointmentLifecycle.insertAppointmentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newValuesJson: {
+          status: 'visited',
+          visit_reason: 'Original consultation',
+          examination_notes: 'Original examination findings',
+          diagnosis: 'Original diagnosis',
+          advice: 'Original advice',
+        },
+      }),
+      harness.tx,
+    );
+  });
+
   it('does not create a duplicate visit after the row lock observes an already-visited appointment', async () => {
     const harness = createHarness('visited');
 
@@ -138,6 +195,7 @@ describe('AppointmentAdminService.markVisited', () => {
       harness.tx,
     );
     expect(harness.patients.upsertByPhone).not.toHaveBeenCalled();
+    expect(harness.patients.findVisitByAppointmentId).not.toHaveBeenCalled();
     expect(harness.patients.insertVisit).not.toHaveBeenCalled();
     expect(harness.slots.updateAppointmentStatus).not.toHaveBeenCalled();
     expect(harness.appointmentLifecycle.insertAppointmentEvent).not.toHaveBeenCalled();

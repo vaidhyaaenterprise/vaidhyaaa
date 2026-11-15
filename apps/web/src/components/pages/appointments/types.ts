@@ -1,4 +1,9 @@
-export type AppointmentStatus = 'pending_confirmation' | 'confirmed' | 'visited' | 'cancelled';
+export type AppointmentStatus =
+  | 'pending_confirmation'
+  | 'confirmed'
+  | 'visited'
+  | 'cancelled'
+  | 'no_show';
 export type AppointmentSource = 'agent' | 'manual' | 'admin';
 export type RoutingSource = 'voice_bot' | 'manual_booking' | 'admin_override';
 export type VisitType = 'new' | 'follow_up';

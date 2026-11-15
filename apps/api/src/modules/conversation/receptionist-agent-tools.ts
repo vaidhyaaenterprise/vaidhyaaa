@@ -13,6 +13,7 @@ import {
 import {
   ADAPTER_TOKENS,
   applyReasonForVisitUpdate,
+  extractActiveExactTime,
   extractActivePreferredDate,
   normalizeAppointmentRoutingSource,
   parseBookingCollected,
@@ -28,7 +29,6 @@ import { DATABASE_CONNECTION } from '../database/database.module';
 import { BookingAppointmentService } from '../booking/booking-appointment.service';
 import {
   filterSlotsByDateAndPreference,
-  getAvailableTimePreferencesForDate,
   mergeCollected,
   slotDisplayTime,
 } from '../booking/booking-field-extractor';
@@ -44,6 +44,12 @@ import {
 import { isPatientActionConfirmed } from './receptionist-agent-confirmation';
 import { SlotHoldService } from '../slots/slot-hold.service';
 import { SlotService } from '../slots/slot.service';
+import {
+  findAvailableRowAtTime,
+  nearestAvailableRows,
+  slotStartTime24h,
+  summarizeAvailability,
+} from '../slots/availability-summary';
 
 export const RECEPTIONIST_AGENT_TOOL_NAMES = [
   'get_clinic_info',
@@ -126,16 +132,18 @@ export const RECEPTIONIST_AGENT_TOOLS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'check_slot_availability',
-      description: 'List real available appointment slots for a date. Call before offering times.',
+      description:
+        'Check real availability for a date. First call with date only to get 24-hour windows and frequency; call again with an exact time chosen by the patient.',
       parameters: {
         type: 'object',
         properties: {
           doctorName: { type: ['string', 'null'] },
           reasonForVisit: { type: ['string', 'null'] },
           date: { type: ['string', 'null'], description: 'YYYY-MM-DD or relative day phrase.' },
-          timePreference: {
+          time: {
             type: ['string', 'null'],
-            enum: ['morning', 'afternoon', 'evening', null],
+            description:
+              'Exact clinic-local time in 24-hour HH:mm, only after the patient chooses it.',
           },
         },
         additionalProperties: false,
@@ -294,6 +302,24 @@ function parseTimePreference(value: unknown): TimePreference | null {
     return value;
   }
   return null;
+}
+
+function normalizeExactTime(value: string | null): string | null {
+  if (!value) return null;
+  const match = /^(\d{1,2})(?::(\d{2}))?$/.exec(value.trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2] ?? '0');
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function minuteDistance(startTime: string, requestedTime: string): number {
+  const [requestedHour, requestedMinute] = requestedTime.split(':').map(Number);
+  const [slotHour, slotMinute] = slotStartTime24h(startTime).split(':').map(Number);
+  return Math.abs(
+    (slotHour ?? 0) * 60 + (slotMinute ?? 0) - ((requestedHour ?? 0) * 60 + (requestedMinute ?? 0)),
+  );
 }
 
 @Injectable()
@@ -545,8 +571,13 @@ export class ReceptionistAgentToolsService {
     const doctorName = readString(args.doctorName) ?? collected.doctor_name ?? null;
     const reasonForVisit = readString(args.reasonForVisit) ?? collected.reason_for_visit ?? null;
     const dateInput = readString(args.date) ?? collected.preferred_date ?? null;
-    const timePreference =
-      parseTimePreference(args.timePreference) ?? collected.time_preference ?? null;
+    const exactTimeRaw =
+      readString(args.time) ??
+      (ctx.patientMessageText ? extractActiveExactTime(ctx.patientMessageText) : null);
+    const exactTime = normalizeExactTime(exactTimeRaw);
+    if (exactTimeRaw && !exactTime) {
+      return { slots: [], error: 'invalid_time', requestedTime: exactTimeRaw };
+    }
 
     let preferredDate = dateInput
       ? (extractActivePreferredDate(dateInput, referenceDate) ??
@@ -621,71 +652,120 @@ export class ReceptionistAgentToolsService {
       return { slots: [], error: 'doctor_required' };
     }
 
-    let bestSlots: Array<{ slot_id: string; start_time: string; available_count?: number }> = [];
-    let bestDoctorId = candidates[0]!.doctorId;
-    let bestDoctorName = candidates[0]!.doctorName;
-
     const referenceTime =
       preferredDate === referenceDate ? formatTimeInTimezone(new Date(), timezone) : undefined;
-
+    const availabilityByDoctor: Array<{
+      doctorId: string;
+      doctorName: string;
+      slots: Array<{
+        slot_id: string;
+        start_time: string;
+        end_time: string;
+        available_count?: number;
+      }>;
+    }> = [];
     for (const candidate of candidates) {
       const slots = await this.slotService.findAvailableSlots(
         ctx.clinicId,
         candidate.doctorId,
         clinicServiceId,
+        preferredDate,
       );
       const filtered = filterSlotsByDateAndPreference(
         slots,
         preferredDate,
-        timePreference ?? undefined,
+        undefined,
         referenceDate,
         referenceTime,
       );
       if (filtered.length > 0) {
-        bestSlots = filtered;
-        bestDoctorId = candidate.doctorId;
-        bestDoctorName = candidate.doctorName;
-        break;
-      }
-      if (bestSlots.length === 0) {
-        const anyDate = filterSlotsByDateAndPreference(
-          slots,
-          preferredDate,
-          undefined,
-          referenceDate,
-          referenceTime,
-        );
-        if (anyDate.length > 0) {
-          bestSlots = anyDate;
-          bestDoctorId = candidate.doctorId;
-          bestDoctorName = candidate.doctorName;
-        }
+        availabilityByDoctor.push({
+          doctorId: candidate.doctorId,
+          doctorName: candidate.doctorName,
+          slots: filtered,
+        });
       }
     }
+
+    let selected = availabilityByDoctor[0] ?? {
+      doctorId: candidates[0]!.doctorId,
+      doctorName: candidates[0]!.doctorName,
+      slots: [],
+    };
+    let exactMatch:
+      | {
+          slot_id: string;
+          start_time: string;
+          end_time: string;
+          available_count?: number;
+        }
+      | undefined;
+
+    if (exactTime) {
+      for (const candidate of availabilityByDoctor) {
+        const match = findAvailableRowAtTime(candidate.slots, preferredDate, exactTime);
+        if (match) {
+          selected = candidate;
+          exactMatch = match;
+          break;
+        }
+      }
+      if (!exactMatch && availabilityByDoctor.length > 1) {
+        selected = [...availabilityByDoctor].sort((left, right) => {
+          const leftNearest = nearestAvailableRows(left.slots, preferredDate, exactTime, 1)[0];
+          const rightNearest = nearestAvailableRows(right.slots, preferredDate, exactTime, 1)[0];
+          return (
+            (leftNearest ? minuteDistance(leftNearest.start_time, exactTime) : Number.MAX_VALUE) -
+            (rightNearest ? minuteDistance(rightNearest.start_time, exactTime) : Number.MAX_VALUE)
+          );
+        })[0]!;
+      }
+    }
+
+    const bestSlots = exactTime
+      ? exactMatch
+        ? [exactMatch]
+        : nearestAvailableRows(selected.slots, preferredDate, exactTime, 3)
+      : selected.slots;
+    const summary = summarizeAvailability(selected.slots, preferredDate);
+    const availabilityStatus =
+      selected.slots.length === 0
+        ? 'no_slots'
+        : exactTime
+          ? exactMatch
+            ? 'matched'
+            : 'same_day_alternative'
+          : 'date_overview';
+    const nearbySlotsText =
+      exactTime && !exactMatch
+        ? bestSlots.map((slot) => slotStartTime24h(slot.start_time)).join(', ')
+        : '';
 
     return {
       slots: bestSlots.map((slot) => ({
         slotId: slot.slot_id,
-        doctorName: bestDoctorName,
+        doctorName: selected.doctorName,
         dateDisplay: preferredDate,
-        time: slotDisplayTime(slot.start_time),
+        time: slotStartTime24h(slot.start_time),
+        startTime: slot.start_time,
+        endTime: slot.end_time,
       })),
-      doctorId: bestDoctorId,
-      doctorName: bestDoctorName,
+      doctorId: selected.doctorId,
+      doctorName: selected.doctorName,
       clinicServiceId,
       preferredDate,
-      timePreference,
+      timePreference: null,
+      availabilityStatus,
+      availabilityWindows: summary.availabilityWindows,
+      availabilityWindowsText: summary.availabilityWindowsText || 'no slots',
+      slotFrequencyMinutes: summary.slotFrequencyMinutes,
+      slotFrequencyText: summary.slotFrequencyText,
+      requestedTime: exactTime,
+      requestedTimeAvailable: exactTime ? Boolean(exactMatch) : null,
+      nearbySlotsText,
       ...(bestSlots.length === 0
         ? {
-            error: 'no_slots_for_preference',
-            availableTimePreferences: getAvailableTimePreferencesForDate(
-              await this.slotService.findAvailableSlots(
-                ctx.clinicId,
-                bestDoctorId,
-                clinicServiceId,
-              ),
-              preferredDate,
-            ),
+            error: 'no_slots_for_date',
           }
         : {}),
     };

@@ -57,6 +57,7 @@ export const generateDailyClinicReportJobPayloadSchema = clinicScopedSchema.exte
 export const jobPayloadSchemas: Record<JobType, z.ZodTypeAny> = {
   [JOB_TYPES.SEND_NOTIFICATION]: sendNotificationJobPayloadSchema,
   [JOB_TYPES.EXPIRE_SLOT_HOLDS]: expireSlotHoldsJobPayloadSchema,
+  [JOB_TYPES.MARK_APPOINTMENT_NO_SHOWS]: z.object({ clinic_id: z.string().uuid().optional() }),
   [JOB_TYPES.GENERATE_SLOTS]: generateSlotsJobPayloadSchema,
   [JOB_TYPES.CLEANUP_EXPIRED_RECORDINGS]: cleanupExpiredRecordingsJobPayloadSchema,
   [JOB_TYPES.CLEANUP_EXPIRED_CALLS]: z.object({ clinic_id: z.string().uuid().optional() }),

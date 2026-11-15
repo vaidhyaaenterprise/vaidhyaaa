@@ -7,6 +7,8 @@ import {
 
 import {
   devAuthHeadersFromProfile,
+  getAuthSessionVersion,
+  initializeTabSession,
   readAccessToken,
   readDevAuthProfile,
 } from '../dev-auth/storage';
@@ -122,11 +124,11 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
   }
 }
 
-function getRequestKey(path: string): string {
-  const authHeaders = buildAuthHeaders();
+function getRequestKey(path: string, authHeaders: Record<string, string>): string {
   return [
     getApiBaseUrl(),
     path,
+    String(getAuthSessionVersion()),
     authHeaders.Authorization ?? '',
     authHeaders['x-dev-user-id'] ?? '',
     authHeaders['x-dev-clinic-id'] ?? '',
@@ -295,11 +297,29 @@ export async function apiRequest<T>(
   options: RequestInit = {},
   policy: ApiRequestPolicy = {},
 ): Promise<T> {
+  if (options.signal?.aborted) throw createAbortError();
+  await initializeTabSession();
+  return apiRequestWithAuth<T>(path, options, policy, buildAuthHeaders());
+}
+
+async function apiRequestWithAuth<T>(
+  path: string,
+  options: RequestInit,
+  policy: ApiRequestPolicy,
+  authHeaders: Record<string, string>,
+): Promise<T> {
+  const authKey = getRequestKey('', authHeaders);
+  const assertCurrentSession = () => {
+    if (options.signal?.aborted || getRequestKey('', buildAuthHeaders()) !== authKey) {
+      throw createAbortError();
+    }
+  };
+  assertCurrentSession();
   const requestId = createRequestId();
   const headers: Record<string, string> = {
     Accept: 'application/json',
     [REQUEST_ID_HEADER]: requestId,
-    ...buildAuthHeaders(),
+    ...authHeaders,
     ...(options.headers as Record<string, string> | undefined),
   };
 
@@ -313,6 +333,7 @@ export async function apiRequest<T>(
   let response: Response | null = null;
 
   for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    assertCurrentSession();
     try {
       response = await fetchWithTimeout(`${getApiBaseUrl()}${path}`, {
         ...options,
@@ -321,6 +342,7 @@ export async function apiRequest<T>(
         headers,
       });
     } catch (error) {
+      assertCurrentSession();
       if (isAbortError(error) && options.signal?.aborted) {
         throw error;
       }
@@ -347,6 +369,7 @@ export async function apiRequest<T>(
       });
     }
 
+    assertCurrentSession();
     if (TRANSIENT_HTTP_STATUSES.has(response.status) && attempt < maximumAttempts) {
       try {
         await response.body?.cancel();
@@ -366,22 +389,38 @@ export async function apiRequest<T>(
     });
   }
 
-  return parseResponse<T>(response);
+  try {
+    const result = await parseResponse<T>(response);
+    assertCurrentSession();
+    return result;
+  } catch (error) {
+    // A late unauthorized response belongs to the old login, not its replacement.
+    assertCurrentSession();
+    throw error;
+  }
 }
 
-export function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw createAbortError();
+  await initializeTabSession();
   if (signal?.aborted) {
     return Promise.reject(createAbortError());
   }
 
-  const key = getRequestKey(path);
+  const authHeaders = buildAuthHeaders();
+  const key = getRequestKey(path, authHeaders);
   const existing = pendingGetRequests.get(key) as PendingGetRequest<T> | undefined;
   if (existing) {
     return attachGetConsumer(existing, signal);
   }
 
   const controller = new AbortController();
-  const request = apiRequest<T>(path, { method: 'GET', signal: controller.signal });
+  const request = apiRequestWithAuth<T>(
+    path,
+    { method: 'GET', signal: controller.signal },
+    {},
+    authHeaders,
+  );
   const entry: PendingGetRequest<T> = {
     key,
     request,
@@ -402,33 +441,37 @@ export async function apiPost<T>(
   body?: unknown,
   policy: ApiRequestPolicy = {},
 ): Promise<T> {
+  await initializeTabSession();
   clearPendingGetRequests();
   const init: RequestInit = { method: 'POST' };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  return apiRequest<T>(path, init, policy);
+  return apiRequestWithAuth<T>(path, init, policy, buildAuthHeaders());
 }
 
 export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  await initializeTabSession();
   clearPendingGetRequests();
   const init: RequestInit = { method: 'PUT' };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  return apiRequest<T>(path, init);
+  return apiRequestWithAuth<T>(path, init, {}, buildAuthHeaders());
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
+  await initializeTabSession();
   clearPendingGetRequests();
-  return apiRequest<T>(path, { method: 'DELETE' });
+  return apiRequestWithAuth<T>(path, { method: 'DELETE' }, {}, buildAuthHeaders());
 }
 
 export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  await initializeTabSession();
   clearPendingGetRequests();
   const init: RequestInit = { method: 'PATCH' };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  return apiRequest<T>(path, init);
+  return apiRequestWithAuth<T>(path, init, {}, buildAuthHeaders());
 }

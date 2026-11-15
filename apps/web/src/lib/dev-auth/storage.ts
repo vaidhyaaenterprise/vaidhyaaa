@@ -5,6 +5,13 @@ import {
   type DevAuthRole,
 } from './constants';
 
+export { initializeTabSession } from './tab-session';
+export const AUTH_SESSION_CHANGED_EVENT = 'vaidhyaa:auth-session-changed';
+let sessionVersion = 0;
+export function getAuthSessionVersion(): number {
+  return sessionVersion;
+}
+
 const DEV_AUTH_ROLES: readonly DevAuthRole[] = ['platform_admin', 'clinic_admin', 'doctor'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -48,7 +55,7 @@ export function readDevAuthProfile(): DevAuthProfile | null {
 
   let raw: string | null = null;
   try {
-    raw = window.localStorage.getItem(DEV_AUTH_STORAGE_KEY);
+    raw = window.sessionStorage.getItem(DEV_AUTH_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -61,7 +68,7 @@ export function readDevAuthProfile(): DevAuthProfile | null {
     const parsed = JSON.parse(raw);
     if (!isDevAuthProfile(parsed)) {
       try {
-        window.localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+        window.sessionStorage.removeItem(DEV_AUTH_STORAGE_KEY);
       } catch {
         // noop
       }
@@ -70,7 +77,7 @@ export function readDevAuthProfile(): DevAuthProfile | null {
     return parsed;
   } catch {
     try {
-      window.localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+      window.sessionStorage.removeItem(DEV_AUTH_STORAGE_KEY);
     } catch {
       // noop
     }
@@ -84,7 +91,9 @@ export function writeDevAuthProfile(profile: DevAuthProfile): void {
   }
 
   try {
-    window.localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(profile));
+    window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(profile));
+    sessionVersion += 1;
+    window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
   } catch {
     // noop
   }
@@ -94,9 +103,10 @@ export function clearDevAuthProfile(): void {
   if (!hasWindow()) {
     return;
   }
+  sessionVersion += 1;
 
   try {
-    window.localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+    window.sessionStorage.removeItem(DEV_AUTH_STORAGE_KEY);
   } catch {
     // noop
   }
@@ -106,6 +116,7 @@ export function clearDevAuthProfile(): void {
   } catch {
     // noop
   }
+  window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
 }
 
 export function readAccessToken(): string | null {
@@ -128,6 +139,7 @@ export function writeAccessToken(token: string): void {
 
   try {
     window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
+    sessionVersion += 1;
   } catch {
     // noop
   }

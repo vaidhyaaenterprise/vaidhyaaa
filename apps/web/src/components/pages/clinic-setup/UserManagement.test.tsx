@@ -593,6 +593,9 @@ describe('UserManagement', () => {
     fireEvent.click(addButton);
 
     const dialog = await screen.findByRole('dialog', { name: 'Add a new login' });
+    // The dialog opens after a reference-data refresh. Wait for its focus effect,
+    // which also installs the keyboard trap, before simulating keyboard navigation.
+    await waitFor(() => expect(within(dialog).getByLabelText('Username')).toHaveFocus());
     const closeButton = within(dialog).getByRole('button', { name: 'Close login dialog' });
     const cancelButton = within(dialog).getByRole('button', { name: 'Cancel' });
 

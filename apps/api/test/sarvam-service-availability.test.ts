@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
+import { AppError } from '@vaidya/shared';
 import { SarvamToolsController } from '../src/modules/sarvam-tools/sarvam-tools.controller';
 import {
   chooseAvailability,
@@ -232,6 +233,83 @@ describe('Sarvam availability across service doctors', () => {
       }),
     );
   });
+
+  it('returns nearby same-day slots when the requested booking time is unavailable', async () => {
+    const { controller, findAvailableSlots, createAppointmentFromFreshHold } = setup({
+      a: [slot('09:30'), slot('10:30'), slot('11:00')],
+    });
+
+    expect(
+      await controller.createAppointment(
+        {
+          clinic_id: 'clinic-1',
+          session_id: 'session-1',
+          patient_name: 'Patient',
+          phone: '9876543210',
+          reason_for_visit: 'fever',
+          clinic_service_id: 'general',
+          doctor_id: 'a',
+          date,
+          time: '10:00',
+        },
+        req,
+      ),
+    ).toMatchObject({
+      error: 'invalid_slot_time',
+      requestedTime: '10:00',
+      nearbySlotsText: '09:30, 10:30, 11:00',
+    });
+    expect(findAvailableSlots).toHaveBeenCalledWith('clinic-1', 'a', 'general', date);
+    expect(createAppointmentFromFreshHold).not.toHaveBeenCalled();
+  });
+
+  it.each(['SLOT_FULL', 'SLOT_NOT_AVAILABLE'] as const)(
+    'refreshes nearby suggestions after a %s booking race without booking a different slot',
+    async (code) => {
+      const { controller, findAvailableSlots, createAppointmentFromFreshHold } = setup({
+        a: [slot('10:00')],
+      });
+      findAvailableSlots
+        .mockResolvedValueOnce([slot('10:00')])
+        .mockResolvedValueOnce([slot('09:30'), slot('10:30'), slot('11:00')]);
+      createAppointmentFromFreshHold.mockRejectedValueOnce(
+        new AppError(code, 'The requested slot is no longer available.'),
+      );
+
+      expect(
+        await controller.createAppointment(
+          {
+            clinic_id: 'clinic-1',
+            session_id: 'session-1',
+            patient_name: 'Patient',
+            phone: '9876543210',
+            reason_for_visit: 'fever',
+            clinic_service_id: 'general',
+            doctor_id: 'a',
+            date,
+            time: '10:00',
+          },
+          req,
+        ),
+      ).toMatchObject({
+        error: 'invalid_slot',
+        requestedTime: '10:00',
+        nearbySlotsText: '09:30, 10:30, 11:00',
+      });
+      expect(findAvailableSlots.mock.calls).toEqual([
+        ['clinic-1', 'a', 'general', date],
+        ['clinic-1', 'a', 'general', date],
+      ]);
+      expect(createAppointmentFromFreshHold).toHaveBeenCalledTimes(1);
+      expect(createAppointmentFromFreshHold).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slotId: `${date}-10:00`,
+          expectedDoctorId: 'a',
+          expectedClinicServiceId: 'general',
+        }),
+      );
+    },
+  );
 
   it('requires an accepted doctor before booking rather than randomly assigning one during the write', async () => {
     const { controller, repos, createAppointmentFromFreshHold } = setup({});

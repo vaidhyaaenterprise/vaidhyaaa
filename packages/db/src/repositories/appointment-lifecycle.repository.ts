@@ -42,6 +42,57 @@ const appointmentWithConflictDetails = {
 export class AppointmentLifecycleRepository {
   constructor(private readonly db: Database) {}
 
+  async markPastConfirmedNoShows(clinicId?: string): Promise<number> {
+    // Appointment timestamps are clinic-local wall clocks, not UTC instants.
+    // Only dates before clinic-today qualify; an elapsed slot today stays confirmed.
+    // One statement makes the status change, audit event and stale request closure
+    // atomic. The status predicate is rechecked after concurrent row updates.
+    const rows = await this.db.execute<{ updated_count: number }>(sql`
+      WITH transitioned AS (
+        UPDATE appointment_requests AS a
+        SET status = 'no_show', updated_at = now()
+        FROM clinics AS c
+        WHERE a.clinic_id = c.id
+          AND a.status = 'confirmed'
+          AND a.appointment_start < (now() AT TIME ZONE c.timezone)::date
+          AND NOT EXISTS (
+            SELECT 1 FROM appointment_events AS e
+            WHERE e.clinic_id = a.clinic_id AND e.appointment_request_id = a.id
+              AND e.event_type = 'appointment.status_corrected'
+              AND e.new_values_json->>'status' = 'confirmed'
+              AND (e.new_values_json->>'appointment_start')::timestamp = a.appointment_start
+              AND (e.created_at AT TIME ZONE c.timezone)::date > a.appointment_start::date
+              AND NOT EXISTS (
+                SELECT 1 FROM appointment_events AS later
+                WHERE later.clinic_id = a.clinic_id AND later.appointment_request_id = a.id
+                  AND later.event_type = 'appointment.rescheduled'
+                  AND later.created_at >= e.created_at
+              )
+          )
+          ${clinicId ? sql`AND a.clinic_id = ${clinicId}` : sql``}
+        RETURNING a.id, a.clinic_id
+      ), recorded AS (
+        INSERT INTO appointment_events (
+          clinic_id, appointment_request_id, event_type, actor_type,
+          old_values_json, new_values_json
+        )
+        SELECT clinic_id, id, 'appointment.no_show', 'system',
+          '{"status":"confirmed"}'::jsonb, '{"status":"no_show"}'::jsonb
+        FROM transitioned
+        RETURNING id
+      ), closed_requests AS (
+        UPDATE appointment_action_requests AS r
+        SET status = 'rejected', updated_at = now()
+        FROM transitioned AS t
+        WHERE r.clinic_id = t.clinic_id AND r.appointment_id = t.id
+          AND r.status = 'pending'
+        RETURNING r.id
+      )
+      SELECT count(*)::int AS updated_count FROM transitioned
+    `);
+    return rows[0]?.updated_count ?? 0;
+  }
+
   listUpcomingAppointmentsByPhone(clinicId: string, patientPhone: string) {
     return this.db
       .select()
@@ -76,6 +127,21 @@ export class AppointmentLifecycleRepository {
       )
       .for('update')
       .limit(1);
+  }
+
+  setCorrectedStatus(
+    clinicId: string,
+    appointmentId: string,
+    status: string,
+    db: Database = this.db,
+  ) {
+    return db
+      .update(appointmentRequests)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(eq(appointmentRequests.clinicId, clinicId), eq(appointmentRequests.id, appointmentId)),
+      )
+      .returning();
   }
 
   findAppointmentsByIds(clinicId: string, appointmentIds: string[]) {

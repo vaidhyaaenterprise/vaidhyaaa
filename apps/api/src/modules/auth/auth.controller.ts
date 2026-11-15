@@ -50,6 +50,7 @@ export class AuthController {
     return this.authService.loginWithUsernamePassword(
       parsed.data.username,
       parsed.data.password,
+      parsed.data.role,
     );
   }
 

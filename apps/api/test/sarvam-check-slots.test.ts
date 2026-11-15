@@ -17,11 +17,11 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-01T06:00:00Z'));
 });
 afterEach(() => vi.useRealTimers());
-function slot(time: string, availableCount = 1, slotDate = date) {
+function slot(time: string, availableCount = 1, slotDate = date, endTime = time) {
   return {
     slot_id: `${slotDate}-${time}`,
     start_time: `${slotDate} ${time}:00`,
-    end_time: `${slotDate} ${time}:00`,
+    end_time: `${slotDate} ${endTime}:00`,
     available_count: availableCount,
   };
 }
@@ -85,6 +85,102 @@ function setup(rows = slots) {
 }
 
 describe('Sarvam check-slots time bounds', () => {
+  it('summarizes date-only availability as 24-hour windows with slot frequency', async () => {
+    const rows = [
+      slot('10:00', 1, date, '10:30'),
+      slot('10:30', 1, date, '11:00'),
+      slot('11:00', 1, date, '11:30'),
+      slot('11:30', 1, date, '12:00'),
+      slot('12:00', 1, date, '12:30'),
+      slot('12:30', 1, date, '13:00'),
+      slot('14:00', 1, date, '14:30'),
+      slot('14:30', 1, date, '15:00'),
+      slot('15:00', 1, date, '15:30'),
+      slot('15:30', 1, date, '16:00'),
+      slot('16:00', 1, date, '16:30'),
+      slot('16:30', 1, date, '17:00'),
+      slot('17:00', 1, date, '17:30'),
+      slot('17:30', 1, date, '18:00'),
+    ];
+
+    expect(await setup(rows).check()).toMatchObject({
+      success: true,
+      timePreference: null,
+      availabilityWindowsText: '10:00-13:00, 14:00-18:00',
+      slotFrequencyMinutes: 30,
+      slotFrequencyText: 'every 30 minutes',
+      // Keep the existing scalar slot field for older Sarvam variable mappings.
+      availableSlotsText: '10:00, 10:30, 11:00, 11:30',
+    });
+  });
+
+  it('splits availability windows at a real gap without changing the slot frequency', async () => {
+    expect(
+      await setup([
+        slot('10:00', 1, date, '10:30'),
+        slot('10:30', 1, date, '11:00'),
+        slot('11:30', 1, date, '12:00'),
+        slot('12:00', 1, date, '12:30'),
+      ]).check(),
+    ).toMatchObject({
+      availabilityWindowsText: '10:00-11:00, 11:30-12:30',
+      slotFrequencyMinutes: 30,
+      slotFrequencyText: 'every 30 minutes',
+      availableSlotsText: '10:00, 10:30, 11:30, 12:00',
+    });
+  });
+
+  it('returns an empty date summary when there is no available capacity', async () => {
+    expect(
+      await setup([
+        slot('10:00', 0, date, '10:30'),
+        slot('10:30', 1, '2026-11-03', '11:00'),
+      ]).check(),
+    ).toMatchObject({
+      success: true,
+      hasAvailability: false,
+      availabilityStatus: 'no_slots',
+      availabilityWindowsText: 'no slots',
+      slotFrequencyMinutes: null,
+      slotFrequencyText: '',
+      availableSlotsText: 'no slots',
+    });
+  });
+
+  it('returns nearby same-day slots when an exact requested time is unavailable', async () => {
+    expect(
+      await setup([
+        slot('10:00', 1, date, '10:30'),
+        slot('10:30', 1, date, '11:00'),
+        slot('11:00', 1, date, '11:30'),
+      ]).check({ time: '10:45' }),
+    ).toMatchObject({
+      success: true,
+      availabilityStatus: 'same_day_alternative',
+      requestedTime: '10:45',
+      requestedTimeAvailable: false,
+      nearbySlotsText: '10:00, 10:30, 11:00',
+      availableSlotsText: '10:00, 10:30, 11:00',
+    });
+  });
+
+  it('marks an exact requested time available without labelling it as a nearby alternative', async () => {
+    expect(
+      await setup([
+        slot('10:00', 1, date, '10:30'),
+        slot('10:30', 1, date, '11:00'),
+        slot('11:00', 1, date, '11:30'),
+      ]).check({ time: '10:30' }),
+    ).toMatchObject({
+      success: true,
+      availabilityStatus: 'matched',
+      requestedTime: '10:30',
+      requestedTimeAvailable: true,
+      nearbySlotsText: '',
+      availableSlotsText: '10:30',
+    });
+  });
+
   it.each(['12', '12:00', '12 PM', '12:00 pm'])(
     'returns the latest three slots strictly before noon (%s)',
     async (beforeTime) => {
@@ -213,7 +309,7 @@ describe('Sarvam check-slots time bounds', () => {
   it('returns only 24-hour times in text without a slots array', async () => {
     const { check } = setup([slot('23:30'), slot('12:00'), slot('00:00'), slot('09:00')]);
     const response = await check();
-    expect(response).toEqual({
+    expect(response).toMatchObject({
       success: true,
       availabilityStatus: 'matched',
       excludedDoctorIdsText: '',

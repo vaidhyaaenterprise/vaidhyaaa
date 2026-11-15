@@ -3,13 +3,48 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiRequestError, apiGet, apiPost, getApiBaseUrl } from '@/lib/api/client';
 import {
+  clearDevAuthProfile,
+  initializeTabSession,
+  writeAccessToken,
+  writeDevAuthProfile,
+} from '@/lib/dev-auth/storage';
+
+vi.mock('@/lib/dev-auth/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/dev-auth/storage')>()),
+  initializeTabSession: vi.fn().mockResolvedValue(undefined),
+}));
+import {
   AUTH_TOKEN_STORAGE_KEY,
   DEV_AUTH_STORAGE_KEY,
   DEV_AUTH_PRESETS,
 } from '@/lib/dev-auth/constants';
 
 describe('api client', () => {
+  it('rejects a response from a logged-out session even if the next login has an identical token', async () => {
+    writeAccessToken('same-token');
+    writeDevAuthProfile(DEV_AUTH_PRESETS.doctor.profile);
+    let finish!: (response: Response) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = apiGet('/v1/aba-session');
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    clearDevAuthProfile();
+    writeAccessToken('same-token');
+    writeDevAuthProfile(DEV_AUTH_PRESETS.doctor.profile);
+    finish(new Response(JSON.stringify(toApiSuccessBody({ private: 'old-session' }, 'req_old'))));
+    await rejected;
+  });
+
   afterEach(() => {
+    vi.mocked(initializeTabSession).mockReset().mockResolvedValue(undefined);
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -24,7 +59,7 @@ describe('api client', () => {
   });
 
   it('uses the API proxy and dev auth headers', async () => {
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       DEV_AUTH_STORAGE_KEY,
       JSON.stringify(DEV_AUTH_PRESETS.clinic_admin.profile),
     );
@@ -60,7 +95,7 @@ describe('api client', () => {
   });
 
   it('does not invent a seed clinic header when the saved profile has no clinic', async () => {
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       DEV_AUTH_STORAGE_KEY,
       JSON.stringify({
         userId: '00000000-0000-0000-0000-000000000101',
@@ -97,6 +132,112 @@ describe('api client', () => {
 
     const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     expect(calls[0]?.[1].headers).toMatchObject({ Authorization: 'Bearer access-token' });
+  });
+
+  it('waits for tab session ownership before reading credentials or sending a request', async () => {
+    let finishInitialization!: () => void;
+    vi.mocked(initializeTabSession).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishInitialization = resolve;
+        }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => toApiSuccessBody({ ok: true }, 'req_initialized'),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const request = apiGet('/v1/initialized');
+    expect(fetchMock).not.toHaveBeenCalled();
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'owned-tab-token');
+    finishInitialization();
+    await expect(request).resolves.toEqual({ ok: true });
+    expect(fetchMock.mock.calls[0]?.[1].headers.Authorization).toBe('Bearer owned-tab-token');
+  });
+
+  it('never uses a legacy shared profile when this tab has a different bearer login', async () => {
+    window.localStorage.setItem(
+      DEV_AUTH_STORAGE_KEY,
+      JSON.stringify(DEV_AUTH_PRESETS.clinic_admin.profile),
+    );
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'doctor-tab-token');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => toApiSuccessBody({ ok: true }, 'req_tab_only'),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await apiGet('/v1/tab-only');
+    const headers = fetchMock.mock.calls[0]?.[1].headers;
+    expect(headers.Authorization).toBe('Bearer doctor-tab-token');
+    expect(headers).not.toHaveProperty('x-dev-user-id');
+    expect(headers).not.toHaveProperty('x-dev-user-role');
+  });
+
+  it('discards a response body if logout or a new login occurs while it is being decoded', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'first-login');
+    let finishBody!: (body: unknown) => void;
+    let bodyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => {
+          bodyStarted();
+          return new Promise((resolve) => {
+            finishBody = resolve;
+          });
+        },
+      }),
+    );
+    const request = apiGet('/v1/old-account');
+    await started;
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'replacement-login');
+    finishBody(toApiSuccessBody({ private: 'first-account-data' }, 'req_old_account'));
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('does not resend old credentials after the session changes during a retry delay', async () => {
+    vi.useFakeTimers();
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'old-login');
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('temporary network failure'));
+    vi.stubGlobal('fetch', fetchMock);
+    const request = apiGet('/v1/retry-old-account');
+    const rejected = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(0);
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'new-login');
+    await vi.advanceTimersByTimeAsync(200);
+    await rejected;
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('ignores an old unauthorized response after a new login', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'old-account');
+    let finishResponse!: (response: Response) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishResponse = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const request = apiGet('/v1/late-auth-error');
+    await Promise.resolve();
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'new-account');
+    finishResponse({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        error: { code: 'UNAUTHORIZED', message: 'Expired', details: {}, request_id: 'req_expired' },
+      }),
+    } as Response);
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe('new-account');
   });
 
   it('retries a transient GET network failure once', async () => {
@@ -198,13 +339,14 @@ describe('api client', () => {
       clinicId: '00000000-0000-0000-0000-000000000001',
     };
 
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       DEV_AUTH_STORAGE_KEY,
       JSON.stringify({ ...sharedIdentity, role: 'clinic_admin' }),
     );
     const adminRequest = apiGet('/v1/role-scoped');
+    await Promise.resolve();
 
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       DEV_AUTH_STORAGE_KEY,
       JSON.stringify({
         ...sharedIdentity,
@@ -215,10 +357,8 @@ describe('api client', () => {
     const doctorRequest = apiGet('/v1/role-scoped');
     releaseResponses?.();
 
-    await expect(Promise.all([adminRequest, doctorRequest])).resolves.toEqual([
-      { ok: true },
-      { ok: true },
-    ]);
+    await expect(adminRequest).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(doctorRequest).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -238,6 +378,7 @@ describe('api client', () => {
     const controller = new AbortController();
 
     const request = apiGet('/v1/cancel-single', controller.signal);
+    await Promise.resolve();
     controller.abort();
 
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
@@ -265,6 +406,7 @@ describe('api client', () => {
 
     const first = apiGet('/v1/shared-cancel', firstController.signal);
     const second = apiGet<{ ok: boolean }>('/v1/shared-cancel');
+    await Promise.resolve();
     firstController.abort();
 
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
@@ -300,6 +442,7 @@ describe('api client', () => {
 
     const first = apiGet('/v1/all-cancel', firstController.signal);
     const second = apiGet('/v1/all-cancel', secondController.signal);
+    await Promise.resolve();
     firstController.abort();
 
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
