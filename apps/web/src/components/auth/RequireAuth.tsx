@@ -6,6 +6,7 @@ import { useEffect, type ReactNode } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { ErrorState, LoadingState } from '@/components/ui/StateViews';
 import { canAccessRoute } from '@/lib/navigation';
+import { getSignInPath } from '@/lib/auth-navigation';
 
 type RequireAuthProps = {
   pathname: string;
@@ -18,9 +19,9 @@ export function RequireAuth({ pathname, children }: RequireAuthProps) {
 
   useEffect(() => {
     if (status === 'unauthenticated') {
-      router.replace('/login');
+      router.replace(getSignInPath(pathname));
     }
-  }, [status, router]);
+  }, [status, pathname, router]);
 
   useEffect(() => {
     if (status === 'authenticated' && !canAccessRoute(pathname, effectiveRole)) {
@@ -39,7 +40,10 @@ export function RequireAuth({ pathname, children }: RequireAuthProps) {
 
   if (status === 'unauthenticated') {
     return (
-      <LoadingState title="Redirecting to sign in" description="Dev login is required in local mode." />
+      <LoadingState
+        title="Redirecting to sign in"
+        description="Sign in to continue to this page."
+      />
     );
   }
 

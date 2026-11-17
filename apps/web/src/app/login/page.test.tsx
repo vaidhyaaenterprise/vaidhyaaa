@@ -10,11 +10,17 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   refresh: vi.fn(),
   establishSession: vi.fn(),
+  status: 'unauthenticated',
+  effectiveRole: 'admin',
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => mocks }));
 vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({ status: 'unauthenticated', establishSession: mocks.establishSession }),
+  useAuth: () => ({
+    status: mocks.status,
+    effectiveRole: mocks.effectiveRole,
+    establishSession: mocks.establishSession,
+  }),
 }));
 vi.mock('@/components/auth/ForgotPasswordFlow', () => ({ ForgotPasswordFlow: () => null }));
 vi.mock('@/components/auth/RegisterClinicForm', () => ({ RegisterClinicForm: () => null }));
@@ -42,6 +48,9 @@ const user = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.status = 'unauthenticated';
+  mocks.effectiveRole = 'admin';
+  window.history.replaceState({}, '', '/login');
   vi.mocked(loginWithUsernamePassword).mockResolvedValue({
     access_token: 'test-token',
     user,
@@ -92,9 +101,43 @@ describe('role-specific sign-in', () => {
       expect(loginWithUsernamePassword).toHaveBeenCalledWith(user.email, 'test-password', role);
       expect(readDevAuthProfile()).toMatchObject({ role, userId: user.id });
       expect(readAccessToken()).toBe('test-token');
-      expect(mocks.replace).toHaveBeenCalledWith('/');
+      expect(mocks.replace).toHaveBeenCalledWith(role === 'doctor' ? '/doctor' : '/');
     },
   );
+
+  it('returns a doctor to the requested doctor Settings page after sign in', async () => {
+    window.history.replaceState({}, '', '/login?next=%2Fdoctor%2Fsettings');
+    render(<LoginPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Doctor' }));
+    enterCredentials();
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/doctor/settings'));
+  });
+
+  it('sends a clinic admin home instead of entering a requested doctor page', async () => {
+    window.history.replaceState({}, '', '/login?next=%2Fdoctor%2Fsettings');
+    render(<LoginPage />);
+    enterCredentials();
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/'));
+  });
+
+  it.each(['https://example.com', '//example.com', '/\\example.com'])(
+    'rejects the unsafe return destination %s',
+    async (next) => {
+      window.history.replaceState({}, '', `/login?${new URLSearchParams({ next })}`);
+      render(<LoginPage />);
+      fireEvent.click(screen.getByRole('button', { name: 'Doctor' }));
+      enterCredentials();
+      await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/doctor'));
+    },
+  );
+
+  it('restores a safe deep link for an already authenticated doctor', async () => {
+    mocks.status = 'authenticated';
+    mocks.effectiveRole = 'doctor';
+    window.history.replaceState({}, '', '/login?next=%2Fdoctor%2Fanalytics');
+    render(<LoginPage />);
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/doctor/analytics'));
+  });
 
   it('does not establish an admin session if doctor login returns only admin access', async () => {
     vi.mocked(loginWithUsernamePassword).mockResolvedValue({

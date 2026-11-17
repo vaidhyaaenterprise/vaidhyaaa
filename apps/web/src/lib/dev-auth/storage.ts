@@ -16,6 +16,10 @@ export function getAuthSessionVersion(): number {
 const DEV_AUTH_ROLES: readonly DevAuthRole[] = ['platform_admin', 'clinic_admin', 'doctor'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHARED_AUTH_SESSION_VERSION = 1;
+const SIGNED_OUT_SHARED_SESSION = JSON.stringify({
+  version: SHARED_AUTH_SESSION_VERSION,
+  signed_out: true,
+});
 
 type SharedAuthSession = {
   version: typeof SHARED_AUTH_SESSION_VERSION;
@@ -115,7 +119,11 @@ export function syncAuthSessionFromShared(options: { clearWhenMissing?: boolean 
   const shared = parseSharedAuthSession(raw);
   if (!shared) {
     try {
-      window.localStorage.removeItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+      // Retain a signed-out marker so a copied tab cannot republish an old
+      // session when it missed a storage event or predates shared login.
+      if (raw !== SIGNED_OUT_SHARED_SESSION) {
+        window.localStorage.setItem(SHARED_AUTH_SESSION_STORAGE_KEY, SIGNED_OUT_SHARED_SESSION);
+      }
     } catch {
       // noop
     }
@@ -165,20 +173,24 @@ export function readDevAuthProfile(): DevAuthProfile | null {
   try {
     const parsed = JSON.parse(raw);
     if (!isDevAuthProfile(parsed)) {
-      try {
-        window.sessionStorage.removeItem(DEV_AUTH_STORAGE_KEY);
-      } catch {
-        // noop
-      }
+      if (clearTabCredentials()) sessionVersion += 1;
       return null;
     }
     return parsed;
   } catch {
-    try {
-      window.sessionStorage.removeItem(DEV_AUTH_STORAGE_KEY);
-    } catch {
-      // noop
-    }
+    if (clearTabCredentials()) sessionVersion += 1;
+    return null;
+  }
+}
+
+/** A migration hint only; AuthProvider must validate it against /me first. */
+export function readLegacyAuthProfileHint(): DevAuthProfile | null {
+  if (!hasWindow()) return null;
+  try {
+    const raw = window.localStorage.getItem(DEV_AUTH_STORAGE_KEY);
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    return isDevAuthProfile(value) ? value : null;
+  } catch {
     return null;
   }
 }
@@ -197,17 +209,43 @@ export function writeDevAuthProfile(profile: DevAuthProfile): void {
   }
 }
 
-export function persistVerifiedAuthSession(token: string, profile: DevAuthProfile): void {
-  if (!hasWindow() || !token.trim() || !isDevAuthProfile(profile)) return;
+export function persistVerifiedAuthSession(
+  token: string,
+  profile: DevAuthProfile,
+  replaceExisting = false,
+): boolean {
+  if (!hasWindow() || !token.trim() || !isDevAuthProfile(profile)) return false;
   const shared: SharedAuthSession = {
     version: SHARED_AUTH_SESSION_VERSION,
     token: token.trim(),
     profile,
   };
   try {
+    const currentRaw = window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+    if (currentRaw && !replaceExisting) {
+      const current = parseSharedAuthSession(currentRaw);
+      if (
+        !current ||
+        current.token !== shared.token ||
+        JSON.stringify(current.profile) !== JSON.stringify(profile)
+      )
+        return false;
+    }
     window.localStorage.setItem(SHARED_AUTH_SESSION_STORAGE_KEY, JSON.stringify(shared));
   } catch {
     // The current tab can continue using sessionStorage if shared storage is unavailable.
+  }
+  try {
+    const profileJson = JSON.stringify(profile);
+    const changed =
+      window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY) !== shared.token ||
+      window.sessionStorage.getItem(DEV_AUTH_STORAGE_KEY) !== profileJson;
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, shared.token);
+    window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, profileJson);
+    if (changed) sessionVersion += 1;
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -219,7 +257,7 @@ export function writeAuthSession(token: string, profile: DevAuthProfile): void {
   try {
     window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, normalizedToken);
     window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, profileJson);
-    persistVerifiedAuthSession(normalizedToken, profile);
+    persistVerifiedAuthSession(normalizedToken, profile, true);
     sessionVersion += 1;
     window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
   } catch {
@@ -245,7 +283,7 @@ export function clearDevAuthProfile(): void {
     // noop
   }
   try {
-    window.localStorage.removeItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+    window.localStorage.setItem(SHARED_AUTH_SESSION_STORAGE_KEY, SIGNED_OUT_SHARED_SESSION);
     window.localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
   } catch {

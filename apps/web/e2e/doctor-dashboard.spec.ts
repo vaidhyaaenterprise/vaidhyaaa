@@ -300,7 +300,7 @@ async function signIn(page: Page) {
   await page.getByPlaceholder('Email Address').fill('doctor@example.test');
   await page.getByPlaceholder('Password', { exact: true }).fill('doctor-test-password');
   await page.getByPlaceholder('Password', { exact: true }).press('Enter');
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/doctor\/?$/);
 }
 
 function summary(page: Page): Locator {
@@ -389,6 +389,11 @@ test('clinic-local Today displays saved weekday hours, assigned services and rea
   await page.setViewportSize({ width: 1440, height: 1000 });
   const api = await mockDashboardApi(context);
   await signIn(page);
+  const doctorSidebar = page.getByRole('complementary');
+  await expect(
+    doctorSidebar.getByText('Service: General Consultation', { exact: true }),
+  ).toBeVisible();
+  await expect(doctorSidebar).not.toContainText(/Dermatology Consultation|Retired Service/);
   await expect(page.getByLabel('Appointment date', { exact: true })).toHaveValue(TODAY);
   expect(await page.evaluate(() => new Date().getDate())).toBe(16);
   await expect(page.getByRole('heading', { name: "Today's Queue", exact: true })).toBeVisible();

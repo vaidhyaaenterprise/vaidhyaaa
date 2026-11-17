@@ -127,18 +127,30 @@ describe('AuthProvider browser-wide account verification', () => {
     expect(readAccessToken()).toBe('admin-token');
     expect(readDevAuthProfile()).toEqual(ADMIN_PROFILE);
   });
-  it.each(['profile', 'token'] as const)(
-    'requires both credentials rather than %s alone',
-    async (only) => {
-      if (only === 'profile')
-        window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(ADMIN_PROFILE));
-      else window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'orphan-token');
-      renderSession();
-      await expectStatus('unauthenticated');
-      expect(apiGet).not.toHaveBeenCalled();
-      expect(screen.getByTestId('auth-user')).toHaveTextContent('no user');
-    },
-  );
+  it('never authenticates from a profile without a bearer credential', async () => {
+    window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(ADMIN_PROFILE));
+    renderSession();
+    await expectStatus('unauthenticated');
+    expect(apiGet).not.toHaveBeenCalled();
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('no user');
+  });
+  it('recovers a copied bearer credential only after the server validates the exact account', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'copied-doctor-token');
+    const pending = deferred<MeResponse>();
+    vi.mocked(apiGet).mockReturnValue(pending.promise);
+    renderSession();
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/v1/me', expect.any(AbortSignal)));
+    expect(screen.getByTestId('auth-status')).toHaveTextContent('loading');
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('no user');
+    await act(async () => {
+      pending.resolve(DOCTOR_SESSION);
+      await pending.promise;
+    });
+    await expectStatus('authenticated');
+    expect(screen.getByTestId('auth-role')).toHaveTextContent('doctor');
+    expect(readDevAuthProfile()).toEqual(DOCTOR_PROFILE);
+    expect(window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY)).toBeTruthy();
+  });
   it('verifies and restores a shared session in a manually opened tab', async () => {
     writeAuthSession('admin-token', ADMIN_PROFILE);
     window.sessionStorage.clear();
@@ -182,12 +194,100 @@ describe('AuthProvider browser-wide account verification', () => {
     expect(readAccessToken()).toBeNull();
     expect(readDevAuthProfile()).toBeNull();
   });
-  it('ignores a legacy shared profile even when an access token remains in this tab', async () => {
+  it('migrates a copied legacy tab from its verified token without trusting an outdated shared role', async () => {
     window.localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(ADMIN_PROFILE));
     window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'copied-token');
+    vi.mocked(apiGet).mockResolvedValue(DOCTOR_SESSION);
+    renderSession();
+    await expectStatus('authenticated');
+    expect(apiGet).toHaveBeenCalledWith('/v1/me', expect.any(AbortSignal));
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('Doctor');
+    expect(screen.getByTestId('auth-role')).toHaveTextContent('doctor');
+    expect(readDevAuthProfile()).toEqual(DOCTOR_PROFILE);
+  });
+  it('rejects an expired legacy credential instead of trusting its profile hint', async () => {
+    window.localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(ADMIN_PROFILE));
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'expired-token');
+    vi.mocked(apiGet).mockRejectedValue(
+      new ApiRequestError({ code: 'UNAUTHORIZED', message: 'Session expired' }),
+    );
+    renderSession();
+    await expectStatus('unauthenticated');
+    expect(readAccessToken()).toBeNull();
+    expect(readDevAuthProfile()).toBeNull();
+  });
+  it('does not choose the first membership when a copied token has ambiguous clinic access', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'legacy-multi-clinic-token');
+    vi.mocked(apiGet).mockResolvedValue({
+      ...DOCTOR_SESSION,
+      clinics: [
+        DOCTOR_SESSION.clinics[0]!,
+        { ...DOCTOR_SESSION.clinics[0]!, clinic_id: '00000000-0000-0000-0000-000000000099' },
+      ],
+    });
+    renderSession();
+    await expectStatus('unauthenticated');
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('no user');
+    expect(readAccessToken()).toBeNull();
+  });
+  it('uses the server-verified token scope to recover the right clinic from multiple memberships', async () => {
+    const anotherClinic = '00000000-0000-0000-0000-000000000099';
+    const token = `${btoa(JSON.stringify({ sub: DOCTOR_USER_ID, clinicId: CLINIC_ID, clinicRole: 'doctor' }))}.test-signature`;
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    vi.mocked(apiGet).mockResolvedValue({
+      ...DOCTOR_SESSION,
+      clinics: [
+        { ...DOCTOR_SESSION.clinics[0]!, clinic_id: anotherClinic },
+        DOCTOR_SESSION.clinics[0]!,
+      ],
+    });
+    renderSession();
+    await expectStatus('authenticated');
+    expect(readDevAuthProfile()).toEqual(DOCTOR_PROFILE);
+  });
+  it('keeps a missed shared logout signed out while a legacy /me request is pending', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'legacy-doctor-token');
+    const pending = deferred<MeResponse>();
+    vi.mocked(apiGet).mockReturnValue(pending.promise);
+    renderSession();
+    await waitFor(() => expect(apiGet).toHaveBeenCalledOnce());
+    // Another document logged out; no synthetic storage event is delivered.
+    window.localStorage.setItem(
+      SHARED_AUTH_SESSION_STORAGE_KEY,
+      JSON.stringify({ version: 1, signed_out: true }),
+    );
+    await act(async () => {
+      pending.resolve(DOCTOR_SESSION);
+      await pending.promise;
+    });
+    await expectStatus('unauthenticated');
+    expect(readAccessToken()).toBeNull();
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('no user');
+  });
+  it('does not migrate a malformed copied profile as a valid legacy session', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'copied-token');
+    window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, '{malformed');
     renderSession();
     await expectStatus('unauthenticated');
     expect(apiGet).not.toHaveBeenCalled();
+  });
+  it('reconciles an account change missed during a suspended legacy verification', async () => {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'legacy-doctor-token');
+    const pending = deferred<MeResponse>();
+    vi.mocked(apiGet).mockReturnValueOnce(pending.promise).mockResolvedValueOnce(ADMIN_SESSION);
+    renderSession();
+    await waitFor(() => expect(apiGet).toHaveBeenCalledOnce());
+    window.localStorage.setItem(
+      SHARED_AUTH_SESSION_STORAGE_KEY,
+      JSON.stringify({ version: 1, token: 'admin-token', profile: ADMIN_PROFILE }),
+    );
+    await act(async () => {
+      pending.resolve(DOCTOR_SESSION);
+      await pending.promise;
+    });
+    await expectStatus('authenticated');
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('Clinic Admin');
+    expect(readDevAuthProfile()).toEqual(ADMIN_PROFILE);
   });
   it('selects the exact doctor membership even when an admin membership appears first', async () => {
     seedSession(DOCTOR_PROFILE, 'doctor-token');

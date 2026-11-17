@@ -61,6 +61,24 @@ async function mockApi(context: BrowserContext) {
           },
         };
       else if (path.endsWith('/appointments')) data = { appointments: [] };
+      else if (path.endsWith('/doctors'))
+        data = {
+          doctors: [
+            {
+              id: DOCTOR_ID,
+              name: 'Doctor Tab Account',
+              qualification: 'MD',
+              active: true,
+              user_id: account('doctor').user.id,
+            },
+          ],
+        };
+      else if (path.endsWith('/schedules')) data = { schedules: [] };
+      else if (path.endsWith('/hours')) data = { hours: [] };
+      else if (path.endsWith('/holidays')) data = { holidays: [] };
+      else if (path.endsWith('/doctor-services')) data = { doctor_services: [] };
+      else if (path.endsWith('/services')) data = { services: [] };
+      else if (path.endsWith('/booking-rules')) data = { booking_rules: [] };
       else if (path.endsWith('/knowledge/entries')) data = { entries: [] };
       else if (path.endsWith('/knowledge/embedding-status')) data = { embedding_status: null };
       else if (path.endsWith('/settings'))
@@ -92,7 +110,7 @@ async function signIn(page: Page, role: 'doctor' | 'clinic_admin') {
   await page.getByPlaceholder('Email Address').fill('shared@example.test');
   await page.getByPlaceholder('Password', { exact: true }).fill('test-password');
   await page.getByPlaceholder('Password', { exact: true }).press('Enter');
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(role === 'doctor' ? /\/doctor\/?$/ : /\/$/);
   if (role === 'doctor')
     await expect(page.getByText('Doctor Portal', { exact: true })).toBeVisible();
   else await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible();
@@ -130,7 +148,7 @@ test('a manually opened clinic-admin deep link inherits the verified browser ses
   ).toBe(true);
   await deepLinkTab.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(deepLinkTab).toHaveURL(/\/login$/);
-  await expect(page).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login\?next=%2F$/);
   expect(await deepLinkTab.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY)).toBeNull();
   expect(await page.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY)).toBeNull();
 });

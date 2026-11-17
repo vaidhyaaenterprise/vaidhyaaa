@@ -10,10 +10,18 @@ import { LoadingState } from '@/components/ui/StateViews';
 import { writeAuthSession } from '@/lib/dev-auth/storage';
 import { loginWithUsernamePassword } from '@/lib/api/auth';
 import { ApiRequestError } from '@/lib/api/client';
+import { getPostLoginPath } from '@/lib/auth-navigation';
+import type { EffectiveRole } from '@/lib/navigation';
 
 type LoginRole = 'clinic_admin' | 'doctor';
 
 const ROLE_ORDER: LoginRole[] = ['clinic_admin', 'doctor'];
+
+function loginDestination(role: EffectiveRole): string {
+  const next =
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('next');
+  return getPostLoginPath(next, role);
+}
 
 const ROLE_LABELS: Record<LoginRole, string> = {
   clinic_admin: 'Clinic Admin',
@@ -536,7 +544,7 @@ const BENEFITS: Array<{ icon: (p: IconProps) => ReactNode; title: string; body: 
 /* ------------------------------------------------------------------ */
 export default function LoginPage() {
   const router = useRouter();
-  const { status, establishSession } = useAuth();
+  const { status, effectiveRole, establishSession } = useAuth();
   const [mode, setMode] = useState<'signin' | 'register' | 'forgot'>('signin');
   const [selectedRole, setSelectedRole] = useState<LoginRole>('clinic_admin');
   const [showPassword, setShowPassword] = useState(false);
@@ -553,9 +561,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (status === 'authenticated') {
-      router.replace('/');
+      router.replace(loginDestination(effectiveRole));
     }
-  }, [status, router]);
+  }, [status, effectiveRole, router]);
 
   async function completeLogin(identifier: string, password: string) {
     const result = await loginWithUsernamePassword(identifier, password, selectedRole);
@@ -579,7 +587,7 @@ export default function LoginPage() {
       user: result.user,
       clinics: result.clinics.filter((row) => row.active && row.role === selectedRole),
     });
-    router.replace('/');
+    router.replace(loginDestination(selectedRole === 'doctor' ? 'doctor' : 'admin'));
     router.refresh();
   }
 

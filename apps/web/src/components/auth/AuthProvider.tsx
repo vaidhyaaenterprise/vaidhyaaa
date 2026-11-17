@@ -12,18 +12,17 @@ import {
 } from 'react';
 import { ApiRequestError, apiGet, isAbortError } from '@/lib/api/client';
 import type { MeResponse } from '@/lib/api/types';
-import {
-  SHARED_AUTH_SESSION_STORAGE_KEY,
-  type DevAuthProfile,
-} from '@/lib/dev-auth/constants';
+import { SHARED_AUTH_SESSION_STORAGE_KEY, type DevAuthProfile } from '@/lib/dev-auth/constants';
 import {
   AUTH_SESSION_CHANGED_EVENT,
   clearDevAuthProfile,
   getAuthSessionVersion,
   initializeTabSession,
+  isDevAuthProfile,
   persistVerifiedAuthSession,
   readAccessToken,
   readDevAuthProfile,
+  readLegacyAuthProfileHint,
   syncAuthSessionFromShared,
 } from '@/lib/dev-auth/storage';
 import { resolveEffectiveRole, type EffectiveRole } from '@/lib/navigation';
@@ -57,7 +56,63 @@ function matchesAccount(session: MeResponse, profile: DevAuthProfile): boolean {
   return !session.user.platform_role && Boolean(selectedMembership(session, profile));
 }
 function sessionIdentity(): string {
-  return JSON.stringify([getAuthSessionVersion(), readAccessToken(), readDevAuthProfile()]);
+  const token = readAccessToken();
+  const profile = readDevAuthProfile();
+  return JSON.stringify([getAuthSessionVersion(), token, profile]);
+}
+
+/** Recover only after /me has authenticated the surviving bearer credential. */
+function profileForVerifiedToken(
+  session: MeResponse,
+  token: string,
+  legacyHint: DevAuthProfile | null,
+): DevAuthProfile | null {
+  if (session.user.platform_role === 'platform_admin') {
+    const profile: DevAuthProfile = { userId: session.user.id, role: 'platform_admin' };
+    return isDevAuthProfile(profile) ? profile : null;
+  }
+  if (session.user.platform_role) return null;
+  let profiles: DevAuthProfile[] = session.clinics
+    .filter(
+      (membership) =>
+        membership.active && (membership.role !== 'doctor' || Boolean(membership.doctor_id)),
+    )
+    .map((membership) => ({
+      userId: session.user.id,
+      role: membership.role,
+      clinicId: membership.clinic_id,
+      ...(membership.doctor_id ? { doctorId: membership.doctor_id } : {}),
+    }))
+    .filter(isDevAuthProfile);
+  // The API signs scope into its token. Decode only after server verification,
+  // and intersect that scope with actual returned memberships, never local hints.
+  try {
+    const encoded = token.split('.')[0]!.replace(/-/g, '+').replace(/_/g, '/');
+    const scope = JSON.parse(atob(encoded)) as {
+      sub?: unknown;
+      clinicId?: unknown;
+      clinicRole?: unknown;
+    };
+    if (scope.clinicId !== undefined || scope.clinicRole !== undefined) {
+      if (scope.sub !== session.user.id) return null;
+      profiles = profiles.filter(
+        (profile) => profile.clinicId === scope.clinicId && profile.role === scope.clinicRole,
+      );
+      return profiles.length === 1 ? profiles[0]! : null;
+    }
+  } catch {
+    // Older/opaque credentials may still be recovered from an unambiguous /me.
+  }
+  const hinted =
+    legacyHint &&
+    profiles.find(
+      (profile) =>
+        profile.userId === legacyHint.userId &&
+        profile.role === legacyHint.role &&
+        profile.clinicId === legacyHint.clinicId &&
+        profile.doctorId === legacyHint.doctorId,
+    );
+  return hinted || (profiles.length === 1 ? profiles[0]! : null);
 }
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
@@ -86,31 +141,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!mountedRef.current || sequence !== sequenceRef.current) return;
     const savedProfile = readDevAuthProfile();
     const token = readAccessToken();
+    const legacyHint = savedProfile ? null : readLegacyAuthProfileHint();
     const identity = sessionIdentity();
     identityRef.current = identity;
-    if (!savedProfile || !token) {
+    if (!token) {
       setStatus('unauthenticated');
       return;
     }
     const controller = new AbortController();
     requestRef.current = controller;
-    const isCurrent = () =>
-      mountedRef.current &&
-      !controller.signal.aborted &&
-      sequenceRef.current === sequence &&
-      sessionIdentity() === identity;
+    const isCurrent = () => {
+      if (!mountedRef.current || controller.signal.aborted || sequenceRef.current !== sequence)
+        return false;
+      if (sessionIdentity() !== identity) {
+        // A suspended tab can miss the event that changed the shared session.
+        // Reconcile that change instead of remaining in loading indefinitely.
+        window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
+        return false;
+      }
+      return true;
+    };
     try {
       const response = await apiGet<MeResponse>('/v1/me', controller.signal);
       if (!isCurrent()) return;
-      if (!matchesAccount(response, savedProfile)) {
+      const verifiedProfile = savedProfile
+        ? matchesAccount(response, savedProfile)
+          ? savedProfile
+          : null
+        : profileForVerifiedToken(response, token, legacyHint);
+      if (!verifiedProfile) {
         clearDevAuthProfile();
         return;
       }
       // Migrate a valid session created before shared-tab support without
       // trusting it until the server has confirmed the exact account/role.
-      persistVerifiedAuthSession(token, savedProfile);
+      if (!persistVerifiedAuthSession(token, verifiedProfile)) {
+        window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
+        return;
+      }
+      identityRef.current = sessionIdentity();
       setMe(response);
-      setProfile(savedProfile);
+      setProfile(verifiedProfile);
       setStatus(response.user.active ? 'authenticated' : 'inactive');
     } catch (err) {
       if (!isCurrent() || isAbortError(err)) return;

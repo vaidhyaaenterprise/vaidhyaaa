@@ -8,6 +8,7 @@ import {
 import {
   clearDevAuthProfile,
   getAuthSessionVersion,
+  persistVerifiedAuthSession,
   readAccessToken,
   readDevAuthProfile,
   writeAuthSession,
@@ -53,7 +54,31 @@ describe('shared browser login storage', () => {
 
     expect(readDevAuthProfile()).toBeNull();
     expect(readAccessToken()).toBeNull();
-    expect(window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY)).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY)!)).toEqual({
+      version: 1,
+      signed_out: true,
+    });
+  });
+  it('keeps copied credentials signed out even when that tab missed the logout event', () => {
+    writeAuthSession('doctor-token', DEV_AUTH_PRESETS.doctor.profile);
+    const copiedToken = window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY)!;
+    const copiedProfile = window.sessionStorage.getItem(DEV_AUTH_STORAGE_KEY)!;
+    clearDevAuthProfile();
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, copiedToken);
+    window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, copiedProfile);
+    expect(readAccessToken()).toBeNull();
+    expect(readDevAuthProfile()).toBeNull();
+    expect(persistVerifiedAuthSession(copiedToken, DEV_AUTH_PRESETS.doctor.profile)).toBe(false);
+  });
+  it('allows an explicit fresh login after logout, but rejects a late old verification', () => {
+    writeAuthSession('old-doctor-token', DEV_AUTH_PRESETS.doctor.profile);
+    clearDevAuthProfile();
+    writeAuthSession('new-admin-token', DEV_AUTH_PRESETS.clinic_admin.profile);
+    expect(persistVerifiedAuthSession('old-doctor-token', DEV_AUTH_PRESETS.doctor.profile)).toBe(
+      false,
+    );
+    expect(readAccessToken()).toBe('new-admin-token');
+    expect(readDevAuthProfile()).toEqual(DEV_AUTH_PRESETS.clinic_admin.profile);
   });
   it('changes the session version even when a user signs back in with an identical token', () => {
     writeAuthSession('same-token', DEV_AUTH_PRESETS.doctor.profile);

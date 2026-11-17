@@ -235,7 +235,7 @@ async function signIn(page: Page) {
   await page.getByPlaceholder('Email Address').fill('doctor@example.test');
   await page.getByPlaceholder('Password', { exact: true }).fill('doctor-test-password');
   await page.getByPlaceholder('Password', { exact: true }).press('Enter');
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/doctor\/?$/);
 }
 
 function card(page: Page, title: string): Locator {
@@ -248,7 +248,7 @@ async function openSettings(page: Page, mobile = false) {
       name: mobile ? 'Doctor mobile navigation' : 'Doctor navigation',
       exact: true,
     })
-    .getByRole('button', { name: 'Settings', exact: true })
+    .getByRole('link', { name: 'Settings', exact: true })
     .click();
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
   await expect(card(page, 'Booking rules').getByText('15 minutes', { exact: true })).toBeVisible();
@@ -316,7 +316,7 @@ test('personal holiday saves for the authenticated doctor and reloads while clin
   ]);
   await page
     .getByRole('navigation', { name: 'Doctor navigation', exact: true })
-    .getByRole('button', { name: /^Today/ })
+    .getByRole('link', { name: /^Today/ })
     .click();
   await openSettings(page);
   await expect(holidays.getByText('Personal leave', { exact: true })).toBeVisible();
