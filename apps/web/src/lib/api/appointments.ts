@@ -4,6 +4,8 @@ export type AppointmentApiRow = {
   id: string;
   patient_name: string;
   patient_phone: string | null;
+  patient_age?: number | null;
+  patient_gender?: string | null;
   doctor_id: string;
   doctor_name: string;
   clinic_service_id: string;
@@ -70,8 +72,12 @@ export async function fetchAppointments(
   clinicId: string,
   status?: readonly string[],
   signal?: AbortSignal,
+  date?: string,
 ) {
-  const query = status?.length ? `?status=${status.join(',')}` : '';
+  const params: string[] = [];
+  if (status?.length) params.push(`status=${status.join(',')}`);
+  if (date) params.push(`date=${encodeURIComponent(date)}`);
+  const query = params.length ? `?${params.join('&')}` : '';
   const data = await apiGet<{ appointments: AppointmentApiRow[] }>(
     `/v1/clinics/${clinicId}/appointments${query}`,
     signal,

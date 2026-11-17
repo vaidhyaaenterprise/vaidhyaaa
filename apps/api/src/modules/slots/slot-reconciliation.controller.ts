@@ -1,9 +1,11 @@
-import { Controller, Get, Headers, Inject, Param, Post, Query } from '@nestjs/common';
+import { Controller, Get, Headers, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
-import { AppError, uuidSchema } from '@vaidya/shared';
+import { FastifyRequest } from 'fastify';
+import { AppError, uuidSchema, type AuthContext } from '@vaidya/shared';
 import { ClinicScoped } from '../../common/decorators/clinic-scoped.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { AUTH_CONTEXT_KEY, getAuthContext } from '../../common/guards/auth.guard';
 import { SlotReconciliationService } from './slot-reconciliation.service';
 
 @Controller()
@@ -25,16 +27,28 @@ export class SlotReconciliationController {
   @Roles('clinic_admin', 'doctor')
   status(
     @Param('clinicId') clinicId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
     @Query('doctor_id') doctorId?: string,
     @Query('clinic_service_id') serviceId?: string,
   ) {
+    const auth = getAuthContext(request);
+    let scopedDoctorId = doctorId;
+    if (auth.clinicRole === 'doctor') {
+      if (auth.clinicId !== clinicId || !auth.doctorId) {
+        throw new AppError('FORBIDDEN', 'A doctor profile for this clinic is required.');
+      }
+      if (doctorId !== undefined && doctorId !== auth.doctorId) {
+        throw new AppError('FORBIDDEN', 'Doctors may only view their own slot update status.');
+      }
+      scopedDoctorId = auth.doctorId;
+    }
     if (
-      (doctorId && !uuidSchema.safeParse(doctorId).success) ||
+      (scopedDoctorId && !uuidSchema.safeParse(scopedDoctorId).success) ||
       (serviceId && !uuidSchema.safeParse(serviceId).success)
     ) {
       throw new AppError('VALIDATION_ERROR', 'Select a valid doctor and service.');
     }
-    return this.jobs.status(clinicId, doctorId, serviceId);
+    return this.jobs.status(clinicId, scopedDoctorId, serviceId);
   }
 
   @Post('clinics/:clinicId/slot-reconciliation/retry')

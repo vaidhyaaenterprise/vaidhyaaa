@@ -49,8 +49,12 @@ export class AppointmentsController {
     @Param('clinicId') clinicId: string,
     @Query('status') status: string | undefined,
     @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+    @Query('date') date?: string,
   ) {
     const auth = getAuthContext(request);
+    if (auth.clinicRole === 'doctor' && (!auth.doctorId || auth.clinicId !== clinicId)) {
+      throw new AppError('FORBIDDEN', 'A doctor profile for this clinic is required.');
+    }
     const statuses = status
       ?.split(',')
       .map((value) => value.trim())
@@ -59,6 +63,7 @@ export class AppointmentsController {
       clinicId,
       ...(auth.clinicRole === 'doctor' && auth.doctorId ? { doctorId: auth.doctorId } : {}),
       ...(statuses?.length ? { status: statuses } : {}),
+      ...(date !== undefined ? { date } : {}),
     });
     return { appointments };
   }

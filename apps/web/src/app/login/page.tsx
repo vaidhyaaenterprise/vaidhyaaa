@@ -7,7 +7,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { ForgotPasswordFlow } from '@/components/auth/ForgotPasswordFlow';
 import { RegisterClinicForm } from '@/components/auth/RegisterClinicForm';
 import { LoadingState } from '@/components/ui/StateViews';
-import { writeAccessToken, writeDevAuthProfile } from '@/lib/dev-auth/storage';
+import { writeAuthSession } from '@/lib/dev-auth/storage';
 import { loginWithUsernamePassword } from '@/lib/api/auth';
 import { ApiRequestError } from '@/lib/api/client';
 
@@ -566,8 +566,7 @@ export default function LoginPage() {
         message: `This login has no active ${ROLE_LABELS[selectedRole].toLowerCase()} access.`,
       });
     }
-    writeAccessToken(result.access_token);
-    writeDevAuthProfile({
+    writeAuthSession(result.access_token, {
       userId: result.user.id,
       role: membership.role,
       clinicId: membership.clinic_id,

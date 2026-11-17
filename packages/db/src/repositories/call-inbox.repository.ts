@@ -47,8 +47,10 @@ export class CallInboxRepository {
   listCalls(clinicId: string, range: InboxDateRange = {}) {
     const filters = [eq(calls.clinicId, clinicId)];
     const occurredAt = sql`coalesce(${calls.startedAt}, ${calls.createdAt})`;
-    if (range.from) filters.push(gte(occurredAt, range.from));
-    if (range.to) filters.push(lte(occurredAt, range.to));
+    // Computed SQL has no column encoder. Bind dates with the timestamp encoder
+    // so Postgres.js receives ISO strings instead of raw Date objects.
+    if (range.from) filters.push(gte(occurredAt, sql.param(range.from, calls.createdAt)));
+    if (range.to) filters.push(lte(occurredAt, sql.param(range.to, calls.createdAt)));
 
     return this.db
       .select({
@@ -99,7 +101,10 @@ export class CallInboxRepository {
       .from(calls)
       .where(
         and(
-          lt(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`, cutoff),
+          lt(
+            sql`coalesce(${calls.startedAt}, ${calls.createdAt})`,
+            sql.param(cutoff, calls.createdAt),
+          ),
           ...(clinicId ? [eq(calls.clinicId, clinicId)] : []),
         ),
       )
@@ -113,7 +118,10 @@ export class CallInboxRepository {
       const callFilter = and(
         eq(calls.clinicId, clinicId),
         eq(calls.id, callId),
-        lt(sql`coalesce(${calls.startedAt}, ${calls.createdAt})`, cutoff),
+        lt(
+          sql`coalesce(${calls.startedAt}, ${calls.createdAt})`,
+          sql.param(cutoff, calls.createdAt),
+        ),
       );
       const [expired] = await tx
         .select({ id: calls.id })

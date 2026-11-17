@@ -40,6 +40,30 @@ const createClinicServiceSchema = z.object({
   active: z.boolean().optional(),
 });
 
+type ClinicalRequest = FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext };
+
+function doctorScope(request: ClinicalRequest, clinicId: string): string | undefined {
+  const auth = getAuthContext(request);
+  if (auth.clinicRole !== 'doctor') return undefined;
+  if (auth.clinicId !== clinicId || !auth.doctorId) {
+    throw new AppError('FORBIDDEN', 'A doctor profile for this clinic is required.');
+  }
+  return auth.doctorId;
+}
+
+function doctorSettingsWriteScope(request: ClinicalRequest, clinicId: string): string | undefined {
+  const auth = getAuthContext(request);
+  // Support can inspect clinic data, but this is not permission to change it.
+  if (
+    auth.platformRole !== 'platform_admin' &&
+    auth.clinicRole !== 'clinic_admin' &&
+    auth.clinicRole !== 'doctor'
+  ) {
+    throw new AppError('FORBIDDEN', 'Clinic administrator or doctor access is required.');
+  }
+  return doctorScope(request, clinicId);
+}
+
 @Controller('clinics/:clinicId')
 @ClinicScoped()
 export class ClinicClinicalController {
@@ -151,32 +175,42 @@ export class ClinicClinicalController {
 
   @Get('booking-rules')
   @Roles('clinic_admin', 'doctor')
-  async listBookingRules(@Param('clinicId') clinicId: string) {
-    const booking_rules = await this.clinicalService.listBookingRules(clinicId);
+  async listBookingRules(@Param('clinicId') clinicId: string, @Req() request: ClinicalRequest) {
+    const booking_rules = await this.clinicalService.listBookingRules(
+      clinicId,
+      doctorScope(request, clinicId),
+    );
     return { booking_rules };
   }
 
   @Patch('booking-rules/:ruleId')
-  @ClinicAdmin()
+  @Roles('platform_admin', 'clinic_admin', 'doctor')
   async patchBookingRule(
     @Param('clinicId') clinicId: string,
     @Param('ruleId') ruleId: string,
     @Body() body: unknown,
+    @Req() request: ClinicalRequest,
   ) {
     const parsed = updateBookingRuleSchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
     }
-    const booking_rule = await this.clinicalService.patchBookingRule(clinicId, ruleId, parsed.data);
+    const booking_rule = await this.clinicalService.patchBookingRule(
+      clinicId,
+      ruleId,
+      parsed.data,
+      doctorSettingsWriteScope(request, clinicId),
+    );
     return { booking_rule };
   }
 
   @Post('booking-rules/:ruleId/preview')
-  @ClinicAdmin()
+  @Roles('platform_admin', 'clinic_admin', 'doctor')
   async previewBookingRuleChange(
     @Param('clinicId') clinicId: string,
     @Param('ruleId') ruleId: string,
     @Body() body: unknown,
+    @Req() request: ClinicalRequest,
   ) {
     const parsed = updateBookingRuleSchema.safeParse(body);
     if (!parsed.success) {
@@ -193,6 +227,7 @@ export class ClinicClinicalController {
       clinicId,
       ruleId,
       previewPatch,
+      doctorSettingsWriteScope(request, clinicId),
     );
     return { preview };
   }
@@ -228,13 +263,16 @@ export class ClinicClinicalController {
 
   @Get('holidays')
   @Roles('clinic_admin', 'doctor')
-  async listHolidays(@Param('clinicId') clinicId: string) {
-    const holidays = await this.clinicalService.listHolidays(clinicId);
+  async listHolidays(@Param('clinicId') clinicId: string, @Req() request: ClinicalRequest) {
+    const holidays = await this.clinicalService.listHolidays(
+      clinicId,
+      doctorScope(request, clinicId),
+    );
     return { holidays };
   }
 
   @Post('holidays')
-  @ClinicAdmin()
+  @Roles('platform_admin', 'clinic_admin', 'doctor')
   async createHoliday(
     @Param('clinicId') clinicId: string,
     @Body() body: unknown,
@@ -245,13 +283,22 @@ export class ClinicClinicalController {
       throw new AppError('VALIDATION_ERROR', 'Invalid holiday payload.');
     }
     const auth = getAuthContext(request);
-    const holiday = await this.clinicalService.createHoliday(clinicId, parsed.data, auth.userId);
+    const holiday = await this.clinicalService.createHoliday(
+      clinicId,
+      parsed.data,
+      auth.userId,
+      doctorSettingsWriteScope(request, clinicId),
+    );
     return { holiday };
   }
 
   @Post('holidays/preview')
-  @ClinicAdmin()
-  async previewHoliday(@Param('clinicId') clinicId: string, @Body() body: unknown) {
+  @Roles('platform_admin', 'clinic_admin', 'doctor')
+  async previewHoliday(
+    @Param('clinicId') clinicId: string,
+    @Body() body: unknown,
+    @Req() request: ClinicalRequest,
+  ) {
     const parsed = createClinicHolidaySchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError('VALIDATION_ERROR', 'Invalid holiday preview payload.');
@@ -260,22 +307,29 @@ export class ClinicClinicalController {
       clinicId,
       parsed.data.holiday_date,
       parsed.data.doctor_ids,
+      doctorSettingsWriteScope(request, clinicId),
     );
     return { preview };
   }
 
   @Patch('holidays/:holidayId')
-  @ClinicAdmin()
+  @Roles('platform_admin', 'clinic_admin', 'doctor')
   async patchHoliday(
     @Param('clinicId') clinicId: string,
     @Param('holidayId') holidayId: string,
     @Body() body: unknown,
+    @Req() request: ClinicalRequest,
   ) {
     const parsed = patchClinicHolidaySchema.safeParse(body);
     if (!parsed.success) {
       throw new AppError('VALIDATION_ERROR', 'Invalid holiday update payload.');
     }
-    const holiday = await this.clinicalService.patchHoliday(clinicId, holidayId, parsed.data);
+    const holiday = await this.clinicalService.patchHoliday(
+      clinicId,
+      holidayId,
+      parsed.data,
+      doctorSettingsWriteScope(request, clinicId),
+    );
     return { holiday };
   }
 
@@ -286,8 +340,8 @@ export class ClinicClinicalController {
     @Param('doctorId') doctorId: string,
     @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
-    const auth = getAuthContext(request);
-    if (auth.clinicRole === 'doctor' && auth.doctorId && auth.doctorId !== doctorId) {
+    const scopedDoctorId = doctorScope(request, clinicId);
+    if (scopedDoctorId && scopedDoctorId !== doctorId) {
       throw new AppError('FORBIDDEN', 'Doctors may only view their own schedule.');
     }
     const schedules = await this.clinicalService.listDoctorSchedules(clinicId, doctorId);
@@ -346,8 +400,8 @@ export class ClinicClinicalController {
     @Body() body: unknown,
     @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
   ) {
-    const auth = getAuthContext(request);
-    if (auth.clinicRole === 'doctor' && auth.doctorId && auth.doctorId !== doctorId) {
+    const scopedDoctorId = doctorScope(request, clinicId);
+    if (scopedDoctorId && scopedDoctorId !== doctorId) {
       throw new AppError('FORBIDDEN', 'Doctors may only edit their own schedule.');
     }
     const parsed = replaceDoctorSchedulesSchema.safeParse(body);

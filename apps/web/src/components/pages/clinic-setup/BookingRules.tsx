@@ -192,14 +192,16 @@ export function BookingRules() {
         .filter((doctor) => (rulesByDoctor.get(doctor.id)?.length ?? 0) > 0),
     [doctorRows, isAdmin, myDoctorId, rulesByDoctor],
   );
-  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(
+    JSON.stringify([clinicId, isAdmin, myDoctorId]),
+  );
 
   const loadRules = useCallback(async () => {
     const request = beginLoad();
     if (!request) {
       return;
     }
-    if (!clinicId) {
+    if (!clinicId || (!isAdmin && !myDoctorId)) {
       if (request.isCurrent()) {
         setRuleRows([]);
         setDoctorRows([]);
@@ -225,9 +227,9 @@ export function BookingRules() {
         return;
       }
 
-      setRuleRows(bookingRules);
+      setRuleRows(bookingRules.filter((row) => isAdmin || row.doctor_id === myDoctorId));
       setAllowDoctorServiceEdit(settings?.allow_doctor_service_edit ?? false);
-      setDoctorRows(doctors);
+      setDoctorRows(doctors.filter((row) => isAdmin || row.id === myDoctorId));
     } catch (err) {
       if (!request.isCurrent() || isAbortError(err)) {
         return;
@@ -240,7 +242,7 @@ export function BookingRules() {
         setLoading(false);
       }
     }
-  }, [beginLoad, clinicId, isAdmin]);
+  }, [beginLoad, clinicId, isAdmin, myDoctorId]);
 
   useEffect(() => {
     setIsEditing(false);
@@ -359,7 +361,7 @@ export function BookingRules() {
       );
     }
 
-    if (tempRules.allowDoctorServiceEdit !== rules.allowDoctorServiceEdit) {
+    if (isAdmin && tempRules.allowDoctorServiceEdit !== rules.allowDoctorServiceEdit) {
       if (!isActive()) {
         return;
       }
@@ -540,7 +542,7 @@ export function BookingRules() {
       <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Booking rules</h3>
-          {isAdmin && !isEditing && (
+          {!isEditing && (isAdmin || selectedDoctorId === myDoctorId) && (
             <button
               onClick={handleEdit}
               className="rounded-xl border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
@@ -676,24 +678,26 @@ export function BookingRules() {
                   className="w-full rounded-xl border-1.5 border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/12"
                 />
               </div>
-              <div className="flex items-center gap-3 pt-6">
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={tempRules.allowDoctorServiceEdit}
-                    onChange={(event) =>
-                      setTempRules({
-                        ...tempRules,
-                        allowDoctorServiceEdit: event.target.checked,
-                      })
-                    }
-                    className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
-                  />
-                  <span className="text-sm font-semibold text-slate-900">
-                    Allow doctor service edit
-                  </span>
-                </label>
-              </div>
+              {isAdmin && (
+                <div className="flex items-center gap-3 pt-6">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={tempRules.allowDoctorServiceEdit}
+                      onChange={(event) =>
+                        setTempRules({
+                          ...tempRules,
+                          allowDoctorServiceEdit: event.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-600"
+                    />
+                    <span className="text-sm font-semibold text-slate-900">
+                      Allow doctor service edit
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">

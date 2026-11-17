@@ -79,10 +79,17 @@ function sameHoliday(left: Holiday, right: Holiday): boolean {
 }
 
 export function HolidaySetup() {
-  const { effectiveRole } = useAuth();
+  const { effectiveRole, me } = useAuth();
   const clinicId = useActiveClinicId();
   const { profile, status: profileStatus, refresh: refreshProfile } = useClinicProfile();
   const isAdmin = effectiveRole === 'admin';
+  const authenticatedDoctorId = useMemo(
+    () =>
+      me?.clinics.find(
+        (clinic) => clinic.clinic_id === clinicId && clinic.role === 'doctor' && clinic.active,
+      )?.doctor_id ?? null,
+    [clinicId, me],
+  );
   const [now, setNow] = useState(() => new Date());
   const clinicDate = useMemo(() => {
     if (profileStatus !== 'ready' || !profile?.timezone) return null;
@@ -103,10 +110,20 @@ export function HolidaySetup() {
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(JSON.stringify([clinicId, isAdmin]));
+  const { beginLoad, cancelLoad, isActive } = useAbortableLoad(
+    JSON.stringify([clinicId, isAdmin, authenticatedDoctorId]),
+  );
   const visibleHolidays = clinicDate
     ? holidays.filter((holiday) => holiday.active && holiday.date >= clinicDate)
     : [];
+  const canManageHoliday = (holiday: Holiday) =>
+    isAdmin ||
+    (Boolean(authenticatedDoctorId) &&
+      !holiday.appliesToClinic &&
+      holiday.doctorIds.length === 1 &&
+      holiday.doctorIds[0] === authenticatedDoctorId);
+  const editableHolidays = visibleHolidays.filter(canManageHoliday);
+  const managedHolidays = visibleHolidays.filter((holiday) => !canManageHoliday(holiday));
 
   useEffect(() => {
     const refreshDate = () => setNow(new Date());
@@ -131,7 +148,7 @@ export function HolidaySetup() {
     if (!request) {
       return;
     }
-    if (!isAdmin || !clinicId) {
+    if (!clinicId || (!isAdmin && !authenticatedDoctorId)) {
       if (request.isCurrent()) {
         setDoctors([]);
         setHolidays([]);
@@ -154,11 +171,18 @@ export function HolidaySetup() {
 
       const mappedDoctors = doctorRows
         .filter((doctor) => doctor.active)
+        .filter((doctor) => isAdmin || doctor.id === authenticatedDoctorId)
         .map((doctor) => ({ id: doctor.id, name: doctor.name }));
 
       const mappedHolidays = holidayRows
         .map(mapHolidayRow)
         .filter((holiday) => holiday.active)
+        .filter(
+          (holiday) =>
+            isAdmin ||
+            holiday.appliesToClinic ||
+            (authenticatedDoctorId && holiday.doctorIds.includes(authenticatedDoctorId)),
+        )
         .sort((left, right) => left.date.localeCompare(right.date));
 
       setDoctors(mappedDoctors);
@@ -174,7 +198,7 @@ export function HolidaySetup() {
         setLoading(false);
       }
     }
-  }, [beginLoad, clinicId, isAdmin]);
+  }, [beginLoad, clinicId, isAdmin, authenticatedDoctorId]);
 
   useEffect(() => {
     setIsEditing(false);
@@ -188,8 +212,8 @@ export function HolidaySetup() {
 
   const handleEdit = () => {
     setNotice(null);
-    setTempHolidays(visibleHolidays);
-    setEditingHolidayIds(visibleHolidays.map((holiday) => holiday.id));
+    setTempHolidays(editableHolidays);
+    setEditingHolidayIds(editableHolidays.map((holiday) => holiday.id));
     setConflicts([]);
     setError(null);
     setIsEditing(true);
@@ -201,6 +225,9 @@ export function HolidaySetup() {
   };
 
   const validateHoliday = (holiday: Holiday): string | null => {
+    if (!canManageHoliday(holiday)) {
+      return 'You can only manage your own individual holidays.';
+    }
     if (!holiday.date) {
       return 'Choose a holiday date for each row before saving.';
     }
@@ -211,7 +238,7 @@ export function HolidaySetup() {
   };
 
   const handleSave = async () => {
-    if (!clinicId || !isActive()) {
+    if (!clinicId || (!isAdmin && !authenticatedDoctorId) || !isActive()) {
       return;
     }
 
@@ -309,8 +336,8 @@ export function HolidaySetup() {
       date: '',
       reason: '',
       active: true,
-      appliesToClinic: true,
-      doctorIds: [],
+      appliesToClinic: isAdmin,
+      doctorIds: isAdmin || !authenticatedDoctorId ? [] : [authenticatedDoctorId],
     };
     setTempHolidays([...tempHolidays, newHoliday]);
   };
@@ -331,7 +358,7 @@ export function HolidaySetup() {
 
   const toggleDoctorSelection = (holidayId: string, doctorId: string) => {
     const holiday = tempHolidays.find((item) => item.id === holidayId);
-    if (!holiday) {
+    if (!holiday || !canManageHoliday(holiday)) {
       return;
     }
     const selected = new Set(holiday.doctorIds);
@@ -348,7 +375,7 @@ export function HolidaySetup() {
       return;
     }
     const holiday = holidays.find((item) => item.id === id);
-    if (!holiday) {
+    if (!holiday || !canManageHoliday(holiday)) {
       return;
     }
 
@@ -382,13 +409,15 @@ export function HolidaySetup() {
     return names ? `Doctors: ${names}` : 'Doctors: none selected';
   };
 
-  if (!isAdmin) {
+  if (!isAdmin && !authenticatedDoctorId) {
     return (
       <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold text-slate-900">Holiday setup</h3>
         </div>
-        <p className="text-sm text-slate-500">Only admins can manage holidays.</p>
+        <p className="text-sm text-slate-500">
+          Your doctor profile is not linked to this clinic. Contact the clinic administrator.
+        </p>
       </div>
     );
   }
@@ -453,12 +482,39 @@ export function HolidaySetup() {
           {notice}
         </p>
       )}
+      {managedHolidays.length > 0 && (
+        <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+            Set by clinic admin · Read only
+          </p>
+          {managedHolidays.map((holiday) => (
+            <div key={holiday.id} className="text-sm text-slate-700">
+              <p className="font-semibold">
+                {new Date(holiday.date).toLocaleDateString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                  timeZone: 'UTC',
+                })}{' '}
+                · {holiday.reason || 'Holiday'}
+              </p>
+              <p className="text-xs text-slate-500">
+                {holiday.appliesToClinic ? 'Whole clinic' : 'Shared holiday including you'}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
       {!isEditing ? (
         <div className="space-y-2">
-          {visibleHolidays.length === 0 ? (
-            <p className="text-sm text-slate-500">No current or upcoming holidays configured.</p>
+          {editableHolidays.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              {isAdmin
+                ? 'No current or upcoming holidays configured.'
+                : 'No current or upcoming personal holidays configured.'}
+            </p>
           ) : (
-            visibleHolidays.map((holiday) => (
+            editableHolidays.map((holiday) => (
               <div
                 key={holiday.id}
                 className="flex min-w-0 flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-start sm:justify-between"
@@ -528,21 +584,25 @@ export function HolidaySetup() {
                   />
                 </div>
 
-                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={holiday.appliesToClinic}
-                    onChange={(event) =>
-                      updateHoliday(holiday.id, {
-                        appliesToClinic: event.target.checked,
-                        ...(event.target.checked ? { doctorIds: [] } : {}),
-                      })
-                    }
-                  />
-                  Applies to whole clinic
-                </label>
+                {isAdmin ? (
+                  <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={holiday.appliesToClinic}
+                      onChange={(event) =>
+                        updateHoliday(holiday.id, {
+                          appliesToClinic: event.target.checked,
+                          ...(event.target.checked ? { doctorIds: [] } : {}),
+                        })
+                      }
+                    />
+                    Applies to whole clinic
+                  </label>
+                ) : (
+                  <p className="text-sm text-slate-500">Applies to your appointments only.</p>
+                )}
 
-                {!holiday.appliesToClinic && (
+                {isAdmin && !holiday.appliesToClinic && (
                   <div className="rounded-lg border border-slate-200 bg-white p-3">
                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
                       Select doctors

@@ -12,14 +12,19 @@ import {
 } from 'react';
 import { ApiRequestError, apiGet, isAbortError } from '@/lib/api/client';
 import type { MeResponse } from '@/lib/api/types';
-import type { DevAuthProfile } from '@/lib/dev-auth/constants';
+import {
+  SHARED_AUTH_SESSION_STORAGE_KEY,
+  type DevAuthProfile,
+} from '@/lib/dev-auth/constants';
 import {
   AUTH_SESSION_CHANGED_EVENT,
   clearDevAuthProfile,
   getAuthSessionVersion,
   initializeTabSession,
+  persistVerifiedAuthSession,
   readAccessToken,
   readDevAuthProfile,
+  syncAuthSessionFromShared,
 } from '@/lib/dev-auth/storage';
 import { resolveEffectiveRole, type EffectiveRole } from '@/lib/navigation';
 
@@ -101,6 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearDevAuthProfile();
         return;
       }
+      // Migrate a valid session created before shared-tab support without
+      // trusting it until the server has confirmed the exact account/role.
+      persistVerifiedAuthSession(token, savedProfile);
       setMe(response);
       setProfile(savedProfile);
       setStatus(response.user.active ? 'authenticated' : 'inactive');
@@ -157,7 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onFocus = () => {
       if (sessionIdentity() !== identityRef.current) void loadMe();
     };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== SHARED_AUTH_SESSION_STORAGE_KEY) return;
+      syncAuthSessionFromShared({ clearWhenMissing: true });
+      void loadMe();
+    };
     window.addEventListener(AUTH_SESSION_CHANGED_EVENT, onChange);
+    window.addEventListener('storage', onStorage);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onFocus);
@@ -166,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mountedRef.current = false;
       invalidateRequest();
       window.removeEventListener(AUTH_SESSION_CHANGED_EVENT, onChange);
+      window.removeEventListener('storage', onStorage);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);

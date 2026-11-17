@@ -61,6 +61,8 @@ export type HolidayApiRow = {
   active: boolean;
   applies_to_clinic: boolean;
   doctor_ids: string[];
+  start_time?: string | null;
+  end_time?: string | null;
 };
 
 export type DoctorScheduleApiRow = {
@@ -70,6 +72,9 @@ export type DoctorScheduleApiRow = {
   start_time: string;
   end_time: string;
   active: boolean;
+  doctor_service_id?: string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
 };
 
 export type CallApiRow = {

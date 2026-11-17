@@ -1,11 +1,12 @@
 import {
   AUTH_TOKEN_STORAGE_KEY,
   DEV_AUTH_STORAGE_KEY,
+  SHARED_AUTH_SESSION_STORAGE_KEY,
   type DevAuthProfile,
   type DevAuthRole,
 } from './constants';
+import { initializeTabSession as initializeTabIdentity } from './tab-session';
 
-export { initializeTabSession } from './tab-session';
 export const AUTH_SESSION_CHANGED_EVENT = 'vaidhyaa:auth-session-changed';
 let sessionVersion = 0;
 export function getAuthSessionVersion(): number {
@@ -14,6 +15,13 @@ export function getAuthSessionVersion(): number {
 
 const DEV_AUTH_ROLES: readonly DevAuthRole[] = ['platform_admin', 'clinic_admin', 'doctor'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHARED_AUTH_SESSION_VERSION = 1;
+
+type SharedAuthSession = {
+  version: typeof SHARED_AUTH_SESSION_VERSION;
+  token: string;
+  profile: DevAuthProfile;
+};
 
 function hasWindow(): boolean {
   return typeof window !== 'undefined';
@@ -48,10 +56,100 @@ export function isDevAuthProfile(value: unknown): value is DevAuthProfile {
   return true;
 }
 
+function parseSharedAuthSession(raw: string): SharedAuthSession | null {
+  try {
+    const value = JSON.parse(raw) as Partial<SharedAuthSession>;
+    if (
+      value.version !== SHARED_AUTH_SESSION_VERSION ||
+      typeof value.token !== 'string' ||
+      !value.token.trim() ||
+      !isDevAuthProfile(value.profile)
+    ) {
+      return null;
+    }
+    return {
+      version: SHARED_AUTH_SESSION_VERSION,
+      token: value.token.trim(),
+      profile: value.profile,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearTabCredentials(): boolean {
+  if (!hasWindow()) return false;
+  let changed = false;
+  try {
+    changed =
+      window.sessionStorage.getItem(DEV_AUTH_STORAGE_KEY) !== null ||
+      window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY) !== null;
+    window.sessionStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+    window.sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // Storage readers fail closed.
+  }
+  return changed;
+}
+
+/**
+ * Reconciles this tab with the single browser-wide session envelope. The
+ * envelope is atomic, so a tab can never combine one account's token with
+ * another account's role/profile.
+ */
+export function syncAuthSessionFromShared(options: { clearWhenMissing?: boolean } = {}): boolean {
+  if (!hasWindow()) return false;
+
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+  } catch {
+    return false;
+  }
+
+  if (!raw) {
+    if (options.clearWhenMissing && clearTabCredentials()) sessionVersion += 1;
+    return false;
+  }
+
+  const shared = parseSharedAuthSession(raw);
+  if (!shared) {
+    try {
+      window.localStorage.removeItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+    } catch {
+      // noop
+    }
+    if (clearTabCredentials()) sessionVersion += 1;
+    return false;
+  }
+
+  const profileJson = JSON.stringify(shared.profile);
+  try {
+    const changed =
+      window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY) !== shared.token ||
+      window.sessionStorage.getItem(DEV_AUTH_STORAGE_KEY) !== profileJson;
+    if (changed) {
+      window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, shared.token);
+      window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, profileJson);
+      sessionVersion += 1;
+    }
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+export async function initializeTabSession(): Promise<void> {
+  await initializeTabIdentity();
+  syncAuthSessionFromShared();
+}
+
 export function readDevAuthProfile(): DevAuthProfile | null {
   if (!hasWindow()) {
     return null;
   }
+
+  syncAuthSessionFromShared();
 
   let raw: string | null = null;
   try {
@@ -99,6 +197,36 @@ export function writeDevAuthProfile(profile: DevAuthProfile): void {
   }
 }
 
+export function persistVerifiedAuthSession(token: string, profile: DevAuthProfile): void {
+  if (!hasWindow() || !token.trim() || !isDevAuthProfile(profile)) return;
+  const shared: SharedAuthSession = {
+    version: SHARED_AUTH_SESSION_VERSION,
+    token: token.trim(),
+    profile,
+  };
+  try {
+    window.localStorage.setItem(SHARED_AUTH_SESSION_STORAGE_KEY, JSON.stringify(shared));
+  } catch {
+    // The current tab can continue using sessionStorage if shared storage is unavailable.
+  }
+}
+
+export function writeAuthSession(token: string, profile: DevAuthProfile): void {
+  if (!hasWindow() || !token.trim() || !isDevAuthProfile(profile)) return;
+
+  const normalizedToken = token.trim();
+  const profileJson = JSON.stringify(profile);
+  try {
+    window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, normalizedToken);
+    window.sessionStorage.setItem(DEV_AUTH_STORAGE_KEY, profileJson);
+    persistVerifiedAuthSession(normalizedToken, profile);
+    sessionVersion += 1;
+    window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
+  } catch {
+    // noop
+  }
+}
+
 export function clearDevAuthProfile(): void {
   if (!hasWindow()) {
     return;
@@ -116,6 +244,13 @@ export function clearDevAuthProfile(): void {
   } catch {
     // noop
   }
+  try {
+    window.localStorage.removeItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+    window.localStorage.removeItem(DEV_AUTH_STORAGE_KEY);
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // noop
+  }
   window.dispatchEvent(new Event(AUTH_SESSION_CHANGED_EVENT));
 }
 
@@ -123,6 +258,8 @@ export function readAccessToken(): string | null {
   if (!hasWindow()) {
     return null;
   }
+
+  syncAuthSessionFromShared();
 
   try {
     const token = window.sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY)?.trim();

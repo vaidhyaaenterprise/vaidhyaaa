@@ -18,6 +18,8 @@ export type AppointmentListItem = {
   id: string;
   patient_name: string;
   patient_phone: string | null;
+  patient_age: number | null;
+  patient_gender: string | null;
   doctor_id: string;
   doctor_name: string;
   clinic_service_id: string;
@@ -124,13 +126,30 @@ export class AppointmentsService {
     clinicId: string;
     doctorId?: string | null;
     status?: string[];
+    date?: string;
   }): Promise<AppointmentListItem[]> {
+    if (input.date !== undefined) {
+      const parsed = new Date(`${input.date}T00:00:00Z`);
+      if (
+        typeof input.date !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(input.date) ||
+        input.date.startsWith('0000') ||
+        Number.isNaN(parsed.getTime()) ||
+        parsed.toISOString().slice(0, 10) !== input.date
+      ) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'date must be a valid calendar date in YYYY-MM-DD format.',
+        );
+      }
+    }
     // Catch up before reading, including when a scheduled run was delayed.
     await this.repos.appointmentLifecycle.markPastConfirmedNoShows(input.clinicId);
     const rows = await this.repos.appointmentLifecycle.listAppointmentsForClinic({
       clinicId: input.clinicId,
       ...(input.doctorId ? { doctorId: input.doctorId } : {}),
       ...(input.status?.length ? { statuses: input.status } : {}),
+      ...(input.date ? { date: input.date } : {}),
     });
 
     const visitedAppointmentIds = rows
@@ -159,6 +178,8 @@ export class AppointmentsService {
         id: row.id,
         patient_name: row.patientName,
         patient_phone: row.patientPhone,
+        patient_age: row.patientAge ?? null,
+        patient_gender: row.patientGender ?? null,
         doctor_id: row.doctorId,
         doctor_name: doctorMap.get(row.doctorId) ?? 'Doctor',
         clinic_service_id: row.clinicServiceId,
@@ -171,7 +192,7 @@ export class AppointmentsService {
         source: row.createdByUserId ? ('manual' as const) : ('agent' as const),
         status: row.status,
         created_at: row.createdAt.toISOString(),
-        has_history: false,
+        has_history: row.hasHistory ?? false,
         ...(visit ? { visit_reason: visit.reasonForVisit } : {}),
         ...(visit?.examinationNotes !== undefined
           ? { examination_notes: visit.examinationNotes }

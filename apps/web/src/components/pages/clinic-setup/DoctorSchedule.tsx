@@ -72,7 +72,7 @@ export function DoctorSchedule() {
     if (!request) {
       return;
     }
-    if (!clinicId) {
+    if (!clinicId || (!isAdmin && !authenticatedDoctorId)) {
       if (request.isCurrent()) {
         setDoctors([]);
         setSchedules([]);
@@ -98,17 +98,20 @@ export function DoctorSchedule() {
       }
       const doctorOptions = doctorRows
         .filter((row) => row.active)
+        .filter((row) => isAdmin || row.id === authenticatedDoctorId)
         .map((row) => ({ id: row.id, name: row.name }));
       setDoctors(doctorOptions);
 
-      const mapped = scheduleRows.map((row) => ({
-        id: row.id,
-        doctorId: row.doctor_id,
-        day: dayLabel(row.day_of_week),
-        startTime: normalizeTime(row.start_time),
-        endTime: normalizeTime(row.end_time),
-        active: row.active,
-      }));
+      const mapped = scheduleRows
+        .filter((row) => isAdmin || row.doctor_id === authenticatedDoctorId)
+        .map((row) => ({
+          id: row.id,
+          doctorId: row.doctor_id,
+          day: dayLabel(row.day_of_week),
+          startTime: normalizeTime(row.start_time),
+          endTime: normalizeTime(row.end_time),
+          active: row.active,
+        }));
       setSchedules(mapped);
       setTempSchedules(mapped);
     } catch (err) {
@@ -300,7 +303,7 @@ export function DoctorSchedule() {
     >
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-900">Doctor schedules</h3>
-        {!isEditing && (
+        {!isEditing && (isAdmin || authenticatedDoctorId) && (
           <button
             onClick={handleEdit}
             className="rounded-xl border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
@@ -343,7 +346,7 @@ export function DoctorSchedule() {
 
       {!isEditing ? (
         <div className="space-y-4">
-          {selectedDoctorId === 'all' ? (
+          {currentDoctorId === 'all' || !isAdmin ? (
             doctors.map((doctor) => {
               const doctorSchedule = getScheduleForDoctor(doctor.id);
               if (doctorSchedule.length === 0) return null;
@@ -377,7 +380,7 @@ export function DoctorSchedule() {
           ) : (
             <div className="space-y-2">
               {DAYS.map((day) => {
-                const dayHours = getHoursForDay(selectedDoctorId, day);
+                const dayHours = getHoursForDay(currentDoctorId ?? '', day);
                 if (dayHours.length === 0) return null;
 
                 return (

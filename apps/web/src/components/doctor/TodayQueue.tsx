@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { useActiveClinicId } from '@/hooks/useActiveClinicId';
 import {
   fetchAppointments,
@@ -8,7 +10,16 @@ import {
   type AppointmentApiRow,
 } from '@/lib/api/appointments';
 import { ApiRequestError, isAbortError } from '@/lib/api/client';
-import { INITIAL_PATIENTS, type Patient, type PatientVisitHistory } from './doctor-data';
+import {
+  fetchClinicHours,
+  fetchDoctorSchedules,
+  fetchDoctorServices,
+  fetchHolidays,
+  fetchServices,
+} from '@/lib/api/clinic-clinical';
+import { computeDoctorDayAvailability } from '@/lib/doctor-dashboard';
+import { getClinicDate } from '@/lib/home-dashboard';
+import type { Patient, PatientVisitHistory } from './doctor-data';
 import { useDoctorNav } from './DoctorLayout';
 
 function statusLabel(status: Patient['status']): string {
@@ -28,10 +39,6 @@ function statusChipClass(status: Patient['status']): string {
     skipped: 'border-slate-200 bg-slate-50 text-slate-600',
   };
   return map[status];
-}
-
-function normalizePhone(value: string): string {
-  return value.replace(/\D/g, '');
 }
 
 function appointmentDatePart(value: string): string {
@@ -57,27 +64,19 @@ function formatAppointmentTime(value: string): string {
   return `${displayHours}:${minutes} ${suffix}`;
 }
 
-function localDateString(date: Date): string {
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function parseDateInput(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T12:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value
+    ? null
+    : parsed;
 }
 
-function parseDateInput(value: string): Date | null {
-  const [yearRaw, monthRaw, dayRaw] = value.split('-');
-  if (!yearRaw || !monthRaw || !dayRaw) {
-    return null;
-  }
-
-  const year = Number.parseInt(yearRaw, 10);
-  const month = Number.parseInt(monthRaw, 10);
-  const day = Number.parseInt(dayRaw, 10);
-  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
-    return null;
-  }
-
-  return new Date(year, month - 1, day);
+function shiftDate(value: string, days: number): string {
+  const parsed = parseDateInput(value);
+  if (!parsed) return value;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function formatQueueDate(value: string): string {
@@ -91,6 +90,7 @@ function formatQueueDate(value: string): string {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+    timeZone: 'UTC',
   });
 }
 
@@ -104,17 +104,15 @@ function formatQueueDateShort(value: string): string {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    timeZone: 'UTC',
   });
 }
 
-const seedByName = new Map(
-  INITIAL_PATIENTS.map((patient) => [patient.name.toLowerCase(), patient]),
-);
-const seedByPhone = new Map(
-  INITIAL_PATIENTS.map((patient) => [normalizePhone(patient.phone), patient]),
-);
-
-type QueuePatient = Patient & {
+type QueuePatient = Omit<Patient, 'age' | 'gender'> & {
+  age: number | null;
+  gender: string | null;
+  hasHistory: boolean;
+  appointmentStatus: 'confirmed' | 'visited';
   appointmentStartRaw: string;
   doctorName: string;
   serviceName: string;
@@ -124,37 +122,29 @@ type QueuePatient = Patient & {
   visitAdvice?: string | null;
 };
 
-function seedForAppointment(row: AppointmentApiRow): Patient | undefined {
-  const byPhone = row.patient_phone
-    ? seedByPhone.get(normalizePhone(row.patient_phone))
-    : undefined;
-  if (byPhone) {
-    return byPhone;
-  }
-  return seedByName.get(row.patient_name.toLowerCase());
+function demographicLabel(patient: QueuePatient): string {
+  return [patient.age !== null ? `${patient.age} yrs` : null, patient.gender]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function mapAppointmentToQueuePatient(row: AppointmentApiRow): QueuePatient {
-  const seed = seedForAppointment(row);
-  const diagnosis = row.diagnosis ?? seed?.diagnosis;
-  const advice = row.advice ?? seed?.advice;
-  const visitNote = row.examination_notes ?? seed?.visitNote;
-
   return {
     id: row.id,
     name: row.patient_name,
-    age: seed?.age ?? 0,
-    gender: seed?.gender ?? 'Male',
-    phone: row.patient_phone ?? seed?.phone ?? '',
+    age: row.patient_age ?? null,
+    gender: row.patient_gender?.trim() || null,
+    phone: row.patient_phone ?? '',
     time: formatAppointmentTime(row.appointment_start),
     type: 'in-person',
     status: row.status === 'visited' ? 'visited' : 'waiting',
+    appointmentStatus: row.status === 'visited' ? 'visited' : 'confirmed',
+    hasHistory: row.has_history,
     reason: row.reason_for_visit,
-    ...(diagnosis ? { diagnosis } : {}),
-    ...(advice ? { advice } : {}),
-    ...(visitNote ? { visitNote } : {}),
-    ...(seed?.roomNumber ? { roomNumber: seed.roomNumber } : {}),
-    history: seed?.history ?? [],
+    ...(row.diagnosis ? { diagnosis: row.diagnosis } : {}),
+    ...(row.advice ? { advice: row.advice } : {}),
+    ...(row.examination_notes ? { visitNote: row.examination_notes } : {}),
+    history: [],
     appointmentStartRaw: row.appointment_start,
     doctorName: row.doctor_name,
     serviceName: row.service_name,
@@ -172,12 +162,32 @@ function formatClinicalField(value?: string | null): string {
 
 export function TodayQueue() {
   const { setPatientCount } = useDoctorNav();
+  const { me } = useAuth();
   const clinicId = useActiveClinicId();
-  const [selectedDate, setSelectedDate] = useState<string>(() => localDateString(new Date()));
+  const { profile, status: profileStatus, refresh: refreshProfile } = useClinicProfile();
+  const doctorId =
+    me?.clinics.find(
+      (membership) =>
+        membership.clinic_id === clinicId && membership.role === 'doctor' && membership.active,
+    )?.doctor_id ?? null;
+  const [now, setNow] = useState(() => new Date());
+  const todayDate = useMemo(() => {
+    if (profileStatus !== 'ready' || !profile?.timezone) return null;
+    try {
+      return getClinicDate(now, profile.timezone);
+    } catch {
+      return null;
+    }
+  }, [now, profile?.timezone, profileStatus]);
+  const [selectedDate, setSelectedDate] = useState('');
   const [patients, setPatients] = useState<QueuePatient[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<ReturnType<
+    typeof computeDoctorDayAvailability
+  > | null>(null);
+  const [loadedContext, setLoadedContext] = useState<string | null>(null);
   const [markingVisitedId, setMarkingVisitedId] = useState<string | null>(null);
   const [historyModal, setHistoryModal] = useState<{
     patient: QueuePatient;
@@ -187,130 +197,201 @@ export function TodayQueue() {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  const activeClinicIdRef = useRef(clinicId);
-  const appointmentRowsCacheRef = useRef<{
-    clinicId: string;
-    rows: AppointmentApiRow[];
-  } | null>(null);
   const queueLoadSequenceRef = useRef(0);
-  const todayDate = localDateString(new Date());
-  const isViewingToday = selectedDate === todayDate;
-  const selectedDateLabel = formatQueueDate(selectedDate);
-  const selectedDateLabelShort = formatQueueDateShort(selectedDate);
+  const activeControllerRef = useRef<AbortController | null>(null);
+  const identity = `${clinicId ?? ''}:${doctorId ?? ''}`;
+  const context = `${identity}:${selectedDate}`;
+  const activeContextRef = useRef(context);
+  activeContextRef.current = context;
+  const previousDayRef = useRef<{ identity: string; today: string | null }>({
+    identity: '',
+    today: null,
+  });
+  // Refreshing the same day must keep the consultation form mounted so its
+  // unsaved notes survive focus/visibility refreshes. Other dates or doctors
+  // remain hidden until their own data has loaded.
+  const queueReady = loadedContext === context;
+  const isViewingToday = Boolean(todayDate && selectedDate === todayDate);
+  const selectedDateLabel = selectedDate ? formatQueueDate(selectedDate) : 'Loading clinic date…';
+  const selectedDateLabelShort = selectedDate ? formatQueueDateShort(selectedDate) : '';
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (toastTimer.current) {
-        clearTimeout(toastTimer.current);
-        toastTimer.current = null;
-      }
+      if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, []);
 
   useEffect(() => {
-    activeClinicIdRef.current = clinicId;
-  }, [clinicId]);
+    const refreshDate = () => setNow(new Date());
+    const timer = window.setInterval(refreshDate, 60_000);
+    window.addEventListener('focus', refreshDate);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refreshDate);
+      document.removeEventListener('visibilitychange', refreshDate);
+    };
+  }, []);
+
+  useEffect(() => {
+    const previous = previousDayRef.current;
+    if (previous.identity !== identity) {
+      setSelectedDate(todayDate ?? '');
+      setPatients([]);
+      setSelectedId(null);
+      setHistoryModal(null);
+      setVisitedDetailsModal(null);
+      setMarkingVisitedId(null);
+      setAvailability(null);
+      setLoadedContext(null);
+    } else if (todayDate && previous.today !== todayDate) {
+      setSelectedDate((value) => (!value || value === previous.today ? todayDate : value));
+    }
+    previousDayRef.current = { identity, today: todayDate };
+  }, [identity, todayDate]);
 
   const loadQueue = useCallback(
     async (signal?: AbortSignal) => {
-      const loadSequence = ++queueLoadSequenceRef.current;
-      if (!clinicId) {
-        setPatients([]);
+      const sequence = ++queueLoadSequenceRef.current;
+      if (!clinicId || !doctorId) {
         setLoadingQueue(false);
-        setQueueError('Clinic context missing. Please re-login.');
+        setQueueError(
+          'Your doctor profile is not linked to this clinic. Contact the clinic administrator.',
+        );
         return;
       }
-
+      if (profileStatus === 'error' || (profileStatus === 'ready' && !todayDate)) {
+        setLoadingQueue(false);
+        setQueueError('Clinic details could not be loaded. Please retry.');
+        return;
+      }
+      if (profileStatus !== 'ready' || !selectedDate || !todayDate) {
+        setLoadingQueue(true);
+        return;
+      }
       setLoadingQueue(true);
       setQueueError(null);
-
       try {
-        const cached = appointmentRowsCacheRef.current;
-        const rows =
-          cached?.clinicId === clinicId
-            ? cached.rows
-            : await fetchAppointments(clinicId, ['confirmed', 'visited'], signal);
-        if (loadSequence !== queueLoadSequenceRef.current || signal?.aborted) {
+        const [rows, schedules, clinicHours, holidays, doctorServices, services] =
+          await Promise.all([
+            fetchAppointments(clinicId, ['confirmed', 'visited'], signal, selectedDate),
+            fetchDoctorSchedules(clinicId, doctorId, signal),
+            fetchClinicHours(clinicId, signal),
+            fetchHolidays(clinicId, signal),
+            fetchDoctorServices(clinicId, signal),
+            fetchServices(clinicId, signal),
+          ]);
+        if (
+          sequence !== queueLoadSequenceRef.current ||
+          signal?.aborted ||
+          activeContextRef.current !== context
+        )
           return;
-        }
-        if (cached?.clinicId !== clinicId) {
-          appointmentRowsCacheRef.current = { clinicId, rows };
-        }
-        const dateRows = rows
-          .filter((row) => appointmentDatePart(row.appointment_start) === selectedDate)
-          .sort((left, right) => left.appointment_start.localeCompare(right.appointment_start));
-        const mapped = dateRows.map(mapAppointmentToQueuePatient);
-
+        const mapped = rows
+          .filter(
+            (row) =>
+              row.doctor_id === doctorId &&
+              appointmentDatePart(row.appointment_start) === selectedDate &&
+              (row.status === 'confirmed' || row.status === 'visited'),
+          )
+          .sort((left, right) => left.appointment_start.localeCompare(right.appointment_start))
+          .map(mapAppointmentToQueuePatient);
         setPatients((previous) => {
-          const previousStatus = new Map(previous.map((patient) => [patient.id, patient.status]));
+          const previousById = new Map(previous.map((patient) => [patient.id, patient]));
           return mapped.map((patient) => {
-            const lastStatus = previousStatus.get(patient.id);
+            const previousPatient = previousById.get(patient.id);
             if (
               patient.status === 'waiting' &&
-              (lastStatus === 'in-progress' || lastStatus === 'skipped')
+              previousPatient &&
+              (previousPatient.status === 'in-progress' || previousPatient.status === 'skipped')
             ) {
-              return { ...patient, status: lastStatus };
+              return {
+                ...patient,
+                status: previousPatient.status,
+                ...(previousPatient.visitNote !== undefined
+                  ? { visitNote: previousPatient.visitNote }
+                  : {}),
+                ...(previousPatient.diagnosis !== undefined
+                  ? { diagnosis: previousPatient.diagnosis }
+                  : {}),
+                ...(previousPatient.advice !== undefined ? { advice: previousPatient.advice } : {}),
+              };
             }
             return patient;
           });
         });
-
-        setSelectedId((current) => {
-          if (!current) {
-            return null;
-          }
-          return mapped.some((patient) => patient.id === current && patient.status !== 'visited')
+        setAvailability(
+          computeDoctorDayAvailability({
+            date: selectedDate,
+            doctorId,
+            schedules,
+            clinicHours,
+            holidays,
+            doctorServices,
+            services,
+          }),
+        );
+        setLoadedContext(context);
+        setSelectedId((current) =>
+          current &&
+          mapped.some((patient) => patient.id === current && patient.status !== 'visited')
             ? current
-            : null;
-        });
+            : null,
+        );
       } catch (error) {
-        if (isAbortError(error) || loadSequence !== queueLoadSequenceRef.current) {
+        if (
+          isAbortError(error) ||
+          signal?.aborted ||
+          sequence !== queueLoadSequenceRef.current ||
+          activeContextRef.current !== context
+        )
           return;
-        }
         setQueueError(
           error instanceof ApiRequestError
             ? error.apiError.message
             : error instanceof Error
               ? error.message
-              : 'Failed to load today queue.',
+              : 'Unable to load appointments.',
         );
       } finally {
-        if (loadSequence === queueLoadSequenceRef.current && !signal?.aborted) {
+        if (
+          sequence === queueLoadSequenceRef.current &&
+          !signal?.aborted &&
+          activeContextRef.current === context
+        )
           setLoadingQueue(false);
-        }
       }
     },
-    [clinicId, selectedDate],
+    [clinicId, context, doctorId, profileStatus, selectedDate, todayDate],
   );
 
-  useEffect(() => {
-    if (appointmentRowsCacheRef.current?.clinicId === clinicId) {
-      return;
-    }
-
-    appointmentRowsCacheRef.current = null;
-    setPatients([]);
-    setSelectedId(null);
-    setHistoryModal(null);
-    setVisitedDetailsModal(null);
-    setMarkingVisitedId(null);
-    setQueueError(null);
-  }, [clinicId]);
-
-  useEffect(() => {
+  const refreshQueue = useCallback(() => {
+    activeControllerRef.current?.abort();
     const controller = new AbortController();
+    activeControllerRef.current = controller;
     void loadQueue(controller.signal);
-    return () => {
-      queueLoadSequenceRef.current += 1;
-      controller.abort();
-    };
   }, [loadQueue]);
 
   useEffect(() => {
-    setPatientCount(patients.length);
-  }, [patients.length, setPatientCount]);
+    refreshQueue();
+    const refreshVisibleQueue = () => {
+      if (document.visibilityState !== 'hidden') refreshQueue();
+    };
+    window.addEventListener('focus', refreshVisibleQueue);
+    document.addEventListener('visibilitychange', refreshVisibleQueue);
+    return () => {
+      queueLoadSequenceRef.current += 1;
+      activeControllerRef.current?.abort();
+      window.removeEventListener('focus', refreshVisibleQueue);
+      document.removeEventListener('visibilitychange', refreshVisibleQueue);
+    };
+  }, [refreshQueue]);
+
+  useEffect(() => {
+    setPatientCount(queueReady ? patients.length : 0);
+  }, [patients.length, queueReady, setPatientCount]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -392,6 +473,7 @@ export function TodayQueue() {
       }
 
       const targetClinicId = clinicId;
+      const targetContext = context;
 
       const current = patients.find((patient) => patient.id === id);
       if (!current) {
@@ -417,32 +499,24 @@ export function TodayQueue() {
           ...(diagnosis ? { diagnosis } : {}),
           ...(advice ? { advice } : {}),
         });
-        if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+        if (!mountedRef.current || activeContextRef.current !== targetContext) {
           return;
         }
-        if (appointmentRowsCacheRef.current?.clinicId === targetClinicId) {
-          appointmentRowsCacheRef.current = {
-            clinicId: targetClinicId,
-            rows: appointmentRowsCacheRef.current.rows.map((row) =>
-              row.id === id
-                ? {
-                    ...row,
-                    status: 'visited',
-                    visit_reason: visitReason,
-                    examination_notes: examinationNotes ?? null,
-                    diagnosis: diagnosis ?? null,
-                    advice: advice ?? null,
-                  }
-                : row,
-            ),
-          };
-        }
+        // A list read started before this write can still return "confirmed".
+        // Invalidate it before applying the saved visit so it cannot roll back
+        // the visible status/counts or revive the completed consultation.
+        queueLoadSequenceRef.current += 1;
+        activeControllerRef.current?.abort();
+        activeControllerRef.current = null;
+        setLoadingQueue(false);
+        setQueueError(null);
         setPatients((currentRows) =>
           currentRows.map((patient) =>
             patient.id === id
               ? {
                   ...patient,
                   status: 'visited',
+                  appointmentStatus: 'visited',
                   visitReason,
                   visitExaminationNotes: examinationNotes ?? null,
                   visitDiagnosis: diagnosis ?? null,
@@ -457,7 +531,7 @@ export function TodayQueue() {
         setSelectedId(null);
         showToast('Marked as visited.');
       } catch (error) {
-        if (!mountedRef.current || activeClinicIdRef.current !== targetClinicId) {
+        if (!mountedRef.current || activeContextRef.current !== targetContext) {
           return;
         }
         showToast(
@@ -468,192 +542,262 @@ export function TodayQueue() {
               : 'Failed to mark as visited.',
         );
       } finally {
-        if (mountedRef.current && activeClinicIdRef.current === targetClinicId) {
+        if (mountedRef.current && activeContextRef.current === targetContext) {
           setMarkingVisitedId(null);
         }
       }
     },
-    [clinicId, patients, showToast],
+    [clinicId, context, patients, showToast],
   );
+
+  function selectDate(date: string) {
+    setSelectedDate(date);
+    setSelectedId(null);
+    setHistoryModal(null);
+    setVisitedDetailsModal(null);
+  }
 
   const waiting = patients.filter((p) => p.status === 'waiting');
   const inProgress = patients.find((p) => p.status === 'in-progress') ?? null;
   const visited = patients.filter((p) => p.status === 'visited');
   const skipped = patients.filter((p) => p.status === 'skipped');
-  const currentConsult = inProgress && selectedId === inProgress.id ? inProgress : null;
+  const confirmedCount = patients.filter(
+    (patient) => patient.appointmentStatus === 'confirmed',
+  ).length;
+  const currentConsult =
+    queueReady && inProgress && selectedId === inProgress.id ? inProgress : null;
 
   return (
     <>
-      {/* Header */}
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
+      <div className="mb-5 flex min-w-0 flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div className="min-w-0">
           <h1 className="text-[26px] font-black tracking-tight text-slate-900">
-            {isViewingToday ? 'Today&apos;s Queue' : 'Appointment Queue'}
+            {isViewingToday ? "Today's Queue" : 'Appointment Queue'}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {selectedDateLabel} · Morning shift · 9:00 AM – 1:00 PM
-          </p>
-          {loadingQueue && (
-            <p className="mt-2 text-xs font-semibold text-slate-500">Syncing queue from DB...</p>
-          )}
-          {queueError && <p className="mt-2 text-xs font-semibold text-red-600">{queueError}</p>}
+          <p className="mt-1 text-sm text-slate-500">{selectedDateLabel}</p>
         </div>
-
-        <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="min-w-0 xl:w-auto">
           <label
             htmlFor="doctor-queue-date"
-            className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500"
+            className="mb-1.5 block text-xs font-bold text-slate-600"
           >
-            Select Date
+            Appointment date
           </label>
-          <div className="mt-1.5 flex items-center gap-2">
-            <input
-              id="doctor-queue-date"
-              type="date"
-              value={selectedDate}
-              onChange={(event) => {
-                const nextDate = event.target.value;
-                if (!nextDate) {
-                  return;
-                }
-                setSelectedDate(nextDate);
-                setSelectedId(null);
-                setVisitedDetailsModal(null);
-              }}
-              className="rounded-[10px] border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-600/20"
-            />
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm focus-within:border-teal-600 focus-within:ring-2 focus-within:ring-teal-600/15">
+              <button
+                type="button"
+                aria-label="Previous day"
+                disabled={!selectedDate}
+                onClick={() => selectDate(shiftDate(selectedDate, -1))}
+                className="flex h-10 w-9 shrink-0 items-center justify-center rounded-lg text-xl text-slate-500 hover:bg-slate-50 hover:text-teal-700 disabled:opacity-40"
+              >
+                <span aria-hidden="true">‹</span>
+              </button>
+              <input
+                id="doctor-queue-date"
+                type="date"
+                value={selectedDate}
+                min="0001-01-01"
+                max="9999-12-31"
+                disabled={!todayDate}
+                onChange={(event) => {
+                  if (parseDateInput(event.target.value)) selectDate(event.target.value);
+                }}
+                className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-slate-900 outline-none xl:w-[150px]"
+              />
+              <button
+                type="button"
+                aria-label="Next day"
+                disabled={!selectedDate}
+                onClick={() => selectDate(shiftDate(selectedDate, 1))}
+                className="flex h-10 w-9 shrink-0 items-center justify-center rounded-lg text-xl text-slate-500 hover:bg-slate-50 hover:text-teal-700 disabled:opacity-40"
+              >
+                <span aria-hidden="true">›</span>
+              </button>
+            </div>
             <button
               type="button"
+              disabled={!todayDate || isViewingToday}
               onClick={() => {
-                setSelectedDate(todayDate);
-                setSelectedId(null);
-                setVisitedDetailsModal(null);
+                if (todayDate) selectDate(todayDate);
               }}
-              disabled={isViewingToday}
-              className="rounded-[10px] border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-12 shrink-0 rounded-xl border border-teal-200 bg-teal-50 px-4 text-sm font-bold text-teal-800 transition hover:bg-teal-100 disabled:cursor-default disabled:border-slate-200 disabled:bg-white disabled:text-slate-400"
             >
               Today
             </button>
           </div>
         </div>
       </div>
-
-      {/* Hero */}
-      <div className="mb-5 rounded-[22px] bg-gradient-to-br from-teal-700 to-slate-900 p-5">
-        <div className="portal-feature-grid gap-[18px]">
-          <div>
-            <h2 className="mb-1.5 text-xl font-black text-white">
-              {patients.length} appointments{' '}
-              {isViewingToday ? 'today' : `on ${selectedDateLabelShort}`}
-            </h2>
-            <p className="text-[13px] leading-relaxed text-teal-100">
-              {visited.length} completed · {waiting.length} remaining ·{' '}
-              {inProgress ? '1 in progress' : 'none in progress'}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {['Morning 9AM–1PM', 'Evening 5PM–9PM', 'Orthopaedic'].map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-white/[0.18] bg-white/[0.12] px-[10px] py-1.5 text-xs font-extrabold text-white"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-[10px]">
-            {[
-              { value: waiting.length, label: 'Waiting' },
-              { value: inProgress ? 1 : 0, label: 'In Progress' },
-              { value: visited.length, label: 'Visited' },
-              { value: patients.length, label: 'Total' },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-[14px] border border-white/[0.12] bg-white/[0.08] px-3 py-[10px] text-center"
-              >
-                <strong className="block text-2xl font-black text-white">{stat.value}</strong>
-                <span className="mt-0.5 block text-[11px] font-bold text-teal-200">
-                  {stat.label}
-                </span>
-              </div>
-            ))}
-          </div>
+      {!queueReady && (loadingQueue || !queueError) ? (
+        <div
+          role="status"
+          className="mb-5 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500"
+        >
+          Loading appointments and working hours…
         </div>
-      </div>
+      ) : null}
+      {queueReady && loadingQueue ? (
+        <p role="status" className="mb-3 text-xs font-semibold text-slate-500">
+          Refreshing appointments and working hours…
+        </p>
+      ) : null}
+      {queueError ? (
+        <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-5">
+          <p className="text-sm font-semibold text-red-700">{queueError}</p>
+          {queueReady ? (
+            <p className="mt-1 text-xs text-red-700">
+              Showing the last loaded appointments and working hours.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              if (profileStatus === 'error' || !todayDate) refreshProfile();
+              else refreshQueue();
+            }}
+            className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {queueReady && availability ? (
+        <section
+          aria-label="Appointment summary"
+          className="mb-5 rounded-[22px] bg-gradient-to-br from-teal-700 to-slate-900 p-5 sm:p-6"
+        >
+          <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)] xl:items-center">
+            <div className="min-w-0">
+              <h2 className="text-xl font-black text-white">
+                {patients.length} {patients.length === 1 ? 'appointment' : 'appointments'}{' '}
+                {isViewingToday ? 'today' : `on ${selectedDateLabelShort}`}
+              </h2>
+              <p className="mt-1 text-[13px] text-teal-100">
+                Confirmed and visited appointments for the selected date.
+              </p>
+              <section aria-label="Working hours" className="mt-4">
+                <p className="mb-2 text-xs font-bold text-teal-100">Working hours</p>
+                {availability.windows.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {availability.windows.map((window) => (
+                      <span
+                        key={`${window.start}-${window.end}`}
+                        className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-sm font-semibold text-white"
+                      >
+                        {window.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm font-semibold text-white">{availability.message}</p>
+                )}
+              </section>
+              <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-xs text-teal-100">
+                <span className="font-bold">Services:</span>
+                {availability.serviceNames.length ? (
+                  <span>{availability.serviceNames.join(' · ')}</span>
+                ) : (
+                  <span>No active services assigned.</span>
+                )}
+              </div>
+            </div>
+            <dl className="grid min-w-0 grid-cols-3 gap-2 sm:gap-3">
+              {[
+                { value: confirmedCount, label: 'Confirmed' },
+                { value: visited.length, label: 'Visited' },
+                { value: patients.length, label: 'Total' },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="min-w-0 rounded-2xl border border-white/15 bg-white/10 px-2 py-4 text-center"
+                >
+                  <dd className="text-2xl font-black text-white">{stat.value}</dd>
+                  <dt className="mt-1 text-xs font-semibold text-teal-100">{stat.label}</dt>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </section>
+      ) : null}
 
       {/* Split: Queue + Consultation Panel */}
-      <div
-        className={`portal-workspace-grid gap-[18px] ${currentConsult ? 'has-secondary-panel' : ''}`}
-      >
-        {/* Queue Column */}
-        <div>
-          {inProgress && (
-            <PatientGroup
-              title="In Progress"
-              icon="⚕"
-              color="text-blue-700"
-              patients={[inProgress]}
-              selectedId={selectedId}
-              onSelect={selectPatient}
-              onStart={startConsultation}
-              onSkip={skipPatient}
+      {queueReady && (
+        <div
+          className={`portal-workspace-grid gap-[18px] ${currentConsult ? 'has-secondary-panel' : ''}`}
+        >
+          {/* Queue Column */}
+          <div>
+            {inProgress && (
+              <PatientGroup
+                title="In Progress"
+                icon="⚕"
+                color="text-blue-700"
+                patients={[inProgress]}
+                selectedId={selectedId}
+                onSelect={selectPatient}
+                onStart={startConsultation}
+                onSkip={skipPatient}
+              />
+            )}
+            {waiting.length > 0 && (
+              <PatientGroup
+                title="Waiting"
+                icon="◷"
+                color="text-amber-600"
+                patients={waiting}
+                selectedId={selectedId}
+                onSelect={selectPatient}
+                onStart={startConsultation}
+                onSkip={skipPatient}
+              />
+            )}
+            {visited.length > 0 && (
+              <PatientGroup
+                title="Visited"
+                icon="✓"
+                color="text-green-600"
+                patients={visited}
+                selectedId={selectedId}
+                onSelect={selectPatient}
+                onStart={startConsultation}
+                onSkip={skipPatient}
+              />
+            )}
+            {skipped.length > 0 && (
+              <PatientGroup
+                title="Skipped"
+                icon="⚠"
+                color="text-slate-500"
+                patients={skipped}
+                selectedId={selectedId}
+                onSelect={selectPatient}
+                onStart={startConsultation}
+                onSkip={skipPatient}
+              />
+            )}
+            {patients.length === 0 && (
+              <div className="rounded-[22px] border border-slate-200 bg-white p-12 text-center text-slate-400">
+                No confirmed or visited appointments for{' '}
+                {isViewingToday ? 'today' : selectedDateLabelShort}.
+              </div>
+            )}
+          </div>
+
+          {/* Consultation Panel */}
+          {currentConsult && (
+            <ConsultationPanel
+              key={currentConsult.id}
+              patient={currentConsult}
+              onSaveDraft={saveDraft}
+              onMarkVisited={markVisited}
+              isMarkingVisited={markingVisitedId === currentConsult.id}
+              onShowHistory={(entry) => setHistoryModal({ patient: currentConsult, entry })}
             />
-          )}
-          {waiting.length > 0 && (
-            <PatientGroup
-              title="Waiting"
-              icon="◷"
-              color="text-amber-600"
-              patients={waiting}
-              selectedId={selectedId}
-              onSelect={selectPatient}
-              onStart={startConsultation}
-              onSkip={skipPatient}
-            />
-          )}
-          {visited.length > 0 && (
-            <PatientGroup
-              title="Visited"
-              icon="✓"
-              color="text-green-600"
-              patients={visited}
-              selectedId={selectedId}
-              onSelect={selectPatient}
-              onStart={startConsultation}
-              onSkip={skipPatient}
-            />
-          )}
-          {skipped.length > 0 && (
-            <PatientGroup
-              title="Skipped"
-              icon="⚠"
-              color="text-slate-500"
-              patients={skipped}
-              selectedId={selectedId}
-              onSelect={selectPatient}
-              onStart={startConsultation}
-              onSkip={skipPatient}
-            />
-          )}
-          {patients.length === 0 && (
-            <div className="rounded-[22px] border border-slate-200 bg-white p-12 text-center text-slate-400">
-              No appointments scheduled for {isViewingToday ? 'today' : selectedDateLabelShort}.
-            </div>
           )}
         </div>
-
-        {/* Consultation Panel */}
-        {currentConsult && (
-          <ConsultationPanel
-            patient={currentConsult}
-            onSaveDraft={saveDraft}
-            onMarkVisited={markVisited}
-            isMarkingVisited={markingVisitedId === currentConsult.id}
-            onShowHistory={(entry) => setHistoryModal({ patient: currentConsult, entry })}
-          />
-        )}
-      </div>
+      )}
 
       {/* History Modal */}
       {historyModal && (
@@ -744,8 +888,9 @@ export function TodayQueue() {
                 </span>
                 <p className="text-sm font-bold text-slate-900">
                   {visitedDetailsModal.name}
-                  {visitedDetailsModal.age ? ` · ${visitedDetailsModal.age}y` : ''}
-                  {` · ${visitedDetailsModal.gender}`}
+                  {demographicLabel(visitedDetailsModal)
+                    ? ` · ${demographicLabel(visitedDetailsModal)}`
+                    : ''}
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">
                   {visitedDetailsModal.phone || 'No phone recorded'}
@@ -814,7 +959,7 @@ type PatientGroupProps = {
   title: string;
   icon: string;
   color: string;
-  patients: Patient[];
+  patients: QueuePatient[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onStart: (id: string) => void;
@@ -853,7 +998,7 @@ function PatientGroup({
 }
 
 type PatientCardProps = {
-  patient: Patient;
+  patient: QueuePatient;
   selected: boolean;
   onSelect: (id: string) => void;
   onStart: (id: string) => void;
@@ -874,9 +1019,9 @@ function PatientCard({ patient, selected, onSelect, onStart, onSkip }: PatientCa
         <div className="min-w-0 flex-1">
           <div className="mb-[3px] flex items-center gap-[7px]">
             <span className="text-[15px] font-extrabold text-slate-900">{patient.name}</span>
-            <span className="text-xs text-slate-400">
-              {patient.age}y · {patient.gender[0]}
-            </span>
+            {demographicLabel(patient) ? (
+              <span className="text-xs text-slate-400">{demographicLabel(patient)}</span>
+            ) : null}
           </div>
           <p className="mb-1.5 text-[13px] leading-snug text-slate-500">{patient.reason}</p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -931,7 +1076,7 @@ function PatientCard({ patient, selected, onSelect, onStart, onSkip }: PatientCa
 }
 
 type ConsultationPanelProps = {
-  patient: Patient;
+  patient: QueuePatient;
   onSaveDraft: (id: string) => void;
   onMarkVisited: (id: string) => void;
   isMarkingVisited: boolean;
@@ -956,7 +1101,8 @@ function ConsultationPanel({
             </p>
             <p className="text-xl font-black">{patient.name}</p>
             <p className="mt-1 text-[13px] text-teal-100">
-              {patient.age} yrs · {patient.gender} · {patient.phone}
+              {[demographicLabel(patient), patient.phone].filter(Boolean).join(' · ') ||
+                'Patient details not recorded'}
             </p>
           </div>
           <div className="text-right">
@@ -993,7 +1139,11 @@ function ConsultationPanel({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-slate-400">No previous visits on record.</p>
+            <p className="text-xs text-slate-400">
+              {patient.hasHistory
+                ? 'Clinical history is available in Patient History.'
+                : 'No clinical history recorded.'}
+            </p>
           )}
         </div>
 

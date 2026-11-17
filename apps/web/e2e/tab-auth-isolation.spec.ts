@@ -61,6 +61,8 @@ async function mockApi(context: BrowserContext) {
           },
         };
       else if (path.endsWith('/appointments')) data = { appointments: [] };
+      else if (path.endsWith('/knowledge/entries')) data = { entries: [] };
+      else if (path.endsWith('/knowledge/embedding-status')) data = { embedding_status: null };
       else if (path.endsWith('/settings'))
         data = {
           settings: {
@@ -103,49 +105,37 @@ async function savedRole(page: Page) {
   );
 }
 
-test('cloned and independent tabs require login and retain separate roles through refresh and logout', async ({
+test('a manually opened clinic-admin deep link inherits the verified browser session', async ({
   context,
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const requests = await mockApi(context);
   await page.goto('/login');
-  await signIn(page, 'doctor');
-  const popupPromise = context.waitForEvent('page');
-  await page.evaluate(() => window.open(location.href));
-  const copiedTab = await popupPromise;
-  await copiedTab.setViewportSize({ width: 1440, height: 900 });
-  await expect(copiedTab).toHaveURL(/\/login$/);
-  await expect(copiedTab.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-  expect(requests.filter((request) => request.page === copiedTab)).toHaveLength(0);
-  expect(await savedRole(page)).toBe('doctor');
-  expect(await savedRole(copiedTab)).toBeNull();
-  await signIn(copiedTab, 'clinic_admin');
-  await page.reload();
-  await expect(page.getByText('Doctor Portal', { exact: true })).toBeVisible();
-  await copiedTab.reload();
-  await expect(copiedTab.getByRole('heading', { name: 'Home', exact: true })).toBeVisible();
-  expect(await savedRole(page)).toBe('doctor');
-  expect(await savedRole(copiedTab)).toBe('clinic_admin');
+  await signIn(page, 'clinic_admin');
+  const deepLinkTab = await context.newPage();
+  await deepLinkTab.setViewportSize({ width: 1440, height: 900 });
+  await deepLinkTab.goto('/knowledge-base');
+  await expect(deepLinkTab).toHaveURL(/\/knowledge-base$/);
+  await expect(
+    deepLinkTab.getByRole('heading', { name: 'Knowledge base', exact: true }),
+  ).toBeVisible();
+  expect(await savedRole(page)).toBe('clinic_admin');
+  expect(await savedRole(deepLinkTab)).toBe('clinic_admin');
+  expect(requests.filter((request) => request.page === deepLinkTab).length).toBeGreaterThan(0);
   expect(
     requests
-      .filter((request) => request.page === page)
-      .every((request) => request.token === 'Bearer doctor-token'),
-  ).toBe(true);
-  expect(
-    requests
-      .filter((request) => request.page === copiedTab)
+      .filter((request) => request.page === deepLinkTab)
       .every((request) => request.token === 'Bearer clinic_admin-token'),
   ).toBe(true);
-  await copiedTab.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(copiedTab).toHaveURL(/\/login$/);
-  await page.reload();
-  await expect(page.getByText('Doctor Portal', { exact: true })).toBeVisible();
-  expect(await savedRole(page)).toBe('doctor');
-  expect(await copiedTab.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY)).toBeNull();
+  await deepLinkTab.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(deepLinkTab).toHaveURL(/\/login$/);
+  await expect(page).toHaveURL(/\/login$/);
+  expect(await deepLinkTab.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY)).toBeNull();
+  expect(await page.evaluate((key) => sessionStorage.getItem(key), TOKEN_KEY)).toBeNull();
 });
 
-test('a copied reload session cannot take ownership while its original doctor tab is frozen', async ({
+test('a new doctor tab restores the shared session while the original tab is frozen', async ({
   context,
   page,
 }) => {
@@ -153,26 +143,19 @@ test('a copied reload session cannot take ownership while its original doctor ta
   const requests = await mockApi(context);
   await page.goto('/login');
   await signIn(page, 'doctor');
-  const copiedStorage = await page.evaluate(() => ({ ...sessionStorage }));
-  const copiedTab = await context.newPage();
-  await copiedTab.goto('/login');
-  await expect(copiedTab.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-  await copiedTab.evaluate((storage) => {
-    sessionStorage.clear();
-    for (const [key, value] of Object.entries(storage)) sessionStorage.setItem(key, value);
-  }, copiedStorage);
   const sourceCdp = await context.newCDPSession(page);
   await sourceCdp.send('Page.setWebLifecycleState', { state: 'frozen' });
+  const copiedTab = await context.newPage();
   try {
-    await copiedTab.reload();
+    await copiedTab.goto('/');
+    await expect(copiedTab.getByText('Doctor Portal', { exact: true })).toBeVisible();
+    expect(await savedRole(copiedTab)).toBe('doctor');
+    expect(requests.filter((request) => request.page === copiedTab).length).toBeGreaterThan(0);
     expect(
-      await copiedTab.evaluate(
-        () => (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).type,
-      ),
-    ).toBe('reload');
-    await expect(copiedTab.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    expect(await savedRole(copiedTab)).toBeNull();
-    expect(requests.filter((request) => request.page === copiedTab)).toHaveLength(0);
+      requests
+        .filter((request) => request.page === copiedTab)
+        .every((request) => request.token === 'Bearer doctor-token'),
+    ).toBe(true);
   } finally {
     await sourceCdp.send('Page.setWebLifecycleState', { state: 'active' });
   }

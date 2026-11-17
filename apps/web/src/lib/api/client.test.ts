@@ -5,6 +5,7 @@ import { ApiRequestError, apiGet, apiPost, getApiBaseUrl } from '@/lib/api/clien
 import {
   clearDevAuthProfile,
   initializeTabSession,
+  writeAuthSession,
   writeAccessToken,
   writeDevAuthProfile,
 } from '@/lib/dev-auth/storage';
@@ -132,6 +133,27 @@ describe('api client', () => {
 
     const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     expect(calls[0]?.[1].headers).toMatchObject({ Authorization: 'Bearer access-token' });
+  });
+
+  it('bootstraps API credentials from the shared session in a manually opened tab', async () => {
+    writeAuthSession('shared-admin-token', DEV_AUTH_PRESETS.clinic_admin.profile);
+    window.sessionStorage.clear();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => toApiSuccessBody({ ok: true }, 'req_shared_tab'),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiGet('/v1/shared-tab');
+
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls[0]?.[1].headers).toMatchObject({
+      Authorization: 'Bearer shared-admin-token',
+      'x-dev-user-id': DEV_AUTH_PRESETS.clinic_admin.profile.userId,
+      'x-dev-user-role': 'clinic_admin',
+      'x-dev-clinic-id': DEV_AUTH_PRESETS.clinic_admin.profile.clinicId,
+    });
   });
 
   it('waits for tab session ownership before reading credentials or sending a request', async () => {

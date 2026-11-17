@@ -26,6 +26,7 @@ export type DevAuthProfile = {
 
 export const DEV_AUTH_STORAGE_KEY = 'vaidya_dev_auth';
 export const AUTH_TOKEN_STORAGE_KEY = 'vaidya_access_token';
+export const SHARED_AUTH_SESSION_STORAGE_KEY = 'vaidya_shared_auth_session_v1';
 
 export const DEV_AUTH_PRESETS: Record<DevAuthRole, { label: string; profile: DevAuthProfile }> = {
   platform_admin: {

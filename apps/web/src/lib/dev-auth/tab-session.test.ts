@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { AUTH_TOKEN_STORAGE_KEY, DEV_AUTH_STORAGE_KEY } from './constants';
 import { createTabSessionManager } from './tab-session';
 
+const TAB_ID_KEY = 'vaidhyaa_tab_session_id';
+
 function memoryStorage(source?: Storage): Storage {
   const values = new Map<string, string>();
   if (source)
@@ -58,21 +60,23 @@ function signIn(storage: Storage, role: string) {
 }
 
 describe('tab session ownership', () => {
-  it('clears copied credentials on new navigation and keeps source credentials untouched', async () => {
+  it('preserves copied credentials on a duplicated tab and assigns independent ownership', async () => {
     const { tab } = harness();
     const source = tab('navigate');
     await source.manager.initialize();
     signIn(source.storage, 'doctor');
     const duplicate = tab('navigate', memoryStorage(source.storage));
     await duplicate.manager.initialize();
-    expect(duplicate.storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
-    expect(duplicate.storage.getItem(DEV_AUTH_STORAGE_KEY)).toBeNull();
+    expect(duplicate.storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe('doctor-token');
+    expect(duplicate.storage.getItem(DEV_AUTH_STORAGE_KEY)).toBe('doctor');
+    expect(duplicate.storage.getItem(TAB_ID_KEY)).not.toBe(source.storage.getItem(TAB_ID_KEY));
+    duplicate.storage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     expect(source.storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe('doctor-token');
     source.manager.dispose();
     duplicate.manager.dispose();
   });
   it.each(['reload', 'back_forward'])(
-    'rejects an inherited owned ID even if duplicate reports %s',
+    'preserves inherited credentials but rotates an owned ID when a duplicate reports %s',
     async (type) => {
       const { tab } = harness();
       const source = tab('navigate');
@@ -80,7 +84,9 @@ describe('tab session ownership', () => {
       signIn(source.storage, 'doctor');
       const duplicate = tab(type, memoryStorage(source.storage));
       await duplicate.manager.initialize();
-      expect(duplicate.storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+      expect(duplicate.storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe('doctor-token');
+      expect(duplicate.storage.getItem(DEV_AUTH_STORAGE_KEY)).toBe('doctor');
+      expect(duplicate.storage.getItem(TAB_ID_KEY)).not.toBe(source.storage.getItem(TAB_ID_KEY));
       signIn(duplicate.storage, 'admin');
       expect(source.storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe('doctor-token');
       duplicate.storage.removeItem(AUTH_TOKEN_STORAGE_KEY);
@@ -117,13 +123,15 @@ describe('tab session ownership', () => {
     expect(request).toHaveBeenCalledTimes(2);
     source.manager.dispose();
   });
-  it('fails closed for restored credentials when ownership is unavailable', async () => {
+  it('preserves restored credentials when the Web Locks API is unavailable', async () => {
     const { tab } = harness();
     const storage = memoryStorage();
     signIn(storage, 'doctor');
     const source = tab('reload', storage, false);
     await source.manager.initialize();
-    expect(storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+    expect(storage.getItem(AUTH_TOKEN_STORAGE_KEY)).toBe('doctor-token');
+    expect(storage.getItem(DEV_AUTH_STORAGE_KEY)).toBe('doctor');
+    expect(storage.getItem(TAB_ID_KEY)).toBeTruthy();
     source.manager.dispose();
   });
 });

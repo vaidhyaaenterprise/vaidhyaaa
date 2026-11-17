@@ -385,12 +385,14 @@ export class ClinicClinicalService {
     };
   }
 
-  private async ensureBookingRulesForActiveMappings(clinicId: string) {
+  private async ensureBookingRulesForActiveMappings(clinicId: string, doctorId?: string) {
     const [mappings, existingRules] = await Promise.all([
       this.repos.clinicalSetup.listDoctorServiceMappings(clinicId),
       this.repos.clinicalSetup.listBookingRules(clinicId),
     ]);
-    const activeMappings = mappings.filter((mapping) => mapping.active);
+    const activeMappings = mappings.filter(
+      (mapping) => mapping.active && (!doctorId || mapping.doctorId === doctorId),
+    );
     const activeRuleKeys = new Set(
       existingRules
         .filter((rule) => rule.active)
@@ -600,8 +602,11 @@ export class ClinicClinicalService {
     return { deleted: true };
   }
 
-  async listBookingRules(clinicId: string) {
-    const { rules: rows, mappings } = await this.ensureBookingRulesForActiveMappings(clinicId);
+  async listBookingRules(clinicId: string, doctorId?: string) {
+    const { rules: rows, mappings } = await this.ensureBookingRulesForActiveMappings(
+      clinicId,
+      doctorId,
+    );
 
     const activeMappingKeys = new Set(
       mappings
@@ -610,6 +615,7 @@ export class ClinicClinicalService {
     );
 
     return rows
+      .filter((row) => !doctorId || row.doctorId === doctorId)
       .filter((row) => activeMappingKeys.has(`${row.doctorId}:${row.clinicServiceId}`))
       .map((row) => ({
         id: row.id,
@@ -630,22 +636,64 @@ export class ClinicClinicalService {
       }));
   }
 
-  previewBookingRuleChange(
+  async previewBookingRuleChange(
     clinicId: string,
     ruleId: string,
     input: { capacity_per_slot?: number; slot_duration_minutes?: number },
+    doctorId?: string,
   ) {
+    await this.assertBookingRuleOwner(clinicId, ruleId, doctorId);
     return this.scheduleChangeImpact.previewBookingRuleChange(clinicId, ruleId, input);
+  }
+
+  private async assertBookingRuleOwner(clinicId: string, ruleId: string, doctorId?: string) {
+    if (!doctorId) return;
+    const [rule] = await this.repos.slots.findBookingRule(clinicId, ruleId);
+    if (!rule) throw new AppError('NOT_FOUND', 'Booking rule not found.');
+    if (rule.doctorId !== doctorId) {
+      throw new AppError('FORBIDDEN', 'Doctors may only edit their own booking rules.');
+    }
   }
 
   previewClinicHoursReplace(clinicId: string, input: ReplaceClinicHoursInput) {
     return this.scheduleChangeImpact.previewClinicHoursReplace(clinicId, input);
   }
 
-  async previewHolidayDate(clinicId: string, holidayDate: string, doctorIds?: string[]) {
-    const normalizedDoctorIds = normalizeDoctorIds(doctorIds);
+  async previewHolidayDate(
+    clinicId: string,
+    holidayDate: string,
+    doctorIds?: string[],
+    scopedDoctorId?: string,
+  ) {
+    const normalizedDoctorIds = this.holidayDoctorScope(doctorIds, scopedDoctorId);
     await this.assertHolidayDoctorsBelongToClinic(clinicId, normalizedDoctorIds);
     return this.scheduleChangeImpact.previewHolidayDate(clinicId, holidayDate, normalizedDoctorIds);
+  }
+
+  private holidayDoctorScope(doctorIds?: string[], scopedDoctorId?: string): string[] {
+    const normalized = normalizeDoctorIds(doctorIds);
+    if (!scopedDoctorId) return normalized;
+    if (doctorIds === undefined) return [scopedDoctorId];
+    if (normalized.length !== 1 || normalized[0] !== scopedDoctorId) {
+      throw new AppError('FORBIDDEN', 'Doctors may only manage their own holidays.');
+    }
+    return normalized;
+  }
+
+  private async assertHolidayOwner(
+    clinicId: string,
+    holidayId: string,
+    doctorId: string,
+    repos: Repositories = this.repos,
+  ) {
+    const rows = await repos.clinicalSetup.listHolidayDoctors(clinicId, holidayId);
+    const doctorIds = normalizeDoctorIds(rows.map((row) => row.doctorId));
+    if (doctorIds.length !== 1 || doctorIds[0] !== doctorId) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Clinic-wide and shared holidays can only be changed by the clinic administrator.',
+      );
+    }
   }
 
   private async assertHolidayDoctorsBelongToClinic(clinicId: string, doctorIds: string[]) {
@@ -662,10 +710,16 @@ export class ClinicClinicalService {
     }
   }
 
-  async patchBookingRule(clinicId: string, ruleId: string, input: UpdateBookingRuleInput) {
+  async patchBookingRule(
+    clinicId: string,
+    ruleId: string,
+    input: UpdateBookingRuleInput,
+    doctorId?: string,
+  ) {
     const parsed = updateBookingRuleSchema.safeParse(input);
     if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
     const bookingRuleInput = parsed.data;
+    await this.assertBookingRuleOwner(clinicId, ruleId, doctorId);
 
     const hasCapacityOrDurationChange =
       bookingRuleInput.capacity_per_slot !== undefined ||
@@ -799,7 +853,7 @@ export class ClinicClinicalService {
     return rows.map(mapClinicHoursRow);
   }
 
-  async listHolidays(clinicId: string) {
+  async listHolidays(clinicId: string, doctorId?: string) {
     const [rows, mappings] = await Promise.all([
       this.repos.clinicalSetup.listHolidays(clinicId),
       this.repos.clinicalSetup.listHolidayDoctorMappings(clinicId),
@@ -812,11 +866,18 @@ export class ClinicClinicalService {
       doctorIdsByHoliday.set(mapping.holidayId, current);
     }
 
-    return rows.map((row) => mapHolidayRow(row, doctorIdsByHoliday.get(row.id) ?? []));
+    return rows
+      .map((row) => mapHolidayRow(row, doctorIdsByHoliday.get(row.id) ?? []))
+      .filter((row) => !doctorId || row.applies_to_clinic || row.doctor_ids.includes(doctorId));
   }
 
-  async createHoliday(clinicId: string, input: CreateClinicHolidayInput, actorUserId: string) {
-    const doctorIds = normalizeDoctorIds(input.doctor_ids);
+  async createHoliday(
+    clinicId: string,
+    input: CreateClinicHolidayInput,
+    actorUserId: string,
+    scopedDoctorId?: string,
+  ) {
+    const doctorIds = this.holidayDoctorScope(input.doctor_ids, scopedDoctorId);
     await this.assertHolidayDoctorsBelongToClinic(clinicId, doctorIds);
 
     if (input.active ?? true) {
@@ -836,41 +897,50 @@ export class ClinicClinicalService {
       }
     }
 
-    return this.slotReconciliation.save(clinicId, {}, async (repos) => {
-      if (input.active ?? true) {
-        const current = await this.scheduleChangeImpact.previewHolidayDate(
-          clinicId,
-          input.holiday_date,
-          doctorIds,
-          repos,
-        );
-        if (current.blocked)
-          throw new AppError(
-            'CONFLICTING_APPOINTMENTS',
-            'Holiday conflicts with active appointments.',
-            { conflicts: current.conflicts },
+    return this.slotReconciliation.save(
+      clinicId,
+      scopedDoctorId ? { doctorId: scopedDoctorId } : {},
+      async (repos) => {
+        if (input.active ?? true) {
+          const current = await this.scheduleChangeImpact.previewHolidayDate(
+            clinicId,
+            input.holiday_date,
+            doctorIds,
+            repos,
           );
-      }
-      const [row] = await repos.clinicalSetup.insertHoliday({
-        clinicId,
-        holidayDate: input.holiday_date,
-        isFullDay: input.is_full_day ?? true,
-        startTime: input.start_time ?? null,
-        endTime: input.end_time ?? null,
-        reason: input.reason ?? null,
-        active: input.active ?? true,
-        createdByUserId: actorUserId,
-      });
-      if (!row) {
-        throw new AppError('INTERNAL_ERROR', 'Failed to create holiday.');
-      }
+          if (current.blocked)
+            throw new AppError(
+              'CONFLICTING_APPOINTMENTS',
+              'Holiday conflicts with active appointments.',
+              { conflicts: current.conflicts },
+            );
+        }
+        const [row] = await repos.clinicalSetup.insertHoliday({
+          clinicId,
+          holidayDate: input.holiday_date,
+          isFullDay: input.is_full_day ?? true,
+          startTime: input.start_time ?? null,
+          endTime: input.end_time ?? null,
+          reason: input.reason ?? null,
+          active: input.active ?? true,
+          createdByUserId: actorUserId,
+        });
+        if (!row) {
+          throw new AppError('INTERNAL_ERROR', 'Failed to create holiday.');
+        }
 
-      await repos.clinicalSetup.replaceHolidayDoctors(clinicId, row.id, doctorIds);
-      return mapHolidayRow(row, doctorIds);
-    });
+        await repos.clinicalSetup.replaceHolidayDoctors(clinicId, row.id, doctorIds);
+        return mapHolidayRow(row, doctorIds);
+      },
+    );
   }
 
-  async patchHoliday(clinicId: string, holidayId: string, input: PatchClinicHolidayInput) {
+  async patchHoliday(
+    clinicId: string,
+    holidayId: string,
+    input: PatchClinicHolidayInput,
+    scopedDoctorId?: string,
+  ) {
     const [existing] = await this.repos.clinicalSetup.findHoliday(clinicId, holidayId);
     if (!existing) {
       throw new AppError('NOT_FOUND', 'Holiday not found.');
@@ -881,6 +951,11 @@ export class ClinicClinicalService {
       holidayId,
     );
     const existingDoctorIds = existingDoctorRows.map((row) => row.doctorId);
+
+    if (scopedDoctorId) {
+      await this.assertHolidayOwner(clinicId, holidayId, scopedDoctorId);
+      this.holidayDoctorScope(input.doctor_ids, scopedDoctorId);
+    }
 
     const nextDoctorIds =
       input.doctor_ids !== undefined ? normalizeDoctorIds(input.doctor_ids) : existingDoctorIds;
@@ -912,39 +987,48 @@ export class ClinicClinicalService {
       }
     }
 
-    return this.slotReconciliation.save(clinicId, {}, async (repos) => {
-      if (shouldPreview) {
-        const current = await this.scheduleChangeImpact.previewHolidayDate(
-          clinicId,
-          nextHolidayDate,
-          nextDoctorIds,
-          repos,
-        );
-        if (current.blocked)
-          throw new AppError(
-            'CONFLICTING_APPOINTMENTS',
-            'Holiday conflicts with active appointments.',
-            { conflicts: current.conflicts },
+    return this.slotReconciliation.save(
+      clinicId,
+      scopedDoctorId ? { doctorId: scopedDoctorId } : {},
+      async (repos) => {
+        // An administrator can reassign a holiday while a doctor is editing it.
+        // Recheck its scope under the same clinic lock used by all schedule saves.
+        if (scopedDoctorId) {
+          await this.assertHolidayOwner(clinicId, holidayId, scopedDoctorId, repos);
+        }
+        if (shouldPreview) {
+          const current = await this.scheduleChangeImpact.previewHolidayDate(
+            clinicId,
+            nextHolidayDate,
+            nextDoctorIds,
+            repos,
           );
-      }
-      const [row] = await repos.clinicalSetup.patchHoliday(clinicId, holidayId, {
-        ...(input.holiday_date !== undefined ? { holidayDate: input.holiday_date } : {}),
-        ...(input.is_full_day !== undefined ? { isFullDay: input.is_full_day } : {}),
-        ...(input.start_time !== undefined ? { startTime: input.start_time } : {}),
-        ...(input.end_time !== undefined ? { endTime: input.end_time } : {}),
-        ...(input.reason !== undefined ? { reason: input.reason } : {}),
-        ...(input.active !== undefined ? { active: input.active } : {}),
-      });
-      if (!row) {
-        throw new AppError('NOT_FOUND', 'Holiday not found.');
-      }
+          if (current.blocked)
+            throw new AppError(
+              'CONFLICTING_APPOINTMENTS',
+              'Holiday conflicts with active appointments.',
+              { conflicts: current.conflicts },
+            );
+        }
+        const [row] = await repos.clinicalSetup.patchHoliday(clinicId, holidayId, {
+          ...(input.holiday_date !== undefined ? { holidayDate: input.holiday_date } : {}),
+          ...(input.is_full_day !== undefined ? { isFullDay: input.is_full_day } : {}),
+          ...(input.start_time !== undefined ? { startTime: input.start_time } : {}),
+          ...(input.end_time !== undefined ? { endTime: input.end_time } : {}),
+          ...(input.reason !== undefined ? { reason: input.reason } : {}),
+          ...(input.active !== undefined ? { active: input.active } : {}),
+        });
+        if (!row) {
+          throw new AppError('NOT_FOUND', 'Holiday not found.');
+        }
 
-      if (input.doctor_ids !== undefined) {
-        await repos.clinicalSetup.replaceHolidayDoctors(clinicId, holidayId, nextDoctorIds);
-      }
+        if (input.doctor_ids !== undefined) {
+          await repos.clinicalSetup.replaceHolidayDoctors(clinicId, holidayId, nextDoctorIds);
+        }
 
-      return mapHolidayRow(row, nextDoctorIds);
-    });
+        return mapHolidayRow(row, nextDoctorIds);
+      },
+    );
   }
 
   async listDoctorSchedules(clinicId: string, doctorId?: string) {
@@ -959,6 +1043,18 @@ export class ClinicClinicalService {
   ) {
     const parsed = replaceDoctorSchedulesSchema.safeParse(input);
     if (!parsed.success) throw new AppError('VALIDATION_ERROR', parsed.error.issues[0]!.message);
+    const mappingIds = input.windows.flatMap((window) =>
+      window.doctor_service_id ? [window.doctor_service_id] : [],
+    );
+    if (mappingIds.length > 0) {
+      const mappings = await this.repos.clinicalSetup.listDoctorServiceMappings(clinicId);
+      const ownMappingIds = new Set(
+        mappings.filter((mapping) => mapping.doctorId === doctorId).map((mapping) => mapping.id),
+      );
+      if (mappingIds.some((mappingId) => !ownMappingIds.has(mappingId))) {
+        throw new AppError('FORBIDDEN', 'Schedule services must belong to the selected doctor.');
+      }
+    }
     const preview = await this.scheduleChangeImpact.previewDoctorSchedulesReplace(
       clinicId,
       doctorId,

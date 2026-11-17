@@ -6,14 +6,14 @@ import type { MeResponse } from '@/lib/api/types';
 import {
   AUTH_TOKEN_STORAGE_KEY,
   DEV_AUTH_STORAGE_KEY,
+  SHARED_AUTH_SESSION_STORAGE_KEY,
   type DevAuthProfile,
 } from '@/lib/dev-auth/constants';
 import {
   clearDevAuthProfile,
   readAccessToken,
   readDevAuthProfile,
-  writeAccessToken,
-  writeDevAuthProfile,
+  writeAuthSession,
 } from '@/lib/dev-auth/storage';
 
 vi.mock('@/lib/dev-auth/storage', async (importOriginal) => ({
@@ -79,8 +79,7 @@ function SessionProbe() {
       <button
         type="button"
         onClick={() => {
-          writeAccessToken('admin-token');
-          writeDevAuthProfile(ADMIN_PROFILE);
+          writeAuthSession('admin-token', ADMIN_PROFILE);
           establishSession(ADMIN_SESSION);
         }}
       >
@@ -117,7 +116,7 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-describe('AuthProvider tab-scoped account verification', () => {
+describe('AuthProvider browser-wide account verification', () => {
   it('hydrates a newly signed-in session without a duplicate /me request', async () => {
     renderSession();
     await expectStatus('unauthenticated');
@@ -140,6 +139,49 @@ describe('AuthProvider tab-scoped account verification', () => {
       expect(screen.getByTestId('auth-user')).toHaveTextContent('no user');
     },
   );
+  it('verifies and restores a shared session in a manually opened tab', async () => {
+    writeAuthSession('admin-token', ADMIN_PROFILE);
+    window.sessionStorage.clear();
+
+    renderSession();
+
+    await expectStatus('authenticated');
+    expect(apiGet).toHaveBeenCalledWith('/v1/me', expect.any(AbortSignal));
+    expect(screen.getByTestId('auth-user')).toHaveTextContent('Clinic Admin');
+    expect(readAccessToken()).toBe('admin-token');
+    expect(readDevAuthProfile()).toEqual(ADMIN_PROFILE);
+  });
+  it('publishes a pre-existing tab session only after server verification', async () => {
+    seedSession(ADMIN_PROFILE, 'legacy-admin-token');
+    expect(window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY)).toBeNull();
+
+    renderSession();
+    await expectStatus('authenticated');
+
+    expect(window.localStorage.getItem(SHARED_AUTH_SESSION_STORAGE_KEY)).toBeTruthy();
+    window.sessionStorage.clear();
+    expect(readAccessToken()).toBe('legacy-admin-token');
+    expect(readDevAuthProfile()).toEqual(ADMIN_PROFILE);
+  });
+  it('logs this tab out when another tab clears the shared browser session', async () => {
+    writeAuthSession('admin-token', ADMIN_PROFILE);
+    renderSession();
+    await expectStatus('authenticated');
+
+    window.localStorage.removeItem(SHARED_AUTH_SESSION_STORAGE_KEY);
+    fireEvent(
+      window,
+      new StorageEvent('storage', {
+        key: SHARED_AUTH_SESSION_STORAGE_KEY,
+        oldValue: 'shared-session',
+        newValue: null,
+      }),
+    );
+
+    await expectStatus('unauthenticated');
+    expect(readAccessToken()).toBeNull();
+    expect(readDevAuthProfile()).toBeNull();
+  });
   it('ignores a legacy shared profile even when an access token remains in this tab', async () => {
     window.localStorage.setItem(DEV_AUTH_STORAGE_KEY, JSON.stringify(ADMIN_PROFILE));
     window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'copied-token');
@@ -240,10 +282,11 @@ describe('AuthProvider tab-scoped account verification', () => {
     expect(readAccessToken()).toBe('admin-token');
     expect(apiGet).toHaveBeenCalledOnce();
   });
-  it('revalidates a BFCache-restored page instead of retaining an old authenticated view', async () => {
+  it('revalidates a BFCache-restored page after the shared browser session was cleared', async () => {
     seedSession();
     renderSession();
     await expectStatus('authenticated');
+    window.localStorage.removeItem(SHARED_AUTH_SESSION_STORAGE_KEY);
     window.sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     const event = new Event('pageshow');
     Object.defineProperty(event, 'persisted', { value: true });

@@ -10,6 +10,8 @@ import {
   doctors,
   emergencyIncidents,
   notificationEvents,
+  patients,
+  patientVisits,
 } from '../schema';
 import { ACTIVE_APPOINTMENT_STATUSES } from '../services/slot-capacity';
 
@@ -265,7 +267,12 @@ export class AppointmentLifecycleRepository {
       .limit(1);
   }
 
-  listAppointmentsForClinic(input: { clinicId: string; doctorId?: string; statuses?: string[] }) {
+  listAppointmentsForClinic(input: {
+    clinicId: string;
+    doctorId?: string;
+    statuses?: string[];
+    date?: string;
+  }) {
     const filters = [eq(appointmentRequests.clinicId, input.clinicId)];
     if (input.doctorId) {
       filters.push(eq(appointmentRequests.doctorId, input.doctorId));
@@ -273,9 +280,37 @@ export class AppointmentLifecycleRepository {
     if (input.statuses?.length) {
       filters.push(inArray(appointmentRequests.status, input.statuses));
     }
+    if (input.date) {
+      // Appointment timestamps store clinic-local wall clocks. Preserve the
+      // selected calendar date rather than converting it to a UTC instant.
+      filters.push(sql`${appointmentRequests.appointmentStart} >= ${input.date}::date`);
+      filters.push(
+        sql`${appointmentRequests.appointmentStart} < ${input.date}::date + interval '1 day'`,
+      );
+    }
     return this.db
-      .select()
+      .select({
+        ...getTableColumns(appointmentRequests),
+        patientAge: sql<number | null>`coalesce(
+          ${patients.ageYears},
+          extract(year from age(current_date, ${patients.dateOfBirth}))::int
+        )`,
+        patientGender: patients.gender,
+        hasHistory: sql<boolean>`exists (
+          select 1 from ${patientVisits}
+          where ${patientVisits.clinicId} = ${appointmentRequests.clinicId}
+            and ${patientVisits.patientId} = ${appointmentRequests.patientId}
+            and ${patientVisits.appointmentRequestId} is distinct from ${appointmentRequests.id}
+        )`,
+      })
       .from(appointmentRequests)
+      .leftJoin(
+        patients,
+        and(
+          eq(patients.clinicId, appointmentRequests.clinicId),
+          eq(patients.id, appointmentRequests.patientId),
+        ),
+      )
       .where(and(...filters))
       .orderBy(desc(appointmentRequests.appointmentStart));
   }

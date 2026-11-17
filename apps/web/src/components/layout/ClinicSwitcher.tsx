@@ -6,12 +6,13 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { useClinicProfile } from '@/components/clinic/ClinicProfileProvider';
 import { ClinicProfileEditModal } from '@/components/layout/ClinicProfileEditModal';
 
-export function ClinicSwitcher() {
+export function ClinicSwitcher({ readOnly = false }: { readOnly?: boolean }) {
   const { clinicRole, me } = useAuth();
   const { clinicId, profile, status, refresh, updateProfile } = useClinicProfile();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const canEdit =
-    clinicRole?.role === 'clinic_admin' || me?.user.platform_role === 'platform_admin';
+    !readOnly &&
+    (clinicRole?.role === 'clinic_admin' || me?.user.platform_role === 'platform_admin');
 
   const closeEditModal = useCallback(() => {
     setIsEditOpen(false);
