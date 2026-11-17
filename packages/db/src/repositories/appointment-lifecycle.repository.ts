@@ -41,6 +41,57 @@ const appointmentWithConflictDetails = {
   serviceName: clinicServices.serviceName,
 };
 
+export type DoctorAnalyticsPoint = {
+  periodStart: string;
+  label: string;
+  total: number;
+  newPatients: number;
+  followUps: number;
+};
+
+export type DoctorMonthlyAnalyticsPoint = DoctorAnalyticsPoint & {
+  averagePerDay: number;
+};
+
+export type DoctorAnalyticsResult = {
+  stats: {
+    confirmedThisMonth: number;
+    newConfirmedThisMonth: number;
+    followUpConfirmedThisMonth: number;
+    averageConfirmedPerDay: number;
+  };
+  trends: {
+    daily: DoctorAnalyticsPoint[];
+    weekly: DoctorAnalyticsPoint[];
+    monthly: DoctorAnalyticsPoint[];
+  };
+  topConditions: Array<{ condition: string; count: number }>;
+  ageGroups: Array<{ label: string; count: number }>;
+  monthlySummary: DoctorMonthlyAnalyticsPoint[];
+};
+
+type AnalyticsPeriodRow = {
+  period_start: string;
+  label: string;
+  total: number;
+  new_patients: number;
+  follow_ups: number;
+};
+
+type MonthlyAnalyticsPeriodRow = AnalyticsPeriodRow & {
+  average_per_day: number;
+};
+
+function mapAnalyticsPoint(row: AnalyticsPeriodRow): DoctorAnalyticsPoint {
+  return {
+    periodStart: row.period_start,
+    label: row.label,
+    total: Number(row.total),
+    newPatients: Number(row.new_patients),
+    followUps: Number(row.follow_ups),
+  };
+}
+
 export class AppointmentLifecycleRepository {
   constructor(private readonly db: Database) {}
 
@@ -313,6 +364,254 @@ export class AppointmentLifecycleRepository {
       )
       .where(and(...filters))
       .orderBy(desc(appointmentRequests.appointmentStart));
+  }
+
+  async getDoctorAnalytics(clinicId: string, doctorId: string): Promise<DoctorAnalyticsResult> {
+    const [statsRows, dailyRows, weeklyRows, monthlyRows, topConditionRows, ageGroupRows] =
+      await Promise.all([
+        this.db.execute<{
+          confirmed_this_month: number;
+          new_confirmed_this_month: number;
+          follow_up_confirmed_this_month: number;
+          average_confirmed_per_day: number;
+        }>(sql`
+          WITH bounds AS (
+            SELECT
+              date_trunc('month', now() AT TIME ZONE c.timezone) AS month_start,
+              date_trunc('month', now() AT TIME ZONE c.timezone) + interval '1 month' AS next_month
+            FROM clinics AS c
+            WHERE c.id = ${clinicId}::uuid
+          ), confirmed AS (
+            SELECT a.is_followup, a.appointment_start::date AS appointment_date
+            FROM appointment_requests AS a
+            CROSS JOIN bounds AS b
+            WHERE a.clinic_id = ${clinicId}::uuid
+              AND a.doctor_id = ${doctorId}::uuid
+              AND a.status = 'confirmed'
+              AND a.appointment_start >= b.month_start
+              AND a.appointment_start < b.next_month
+          )
+          SELECT
+            count(*)::int AS confirmed_this_month,
+            count(*) FILTER (WHERE NOT is_followup)::int AS new_confirmed_this_month,
+            count(*) FILTER (WHERE is_followup)::int AS follow_up_confirmed_this_month,
+            coalesce(
+              round(count(*)::numeric / nullif(count(DISTINCT appointment_date), 0)),
+              0
+            )::int AS average_confirmed_per_day
+          FROM confirmed
+        `),
+        this.db.execute<AnalyticsPeriodRow>(sql`
+          WITH bounds AS (
+            SELECT (now() AT TIME ZONE c.timezone)::date AS today
+            FROM clinics AS c
+            WHERE c.id = ${clinicId}::uuid
+          ), periods AS (
+            SELECT generate_series(
+              b.today - interval '6 days',
+              b.today,
+              interval '1 day'
+            )::date AS period_start
+            FROM bounds AS b
+          ), counts AS (
+            SELECT
+              a.appointment_start::date AS period_start,
+              count(*)::int AS total,
+              count(*) FILTER (WHERE NOT a.is_followup)::int AS new_patients,
+              count(*) FILTER (WHERE a.is_followup)::int AS follow_ups
+            FROM appointment_requests AS a
+            CROSS JOIN bounds AS b
+            WHERE a.clinic_id = ${clinicId}::uuid
+              AND a.doctor_id = ${doctorId}::uuid
+              AND a.status IN ('confirmed', 'visited')
+              AND a.appointment_start >= b.today - interval '6 days'
+              AND a.appointment_start < b.today + interval '1 day'
+            GROUP BY a.appointment_start::date
+          )
+          SELECT
+            p.period_start::text AS period_start,
+            to_char(p.period_start, 'DD Mon') AS label,
+            coalesce(c.total, 0)::int AS total,
+            coalesce(c.new_patients, 0)::int AS new_patients,
+            coalesce(c.follow_ups, 0)::int AS follow_ups
+          FROM periods AS p
+          LEFT JOIN counts AS c USING (period_start)
+          ORDER BY p.period_start
+        `),
+        this.db.execute<AnalyticsPeriodRow>(sql`
+          WITH bounds AS (
+            SELECT date_trunc('week', now() AT TIME ZONE c.timezone)::date AS current_week
+            FROM clinics AS c
+            WHERE c.id = ${clinicId}::uuid
+          ), periods AS (
+            SELECT generate_series(
+              b.current_week - interval '5 weeks',
+              b.current_week,
+              interval '1 week'
+            )::date AS period_start
+            FROM bounds AS b
+          ), counts AS (
+            SELECT
+              date_trunc('week', a.appointment_start)::date AS period_start,
+              count(*)::int AS total,
+              count(*) FILTER (WHERE NOT a.is_followup)::int AS new_patients,
+              count(*) FILTER (WHERE a.is_followup)::int AS follow_ups
+            FROM appointment_requests AS a
+            CROSS JOIN bounds AS b
+            WHERE a.clinic_id = ${clinicId}::uuid
+              AND a.doctor_id = ${doctorId}::uuid
+              AND a.status IN ('confirmed', 'visited')
+              AND a.appointment_start >= b.current_week - interval '5 weeks'
+              AND a.appointment_start < b.current_week + interval '1 week'
+            GROUP BY date_trunc('week', a.appointment_start)::date
+          )
+          SELECT
+            p.period_start::text AS period_start,
+            to_char(p.period_start, 'DD Mon') AS label,
+            coalesce(c.total, 0)::int AS total,
+            coalesce(c.new_patients, 0)::int AS new_patients,
+            coalesce(c.follow_ups, 0)::int AS follow_ups
+          FROM periods AS p
+          LEFT JOIN counts AS c USING (period_start)
+          ORDER BY p.period_start
+        `),
+        this.db.execute<MonthlyAnalyticsPeriodRow>(sql`
+          WITH bounds AS (
+            SELECT date_trunc('month', now() AT TIME ZONE c.timezone)::date AS current_month
+            FROM clinics AS c
+            WHERE c.id = ${clinicId}::uuid
+          ), periods AS (
+            SELECT generate_series(
+              b.current_month - interval '5 months',
+              b.current_month,
+              interval '1 month'
+            )::date AS period_start
+            FROM bounds AS b
+          ), counts AS (
+            SELECT
+              date_trunc('month', a.appointment_start)::date AS period_start,
+              count(*)::int AS total,
+              count(*) FILTER (WHERE NOT a.is_followup)::int AS new_patients,
+              count(*) FILTER (WHERE a.is_followup)::int AS follow_ups,
+              coalesce(
+                round(
+                  count(*)::numeric /
+                    nullif(count(DISTINCT a.appointment_start::date), 0)
+                ),
+                0
+              )::int AS average_per_day
+            FROM appointment_requests AS a
+            CROSS JOIN bounds AS b
+            WHERE a.clinic_id = ${clinicId}::uuid
+              AND a.doctor_id = ${doctorId}::uuid
+              AND a.status IN ('confirmed', 'visited')
+              AND a.appointment_start >= b.current_month - interval '5 months'
+              AND a.appointment_start < b.current_month + interval '1 month'
+            GROUP BY date_trunc('month', a.appointment_start)::date
+          )
+          SELECT
+            p.period_start::text AS period_start,
+            to_char(p.period_start, 'Mon YYYY') AS label,
+            coalesce(c.total, 0)::int AS total,
+            coalesce(c.new_patients, 0)::int AS new_patients,
+            coalesce(c.follow_ups, 0)::int AS follow_ups,
+            coalesce(c.average_per_day, 0)::int AS average_per_day
+          FROM periods AS p
+          LEFT JOIN counts AS c USING (period_start)
+          ORDER BY p.period_start
+        `),
+        this.db.execute<{ condition: string; count: number }>(sql`
+          WITH grouped AS (
+            SELECT
+              lower(regexp_replace(btrim(v.diagnosis), '\\s+', ' ', 'g'))
+                AS normalized_condition,
+              min(regexp_replace(btrim(v.diagnosis), '\\s+', ' ', 'g')) AS condition,
+              count(*)::int AS count
+            FROM patient_visits AS v
+            WHERE v.clinic_id = ${clinicId}::uuid
+              AND v.doctor_id = ${doctorId}::uuid
+              AND v.diagnosis IS NOT NULL
+              AND btrim(v.diagnosis) <> ''
+            GROUP BY lower(regexp_replace(btrim(v.diagnosis), '\\s+', ' ', 'g'))
+          )
+          SELECT condition, count
+          FROM grouped
+          ORDER BY count DESC, normalized_condition ASC
+          LIMIT 5
+        `),
+        this.db.execute<{ label: string; count: number; sort_order: number }>(sql`
+          WITH bounds AS (
+            SELECT
+              (now() AT TIME ZONE c.timezone)::date AS today,
+              date_trunc('month', now() AT TIME ZONE c.timezone) - interval '5 months'
+                AS first_month,
+              date_trunc('month', now() AT TIME ZONE c.timezone) + interval '1 month'
+                AS next_month
+            FROM clinics AS c
+            WHERE c.id = ${clinicId}::uuid
+          ), age_ranges(label, min_age, max_age, sort_order) AS (
+            VALUES
+              ('0–18', 0, 18, 1),
+              ('19–30', 19, 30, 2),
+              ('31–45', 31, 45, 3),
+              ('46–60', 46, 60, 4),
+              ('61–75', 61, 75, 5),
+              ('76+', 76, NULL, 6)
+          ), encounter_ages AS (
+            SELECT DISTINCT
+              p.id,
+              coalesce(
+                p.age_years,
+                extract(year FROM age(b.today, p.date_of_birth))::int
+              ) AS age
+            FROM appointment_requests AS a
+            INNER JOIN patients AS p
+              ON p.clinic_id = a.clinic_id AND p.id = a.patient_id
+            CROSS JOIN bounds AS b
+            WHERE a.clinic_id = ${clinicId}::uuid
+              AND a.doctor_id = ${doctorId}::uuid
+              AND a.status IN ('confirmed', 'visited')
+              AND a.appointment_start >= b.first_month
+              AND a.appointment_start < b.next_month
+          ), counts AS (
+            SELECT r.sort_order, count(e.age)::int AS count
+            FROM age_ranges AS r
+            LEFT JOIN encounter_ages AS e
+              ON e.age >= r.min_age AND (r.max_age IS NULL OR e.age <= r.max_age)
+            GROUP BY r.sort_order
+          )
+          SELECT r.label, coalesce(c.count, 0)::int AS count, r.sort_order
+          FROM age_ranges AS r
+          LEFT JOIN counts AS c USING (sort_order)
+          ORDER BY r.sort_order
+        `),
+      ]);
+
+    const stats = statsRows[0];
+    const monthlySummary = monthlyRows.map((row) => ({
+      ...mapAnalyticsPoint(row),
+      averagePerDay: Number(row.average_per_day),
+    }));
+
+    return {
+      stats: {
+        confirmedThisMonth: Number(stats?.confirmed_this_month ?? 0),
+        newConfirmedThisMonth: Number(stats?.new_confirmed_this_month ?? 0),
+        followUpConfirmedThisMonth: Number(stats?.follow_up_confirmed_this_month ?? 0),
+        averageConfirmedPerDay: Number(stats?.average_confirmed_per_day ?? 0),
+      },
+      trends: {
+        daily: dailyRows.map(mapAnalyticsPoint),
+        weekly: weeklyRows.map(mapAnalyticsPoint),
+        monthly: monthlySummary.map(({ averagePerDay: _averagePerDay, ...row }) => row),
+      },
+      topConditions: topConditionRows.slice(0, 5).map((row) => ({
+        condition: row.condition,
+        count: Number(row.count),
+      })),
+      ageGroups: ageGroupRows.map((row) => ({ label: row.label, count: Number(row.count) })),
+      monthlySummary,
+    };
   }
 
   listClinicAdminAppointmentActivities(clinicId: string) {

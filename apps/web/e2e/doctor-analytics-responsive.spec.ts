@@ -15,12 +15,16 @@ async function mockDoctorPortalApi(page: Page) {
   await page.addInitScript(
     ({ clinicId, doctorId, userId }) => {
       window.localStorage.setItem(
-        'vaidya_dev_auth',
+        'vaidya_shared_auth_session_v1',
         JSON.stringify({
-          userId,
-          clinicId,
-          doctorId,
-          role: 'doctor',
+          version: 1,
+          token: 'doctor-analytics-test-token',
+          profile: {
+            userId,
+            clinicId,
+            doctorId,
+            role: 'doctor',
+          },
         }),
       );
     },
@@ -65,6 +69,62 @@ async function mockDoctorPortalApi(page: Page) {
           timezone: 'Asia/Kolkata',
         },
       };
+    } else if (apiPath.endsWith('/appointments/analytics')) {
+      data = {
+        analytics: {
+          stats: {
+            confirmed_this_month: 34,
+            new_confirmed_this_month: 14,
+            follow_up_confirmed_this_month: 20,
+            average_confirmed_per_day: 2,
+          },
+          trends: {
+            daily: [
+              {
+                period_start: '2026-11-17',
+                label: '17 Nov',
+                total: 5,
+                new_patients: 2,
+                follow_ups: 3,
+              },
+            ],
+            weekly: [],
+            monthly: [],
+          },
+          top_conditions: [
+            { condition: 'Back pain', count: 8 },
+            { condition: 'Knee pain', count: 6 },
+          ],
+          age_groups: [
+            { label: '19–30', count: 6 },
+            { label: '31–45', count: 12 },
+          ],
+          monthly_summary: ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'].map((label, index) => ({
+            period_start: `2026-${String(index + 6).padStart(2, '0')}-01`,
+            label: `${label} 2026`,
+            total: index + 3,
+            new_patients: index + 1,
+            follow_ups: 2,
+            average_per_day: 1,
+          })),
+        },
+      };
+    } else if (apiPath.endsWith('/doctors')) {
+      data = {
+        doctors: [
+          {
+            id: DOCTOR_ID,
+            name: 'Dr. Responsive Test',
+            qualification: 'MBBS, MD',
+            active: true,
+            user_id: DOCTOR_USER_ID,
+          },
+        ],
+      };
+    } else if (apiPath.endsWith('/doctor-services')) {
+      data = { doctor_services: [] };
+    } else if (apiPath.endsWith('/services')) {
+      data = { services: [] };
     } else if (apiPath.includes('/appointments')) {
       data = { appointments: [] };
     } else {
@@ -91,11 +151,15 @@ async function settleResponsiveLayout(page: Page) {
 test('doctor analytics cards remain contained at desktop breakpoints', async ({ page }) => {
   await mockDoctorPortalApi(page);
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/');
-  await page.getByRole('button', { name: /Analytics/ }).click();
+  await page.goto('/doctor/analytics');
 
   const breakdown = page.getByTestId('doctor-analytics-breakdown');
   await expect(breakdown).toBeVisible();
+  const totalCard = page.getByText('Total This Month', { exact: true }).locator('..');
+  await expect(totalCard).toContainText('34');
+  await expect(page.getByText('Back pain', { exact: true })).toBeVisible();
+  await expect(page.getByText('Visit Type', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('table').getByRole('row')).toHaveCount(7);
 
   for (const width of [1024, 1280, 1440, 1536, 1920]) {
     await page.setViewportSize({ width, height: 900 });
@@ -122,7 +186,7 @@ test('doctor analytics cards remain contained at desktop breakpoints', async ({ 
 
     expect(measurements.documentWidth).toBeLessThanOrEqual(measurements.viewportWidth + 1);
     expect(measurements.mainScrollWidth).toBeLessThanOrEqual(measurements.mainClientWidth + 1);
-    expect(measurements.cardOverflow).toHaveLength(3);
+    expect(measurements.cardOverflow).toHaveLength(2);
     for (const card of measurements.cardOverflow) {
       expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth + 1);
     }

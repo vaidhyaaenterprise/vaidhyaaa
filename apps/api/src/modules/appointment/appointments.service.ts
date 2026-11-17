@@ -82,6 +82,31 @@ export type AppointmentActivityItem = {
   appointment_end: string;
 };
 
+export type DoctorAnalyticsItem = {
+  stats: {
+    confirmed_this_month: number;
+    new_confirmed_this_month: number;
+    follow_up_confirmed_this_month: number;
+    average_confirmed_per_day: number;
+  };
+  trends: {
+    daily: DoctorAnalyticsTrendItem[];
+    weekly: DoctorAnalyticsTrendItem[];
+    monthly: DoctorAnalyticsTrendItem[];
+  };
+  top_conditions: Array<{ condition: string; count: number }>;
+  age_groups: Array<{ label: string; count: number }>;
+  monthly_summary: Array<DoctorAnalyticsTrendItem & { average_per_day: number }>;
+};
+
+export type DoctorAnalyticsTrendItem = {
+  period_start: string;
+  label: string;
+  total: number;
+  new_patients: number;
+  follow_ups: number;
+};
+
 function readJsonString(value: unknown, key: string): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -201,6 +226,44 @@ export class AppointmentsService {
         ...(visit?.advice !== undefined ? { advice: visit.advice } : {}),
       };
     });
+  }
+
+  async getDoctorAnalytics(input: {
+    clinicId: string;
+    doctorId: string;
+  }): Promise<DoctorAnalyticsItem> {
+    await this.repos.appointmentLifecycle.markPastConfirmedNoShows(input.clinicId);
+    const analytics = await this.repos.appointmentLifecycle.getDoctorAnalytics(
+      input.clinicId,
+      input.doctorId,
+    );
+    const mapPoint = (point: (typeof analytics.trends.daily)[number]) => ({
+      period_start: point.periodStart,
+      label: point.label,
+      total: point.total,
+      new_patients: point.newPatients,
+      follow_ups: point.followUps,
+    });
+
+    return {
+      stats: {
+        confirmed_this_month: analytics.stats.confirmedThisMonth,
+        new_confirmed_this_month: analytics.stats.newConfirmedThisMonth,
+        follow_up_confirmed_this_month: analytics.stats.followUpConfirmedThisMonth,
+        average_confirmed_per_day: analytics.stats.averageConfirmedPerDay,
+      },
+      trends: {
+        daily: analytics.trends.daily.map(mapPoint),
+        weekly: analytics.trends.weekly.map(mapPoint),
+        monthly: analytics.trends.monthly.map(mapPoint),
+      },
+      top_conditions: analytics.topConditions,
+      age_groups: analytics.ageGroups,
+      monthly_summary: analytics.monthlySummary.map((point) => ({
+        ...mapPoint(point),
+        average_per_day: point.averagePerDay,
+      })),
+    };
   }
 
   async listActionRequests(clinicId: string): Promise<AppointmentActionRequestItem[]> {

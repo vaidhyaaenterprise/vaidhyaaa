@@ -5,6 +5,18 @@ const DOCTOR_ID = '00000000-0000-4000-8000-000000000401';
 const PROFILE_KEY = 'vaidya_dev_auth';
 const TOKEN_KEY = 'vaidya_access_token';
 const SHARED_KEY = 'vaidya_shared_auth_session_v1';
+const EMPTY_ANALYTICS = {
+  stats: {
+    confirmed_this_month: 0,
+    new_confirmed_this_month: 0,
+    follow_up_confirmed_this_month: 0,
+    average_confirmed_per_day: 0,
+  },
+  trends: { daily: [], weekly: [], monthly: [] },
+  top_conditions: [],
+  age_groups: [],
+  monthly_summary: [],
+};
 
 type Role = 'doctor' | 'clinic_admin';
 
@@ -83,6 +95,7 @@ async function mockApi(context: BrowserContext) {
             },
           ],
         };
+      else if (path.endsWith('/appointments/analytics')) data = { analytics: EMPTY_ANALYTICS };
       else if (path.endsWith('/appointments')) data = { appointments: [] };
       else if (path.endsWith('/schedules')) data = { schedules: [] };
       else if (path.endsWith('/hours')) data = { hours: [] };

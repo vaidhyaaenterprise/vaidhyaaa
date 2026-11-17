@@ -66,6 +66,7 @@ describe('@vaidya/db integration', () => {
     const applied = await runMigrations(TEST_DATABASE_URL);
     expect(applied).toContain('001_initial_schema_production.sql');
     expect(applied).toContain('002_c04_schema_alignment.sql');
+    expect(applied).toContain('024_doctor_analytics_indexes.sql');
 
     const status = await getAppliedMigrations(TEST_DATABASE_URL);
     expect(status.some((row) => row.name === '001_initial_schema_production.sql')).toBe(true);
@@ -79,6 +80,14 @@ describe('@vaidya/db integration', () => {
         AND table_name IN ('clinics', 'appointment_slots', 'slot_holds', 'appointment_requests')
     `;
     expect(tables).toHaveLength(4);
+
+    const analyticsIndexes = await sql<{ indexname: string }[]>`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname = 'idx_patient_visits_doctor_time'
+    `;
+    expect(analyticsIndexes).toHaveLength(1);
   });
 
   it('2. applies seed after migration', async () => {
@@ -320,6 +329,129 @@ describe('@vaidya/db integration', () => {
       // No test fixture or deletion is committed to the shared test database.
       throw rollback;
     })).rejects.toBe(rollback);
+  });
+
+  it('12. doctor analytics executes against PostgreSQL with bounded months and normalized top conditions', async () => {
+    const rollback = new Error('rollback doctor-analytics test fixtures');
+    await expect(
+      connection.db.transaction(async (tx) => {
+        const clinicId = randomUUID();
+        const doctorId = randomUUID();
+        const serviceId = randomUUID();
+        const patientOneId = randomUUID();
+        const patientTwoId = randomUUID();
+
+        await tx.execute(query`
+          INSERT INTO clinics (
+            id, name, primary_phone, address_line1, city, state, country,
+            timezone, default_language_code
+          ) VALUES (
+            ${clinicId}, 'Analytics integration clinic', '+914400009999', 'Test road',
+            'Chennai', 'Tamil Nadu', 'India', 'Pacific/Kiritimati', 'english'
+          )
+        `);
+        await tx.execute(query`
+          INSERT INTO doctors (id, clinic_id, name, qualification, active)
+          VALUES (${doctorId}, ${clinicId}, 'Dr Analytics', 'MD', true)
+        `);
+        await tx.execute(query`
+          INSERT INTO clinic_services (id, clinic_id, service_name, service_key, active)
+          VALUES (${serviceId}, ${clinicId}, 'General Consultation', 'general_consultation', true)
+        `);
+        await tx.execute(query`
+          INSERT INTO patients (id, clinic_id, name, age_years)
+          VALUES
+            (${patientOneId}, ${clinicId}, 'Patient One', 42),
+            (${patientTwoId}, ${clinicId}, 'Patient Two', 65)
+        `);
+
+        await tx.execute(query`
+          WITH month AS (
+            SELECT date_trunc('month', now() AT TIME ZONE 'Pacific/Kiritimati') AS start
+          )
+          INSERT INTO appointment_requests (
+            clinic_id, patient_id, patient_name, doctor_id, clinic_service_id,
+            reason_for_visit, appointment_start, appointment_end, status, is_followup
+          )
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Confirmed new', start + interval '1 day 9 hours',
+            start + interval '1 day 9 hours 30 minutes', 'confirmed', false FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Confirmed follow-up', start + interval '2 days 9 hours',
+            start + interval '2 days 9 hours 30 minutes', 'confirmed', true FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientTwoId}, 'Patient Two', ${doctorId}, ${serviceId},
+            'Completed visit', start + interval '3 days 9 hours',
+            start + interval '3 days 9 hours 30 minutes', 'visited', false FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Cancelled', start + interval '4 days 9 hours',
+            start + interval '4 days 9 hours 30 minutes', 'cancelled', false FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Oldest included month', start - interval '5 months' + interval '1 day 9 hours',
+            start - interval '5 months' + interval '1 day 9 hours 30 minutes',
+            'visited', false FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Outside summary', start - interval '6 months' + interval '1 day 9 hours',
+            start - interval '6 months' + interval '1 day 9 hours 30 minutes',
+            'visited', false FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Previous month boundary', start - interval '1 second', start + interval '29 minutes',
+            'confirmed', false FROM month
+          UNION ALL
+          SELECT ${clinicId}, ${patientOneId}, 'Patient One', ${doctorId}, ${serviceId},
+            'Next month boundary', start + interval '1 month',
+            start + interval '1 month 30 minutes', 'confirmed', false FROM month
+        `);
+
+        await tx.execute(query`
+          INSERT INTO patient_visits (
+            clinic_id, patient_id, doctor_id, clinic_service_id,
+            reason_for_visit, diagnosis, visited_at
+          ) VALUES
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'Old Condition', now() - interval '2 years'),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', ' old   condition ', now() - interval '18 months'),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'OLD CONDITION', now() - interval '1 year'),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'Back Pain', now()),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', ' back   PAIN ', now()),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'Diabetes', now()),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'Fever', now()),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'Knee Pain', now()),
+            (${clinicId}, ${patientOneId}, ${doctorId}, ${serviceId}, 'Review', 'Migraine', now())
+        `);
+
+        const repository = createRepositories(
+          tx as unknown as typeof connection.db,
+        ).appointmentLifecycle;
+        const analytics = await repository.getDoctorAnalytics(clinicId, doctorId);
+
+        expect(analytics.stats).toMatchObject({
+          confirmedThisMonth: 2,
+          newConfirmedThisMonth: 1,
+          followUpConfirmedThisMonth: 1,
+        });
+        expect(analytics.monthlySummary).toHaveLength(6);
+        expect(analytics.monthlySummary[0]?.total).toBe(1);
+        expect(analytics.monthlySummary.at(-1)).toMatchObject({
+          total: 3,
+          newPatients: 2,
+          followUps: 1,
+        });
+        expect(analytics.topConditions).toHaveLength(5);
+        expect(analytics.topConditions[0]).toMatchObject({ count: 3 });
+        expect(analytics.topConditions[0]?.condition.toLowerCase()).toBe('old condition');
+        expect(analytics.topConditions[1]).toMatchObject({ count: 2 });
+        expect(analytics.topConditions[1]?.condition.toLowerCase()).toBe('back pain');
+        expect(analytics.ageGroups.find((group) => group.label === '31–45')?.count).toBe(1);
+        expect(analytics.ageGroups.find((group) => group.label === '61–75')?.count).toBe(1);
+
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
   });
 });
 

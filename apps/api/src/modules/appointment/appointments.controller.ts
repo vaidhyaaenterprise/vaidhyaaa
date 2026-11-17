@@ -68,6 +68,23 @@ export class AppointmentsController {
     return { appointments };
   }
 
+  @Get('analytics')
+  @Roles('doctor')
+  async getDoctorAnalytics(
+    @Param('clinicId') clinicId: string,
+    @Req() request: FastifyRequest & { [AUTH_CONTEXT_KEY]?: AuthContext },
+  ) {
+    const auth = getAuthContext(request);
+    if (auth.clinicRole !== 'doctor' || auth.clinicId !== clinicId || !auth.doctorId) {
+      throw new AppError('FORBIDDEN', 'A doctor profile for this clinic is required.');
+    }
+    const analytics = await this.appointmentsService.getDoctorAnalytics({
+      clinicId,
+      doctorId: auth.doctorId,
+    });
+    return { analytics };
+  }
+
   @Get('action-requests')
   @Roles('clinic_admin')
   async listActionRequests(@Param('clinicId') clinicId: string) {
